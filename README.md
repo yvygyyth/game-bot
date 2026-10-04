@@ -23,7 +23,8 @@ game-bot/
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
 │   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
-│   └── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
+│   ├── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
+│   └── ui.md                    #   ★ 本地控制台 UI 的设计（布局 / 线程 / 分阶段）
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
 │   └── testgame/                #   沙盒测试游戏：合成屏幕 + 八项自检
 ├── logs/                        # 运行产物（不入版本管理）
@@ -191,30 +192,37 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 | L2 Frame | ✅ 完整 | 12 个查询方法全部实现，含帧内缓存与子帧坐标换算 |
 | L3 Query | ✅ 完整 | 11 个描述符 + 注册表（`query_from_dict` 归流程层，未写） |
 | L4 组合子 | ✅ 完整 | 5 个帧内 + 5 个跨帧，统一 error 透传语义 |
-| L5 动作 | ✅ 完整 | 13 个动作，逻辑坐标自动换算，`click_image` 找不到不点 |
+| L5 动作 | ✅ 完整 | 14 个动作，逻辑坐标自动换算，`click_image` 找不到不点 |
 | 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现已写但未装依赖验证 |
 | 平台后端 | ✅ 完整 | windows（mss + pydirectinput/pyautogui）、android（adb） |
 | fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
 | 状态层 | 🟡 部分 | ★ 页面树（`Page`/`PageTree`/`PageMatch`）结构、ROI 继承、跟踪层（`PageTracker`/`PageChange`）、校验全部实现；`PageTree.locate` 待实现 |
 | 流程层 | 🟡 部分 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）决策与校验、`Scenario` 跨树图校验全部实现；`FlowEngine.tick`、YAML 加载待实现 |
-| 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；`Executor.run` 待实现 |
+| 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；9 个 Step 的 `run()`、`Executor.run`、journal 落盘待实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
-| 测试 | ✅ 328 个用例 | 结构契约 + 已实现部分的行为 |
+| 业务层 | 🟡 部分 | ★ 按游戏/功能两级、注册表自动发现、`check`/`setup`/`selftest` 已实现；`games/testgame` 是完整样板（合成屏幕 + 八项自检） |
+| 日志 | 🟡 部分 | 控制台 + 文件 handler 已实现；内存环形缓冲、每次运行独立日志、结构化事件流待实现 |
+| UI | ⬜ 未开始 | 设计见 [docs/ui.md](docs/ui.md)（阶段 1 现在就能做） |
+| 测试 | ✅ 332 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
-> 剩下的就是状态层 / 流程层 / 执行层里那几个核心方法。
+> **"看图"这条链是通的；"看图之后做决定、动手"这条链（`locate` / `tick` /
+> `Executor.run` / 步骤本体）还是桩。**
 
 ### 下一步
 
 原子层已封板（L0~L5 + 视觉 + 平台后端全部实现并在真机验证过），
-状态层和流程层的**类型与结构逻辑**也齐了。按依赖顺序还剩：
+业务层骨架和测试游戏也齐了。按依赖顺序还剩：
 
-1. `PageTree.locate()` —— 状态层闭环（算法已写进它的 docstring）
+1. `PageTree.locate()` —— 状态层闭环（算法已写进它的 docstring）；
+   有了 `games/testgame` 的合成屏幕，它是**第一个能端到端验证**的方法
 2. `FlowEngine.tick()` —— 把定位、对齐、守卫、执行、转移串起来
-3. `query_from_dict` + `step_from_dict` —— 让 YAML 真正驱动脚本
-4. `Executor.run` + `JsonlJournal.record` —— 可观测性
-5. OCR 实测（装 `--extra ocr-rapid` 后跑一遍 `find_text`）
+3. `Executor.run` + 9 个 Step 的 `run()` —— 动作真正能下发
+4. `events.py` + 日志 handler —— UI 和 journal 的数据源（见 [docs/ui.md](docs/ui.md)）
+5. UI 阶段 1 —— 选脚本 / 看画面 / 日志框（**不依赖上面任何一条**）
+6. `query_from_dict` + `step_from_dict` —— 让 YAML 真正驱动脚本
+7. OCR 实测（装 `--extra ocr-rapid` 后跑一遍 `find_text`）
 
 ## 开发约定
 
