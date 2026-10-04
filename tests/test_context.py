@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 
 import numpy as np
-import pytest
 
 from gamebot.atomic.backends.fake import FakeInputBackend, build_fake_backends
 from gamebot.atomic.session import BaseSession
@@ -120,9 +119,18 @@ class TestQueriesOnContext:
         assert result.ok
 
     def test_find_image_delegates_to_frame(self, ctx: RunContext) -> None:
-        """匹配算法还没实现，所以这里只断言"调用链通到了 Frame"。"""
-        with pytest.raises(NotImplementedError):
-            ctx.find_image("a.png")
+        """走的是 ctx -> Frame -> Session.matcher 这条链。
+
+        conftest 的 FakeMatcher 登记了 "a.png" -> (100, 50)，所以这里应当命中。
+        """
+        result = ctx.find_image("a.png")
+        assert result.ok
+        assert result.value == Point(100, 50)
+
+    def test_find_image_miss_is_not_found(self, ctx: RunContext) -> None:
+        result = ctx.find_image("没有这张图.png")
+        assert not result.ok
+        assert result.status.value == "not_found"
 
 
 class TestPaths:

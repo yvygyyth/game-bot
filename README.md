@@ -161,31 +161,34 @@ atomic (原子层) ── 怎么做        L0~L5 共 49 个原子方法
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | L0 类型层 | ✅ 完整 | `ActionResult` / `Point` / `Region`，含全部便捷方法 |
-| L1 Session | ✅ 组装完成 | 截图编排、坐标换算、生命周期；平台后端待实现 |
-| L2 Frame | 🟡 部分 | `crop` / `to_numpy` / `get_pixel` / `save` / `read_number` 已实现；其余依赖 Matcher |
-| L3 Query | ✅ 委托完成 | 11 个描述符的字段与委托已写好，注册表就绪 |
-| L4 组合子 | ⬜ 待实现 | 10 个函数，契约与返回形状已在 docstring 定死 |
-| L5 动作 | 🟡 部分 | `sleep` 已实现，其余 12 个待实现 |
+| L1 Session | ✅ 完整 | 截图编排、坐标换算、生命周期、平台分发 |
+| L2 Frame | ✅ 完整 | 12 个查询方法全部实现，含帧内缓存与子帧坐标换算 |
+| L3 Query | ✅ 完整 | 11 个描述符 + 注册表（`query_from_dict` 归流程层，未写） |
+| L4 组合子 | ✅ 完整 | 5 个帧内 + 5 个跨帧，统一 error 透传语义 |
+| L5 动作 | ✅ 完整 | 13 个动作，逻辑坐标自动换算，`click_image` 找不到不点 |
+| 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现已写但未装依赖验证 |
+| 平台后端 | ✅ 完整 | windows（mss + pydirectinput/pyautogui）、android（adb） |
+| fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
 | 状态层 | 🟡 部分 | 定义/快照/黑板/存储已实现；`detect` / `update` 待实现 |
 | 流程层 | 🟡 部分 | 定义/节点/转移/状态机骨架已实现；`select` / `apply` / `validate` / `tick` 待实现 |
 | 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；`Executor.run` 待实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
-| 视觉算法 | ⬜ 待实现 | `OpenCvMatcher` / RapidOCR / Tesseract |
-| 平台后端 | ⬜ 待实现 | windows（mss + pydirectinput）、android（adb） |
-| fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
-| 测试 | ✅ 234 个用例 | 结构契约 + 已实现部分的行为 |
+| 测试 | ✅ 235 个用例 | 结构契约 + 已实现部分的行为 |
 
-### 建议的实现顺序
+> **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
+> （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
+> 剩下的就是状态层 / 流程层 / 执行层里那几个核心方法。
 
-1. `gamebot/vision/opencv_matcher.py` + `bootstrap.build_matcher` —— 没有它什么都测不了
-2. `Frame` 的 8 个查询方法 —— 原子层就通了，此时已能写"只会点固定目标"的脚本
-3. `L4 combinators` 的 5 个帧内组合子 —— 一次判断多个目标的效率立刻上来
-4. `L5 actions` 的 12 个动作 —— 需要先实现 `backends/windows.py`
-5. `StateDetector.detect` + `StateStore.update` —— 状态层闭环
-6. `FlowMachine.select/apply` + `FlowDefinition.validate` + `FlowEngine.tick` —— 流程跑通
-7. `Executor.run` + `JsonlJournal.record` —— 可观测性
-8. `flow/loader.py` —— 让 YAML 真正驱动流程
-9. OCR（按需）—— 找图能撑起绝大多数脚本
+### 下一步
+
+原子层已封板（L0~L5 + 视觉 + 平台后端全部实现并在真机验证过），
+接下来按依赖顺序填上层：
+
+1. `StateDetector.detect` + `StateStore.update` —— 状态层闭环
+2. `FlowMachine.select/apply` + `FlowDefinition.validate` + `FlowEngine.tick` —— 流程跑通
+3. `Executor.run` + `JsonlJournal.record` —— 可观测性
+4. `flow/loader.py`（含 `query_from_dict`）—— 让 YAML 真正驱动流程
+5. OCR 实测（装 `--extra ocr-rapid` 后跑一遍 `find_text`）
 
 ## 开发约定
 

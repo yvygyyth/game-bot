@@ -57,16 +57,24 @@ __all__ = [
 # 视觉部件
 # --------------------------------------------------------------------------- #
 def build_matcher(config: AppConfig) -> Matcher:
-    """造模板匹配实现。
+    """造模板匹配实现（OpenCV ``matchTemplate``）。
 
-    实现类在 ``gamebot.vision.opencv_matcher``（待写）。在它存在之前，
-    这里抛 ``GameBotError`` 并给一句明确的话，而不是 ImportError。
+    ``preload=True``：启动时把模板目录整个读进内存。好处是第一次查询不会卡一下，
+    坏处是模板路径写错时启动就炸 —— 这正是我们想要的（早炸早发现）。
+
+    :raises TemplateNotFoundError: 预加载时遇到损坏的模板文件。
     """
-    raise NotImplementedError(
-        "待实现: from .vision.opencv_matcher import OpenCvMatcher; "
-        "return OpenCvMatcher(templates_dir=config.paths.resolve(config.vision.templates_dir), "
-        "grayscale=config.vision.grayscale, use_pyramid=config.vision.use_pyramid)"
+    from .vision.opencv_matcher import OpenCvMatcher
+
+    matcher = OpenCvMatcher(
+        templates_dir=config.paths.resolve(config.vision.templates_dir),
+        grayscale=config.vision.grayscale,
+        use_pyramid=config.vision.use_pyramid,
+        preload=True,
     )
+    log.info("模板匹配就绪: %d 个模板, 灰度=%s, 多尺度=%s",
+             len(matcher.cached_templates), matcher.grayscale, matcher.use_pyramid)
+    return matcher
 
 
 def build_reader(config: AppConfig) -> TextReader:
@@ -79,10 +87,24 @@ def build_reader(config: AppConfig) -> TextReader:
     if engine in ("none", "", "off"):
         log.info("未启用 OCR，find_text / read_text 将返回 not_found")
         return UnavailableTextReader("config.vision.ocr_engine = none")
+
     if engine == "rapid":
-        raise NotImplementedError("待实现: from .vision.rapid_ocr import RapidOcrReader")
+        from .vision.ocr import RapidOcrReader
+
+        reader = RapidOcrReader(lang=config.vision.ocr_lang)
+        if config.meta.get("ocr_warmup", True):
+            # 第一次 OCR 要加载 onnx 模型（几秒），挪到启动阶段，别让流程误判超时
+            reader.warmup()
+        return reader
+
     if engine == "tesseract":
-        raise NotImplementedError("待实现: from .vision.tesseract_reader import TesseractReader")
+        from .vision.ocr import TesseractReader
+
+        return TesseractReader(
+            tesseract_cmd=str(config.meta.get("tesseract_cmd", "")),
+            lang="eng" if config.vision.ocr_lang == "en" else "eng+chi_sim",
+        )
+
     raise ConfigError(
         f"未知 OCR 引擎: {config.vision.ocr_engine!r}（可选 none / rapid / tesseract）"
     )

@@ -2,7 +2,12 @@
 
 共 **49** 个原子方法（设计稿 47 个 + `AllTextsQuery` + `VisibleQuery`，见文末说明）。
 
-图例：`✅` 已实现 · `⬜` 接口已定，实现待写
+图例：`✅` 已实现
+
+**L0~L5 现已全部实现。** 唯一需要额外依赖的是 OCR：`find_text` / `read_text` /
+`read_number` 在 `vision.ocr_engine = none` 时返回 `not_found`（不报错），
+装了 `--extra ocr-rapid` 或 `--extra ocr-tesseract` 并改配置后才真正识字。
+平台后端：`--extra windows`（PC）/ `--extra android`（adb）。
 
 ---
 
@@ -63,15 +68,15 @@ Session **只负责截图、坐标换算、持有输入后端**，不做任何�
 
 | # | 方法 | 返回 | 状态 |
 |---|---|---|---|
-| 4 | `find_image(template, region, confidence, use_pyramid, grayscale)` | `success(value=Point, score=...)` | ⬜ |
-| 5 | `find_all_images(template, region, confidence, max_count, min_distance)` | `success(value=list[Point])` | ⬜ |
-| 6 | `find_text(text, region, lang, confidence, exact_match)` | `success(value=Point, text=...)` | ⬜ |
-| 7 | `find_all_texts(text, region, lang, confidence)` | `success(value=list[Point])` | ⬜ |
-| 8 | `read_text(region, lang, confidence)` | `success(value=str)` | ⬜ |
+| 4 | `find_image(template, region, confidence, use_pyramid, grayscale)` | `success(value=Point, score=...)` | ✅ |
+| 5 | `find_all_images(template, region, confidence, max_count, min_distance)` | `success(value=list[Point])` | ✅ |
+| 6 | `find_text(text, region, lang, confidence, exact_match)` | `success(value=Point, text=...)` | ✅ |
+| 7 | `find_all_texts(text, region, lang, confidence)` | `success(value=list[Point])` | ✅ |
+| 8 | `read_text(region, lang, confidence)` | `success(value=str)` | ✅ |
 | 9 | `read_number(region, lang, confidence)` | `success(value=int\|float)` | ✅ |
 | 10 | `get_pixel(point)` | `success(value=(r, g, b))` | ✅ |
-| 11 | `compare_region(region, template, confidence)` | `success(value=similarity)` | ⬜ |
-| 12 | `is_image_visible(template, region, confidence)` | `success(value=bool)`（**不是 not_found**） | ⬜ |
+| 11 | `compare_region(region, template, confidence)` | `success(value=similarity)` | ✅ |
+| 12 | `is_image_visible(template, region, confidence)` | `success(value=bool)`（**不是 not_found**） | ✅ |
 
 ### 变换 / 导出
 
@@ -106,15 +111,15 @@ frame.clear_cache()
 | 21 | `PixelQuery` | `point, expected_color, tolerance` | ✅ 委托 |
 | 22 | `CompareQuery` | `region, template, confidence, comparator` | ✅ 委托 |
 | 23 | `VisibleQuery` | `template, region, confidence` | ✅ 委托 |
-| 24 | `AndQuery` | `queries` | ⬜ 依赖 L4 |
-| 25 | `OrQuery` | `queries, short_circuit` | ⬜ 依赖 L4 |
-| 26 | `NotQuery` | `query, message` | ⬜ 依赖 L4 |
+| 24 | `AndQuery` | `queries` | ✅ 委托 L4 |
+| 25 | `OrQuery` | `queries, short_circuit` | ✅ 委托 L4 |
+| 26 | `NotQuery` | `query, message` | ✅ 委托 L4 |
 
-> "委托"指 `run()` 只是把参数转发给 Frame 的对应方法 —— 这部分逻辑已经写好了。
-> 真正待实现的是 Frame 里那些被转发到的方法。
+> "委托"指 `run()` 把参数转发给 Frame 的对应方法，自己不掺逻辑 ——
+> 这样 Query 才能保持"纯数据、可序列化、可复用"。
 
 `query_registry()` 提供类型名 -> 类的映射，供 YAML 反序列化使用。
-`query_from_dict(data)` 待实现。
+`query_from_dict(data)` 还没写（属于流程层的 YAML 加载，不在原子层范围内）。
 
 ---
 
@@ -124,21 +129,21 @@ frame.clear_cache()
 
 | # | 函数 | 语义 | 状态 |
 |---|---|---|---|
-| 27 | `find_all_of(frame, queries)` | `Promise.all`：全部命中才成功 | ⬜ |
-| 28 | `find_any_of(frame, queries, short_circuit)` | `Promise.race`：任一命中即成功 | ⬜ |
-| 29 | `find_first_of(frame, queries)` | 按顺序取第一个成功的（顺序即优先级） | ⬜ |
-| 30 | `find_none_of(frame, queries)` | 全部失败才成功；**子查询 error 则整体失败** | ⬜ |
-| 31 | `count_hits(frame, queries)` | 统计命中数量 -> `success(value=int)` | ⬜ |
+| 27 | `find_all_of(frame, queries)` | `Promise.all`：全部命中才成功 | ✅ |
+| 28 | `find_any_of(frame, queries, short_circuit)` | `Promise.race`：任一命中即成功 | ✅ |
+| 29 | `find_first_of(frame, queries)` | 按顺序取第一个成功的（顺序即优先级） | ✅ |
+| 30 | `find_none_of(frame, queries)` | 全部失败才成功；**子查询 error 则整体失败** | ✅ |
+| 31 | `count_hits(frame, queries)` | 统计命中数量 -> `success(value=int)` | ✅ |
 
 **跨帧组合子**（自己循环截图；失败返回 `timeout`，`meta["last"]` 带最后一次子结果）：
 
 | # | 函数 | 语义 | 状态 |
 |---|---|---|---|
-| 32 | `wait_any_of(session, queries, timeout, interval, short_circuit)` | 等到任一命中 | ⬜ |
-| 33 | `wait_all_of(session, queries, timeout, interval)` | 等到全部命中，**必须在同一帧成立** | ⬜ |
-| 34 | `wait_until(session, predicate, timeout, interval)` | 等到谓词成立，返回那帧 | ⬜ |
-| 35 | `wait_stable(session, region, threshold, stable_frames, timeout, interval)` | 等到画面稳定 | ⬜ |
-| 36 | `wait_disappear(session, query, timeout, interval)` | 等到不再命中 | ⬜ |
+| 32 | `wait_any_of(session, queries, timeout, interval, short_circuit)` | 等到任一命中 | ✅ |
+| 33 | `wait_all_of(session, queries, timeout, interval)` | 等到全部命中，**必须在同一帧成立** | ✅ |
+| 34 | `wait_until(session, predicate, timeout, interval)` | 等到谓词成立，返回那帧 | ✅ |
+| 35 | `wait_stable(session, region, threshold, stable_frames, timeout, interval)` | 等到画面稳定 | ✅ |
+| 36 | `wait_disappear(session, query, timeout, interval)` | 等到不再命中 | ✅ |
 
 > 效率提示：5 个查询用 `find_all_of` 是 **1 次截图 + 5 次匹配**；
 > 写成 5 个独立查询就是 5 次截图。能用帧内组合子就别拆开写。
@@ -154,28 +159,28 @@ frame.clear_cache()
 
 | # | 函数 | 返回 | 状态 |
 |---|---|---|---|
-| 37 | `click_point(session, point, button, clicks, interval)` | `success(value=实际源坐标)` | ⬜ |
-| 38 | `click_image(session, template, region, confidence, button, offset)` | 找不到时 `not_found`（**不乱点**） | ⬜ |
-| 39 | `click_text(session, text, region, lang, confidence)` | 同上 | ⬜ |
-| 40 | `double_click(session, point, interval)` | — | ⬜ |
-| 41 | `right_click(session, point)` | — | ⬜ |
+| 37 | `click_point(session, point, button, clicks, interval)` | `success(value=实际源坐标)` | ✅ |
+| 38 | `click_image(session, template, region, confidence, button, offset)` | 找不到时 `not_found`（**不乱点**） | ✅ |
+| 39 | `click_text(session, text, region, lang, confidence)` | 同上 | ✅ |
+| 40 | `double_click(session, point, interval)` | — | ✅ |
+| 41 | `right_click(session, point)` | — | ✅ |
 
 ### 移动 / 拖拽 / 滚轮
 
 | # | 函数 | 备注 | 状态 |
 |---|---|---|---|
-| 42 | `move_to(session, point, duration)` | `duration=0` 会漏掉 hover 类 UI | ⬜ |
-| 43 | `drag(session, start, end, duration, button)` | Windows 需拆 mouseDown/移动/mouseUp | ⬜ |
-| 44 | `drag_image(session, source_template, target, duration, confidence)` | 识图 + 拖拽 | ⬜ |
-| 45 | `scroll(session, clicks, point)` | 正数上/前，负数下/后 | ⬜ |
+| 42 | `move_to(session, point, duration)` | `duration=0` 会漏掉 hover 类 UI | ✅ |
+| 43 | `drag(session, start, end, duration, button)` | Windows 需拆 mouseDown/移动/mouseUp | ✅ |
+| 44 | `drag_image(session, source_template, target, duration, confidence)` | 识图 + 拖拽 | ✅ |
+| 45 | `scroll(session, clicks, point)` | 正数上/前，负数下/后 | ✅ |
 
 ### 键盘
 
 | # | 函数 | 备注 | 状态 |
 |---|---|---|---|
-| 46 | `type_text(session, text, interval)` | 中文需剪贴板/ADBKeyboard | ⬜ |
-| 47 | `press_key(session, key, presses, interval)` | 统一键名，由后端映射 | ⬜ |
-| 48 | `hotkey(session, keys)` | pydirectinput 组合键支持有限 | ⬜ |
+| 46 | `type_text(session, text, interval)` | 中文需剪贴板/ADBKeyboard | ✅ |
+| 47 | `press_key(session, key, presses, interval)` | 统一键名，由后端映射 | ✅ |
+| 48 | `hotkey(session, keys)` | pydirectinput 组合键支持有限 | ✅ |
 
 ### 等待
 

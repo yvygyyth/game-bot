@@ -12,6 +12,12 @@
 * 窗口截图统一走 **屏幕坐标裁剪**（mss 直接抓窗口在屏幕上的矩形），
   而不是 ``PrintWindow`` —— 后者对硬件加速渲染的游戏经常抓到黑屏。
   代价：窗口被遮挡时会抓到遮挡物，因此运行时应保持游戏窗口置顶。
+* **坐标基准**：``screen_size()`` / ``grab(region)`` 里的坐标，原点是
+  「窗口客户区左上角」或「显示器左上角」。窗口截图时后端负责把源坐标
+  叠加上窗口在屏幕上的偏移，上层永远只看到 0 起点。
+
+依赖（都在 ``--extra windows`` 里）：
+``mss``（基础依赖）、``pywin32``、``pydirectinput``。
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Any
 
-from ...exceptions import BackendUnavailable
+from ...exceptions import BackendError, BackendUnavailable
 from ...types import Point, Region
 from ...utils.logging import get_logger
 from .base import BackendBundle, WindowInfo
@@ -31,18 +37,75 @@ if TYPE_CHECKING:
 log = get_logger("backends.windows")
 
 __all__ = [
+    "KEY_MAP",
     "WindowsInputBackend",
     "WindowsScreenBackend",
     "WindowsWindowBackend",
     "build_windows_backends",
     "enable_dpi_awareness",
+    "normalize_key",
 ]
+
+#: 统一键名 -> pyautogui / pydirectinput 的键名。
+#: 业务脚本只应该用左边这些；要加自定义映射请改这里，别把平台键名写进脚本。
+KEY_MAP: dict[str, str] = {
+    # 编辑键
+    "enter": "enter",
+    "return": "enter",
+    "esc": "escape",
+    "escape": "escape",
+    "space": "space",
+    "tab": "tab",
+    "backspace": "backspace",
+    "delete": "delete",
+    "del": "delete",
+    "insert": "insert",
+    "home": "home",
+    "end": "end",
+    "pageup": "pageup",
+    "pagedown": "pagedown",
+    # 方向键
+    "up": "up",
+    "down": "down",
+    "left": "left",
+    "right": "right",
+    # 修饰键
+    "ctrl": "ctrl",
+    "control": "ctrl",
+    "alt": "alt",
+    "shift": "shift",
+    "win": "win",
+    "cmd": "win",
+    # 小键盘 / 功能键
+    "capslock": "capslock",
+    "numlock": "numlock",
+    "printscreen": "printscreen",
+    "scrolllock": "scrolllock",
+    "pause": "pause",
+    # 鼠标
+    "mouseleft": "left",
+    "mouseright": "right",
+    "mousemiddle": "middle",
+}
+
+# 单字符键（a-z / 0-9 / 符号）原样透传，这里只补几个习惯写法
+for _digit in "0123456789":
+    KEY_MAP[_digit] = _digit
+for _letter in "abcdefghijklmnopqrstuvwxyz":
+    KEY_MAP[_letter] = _letter
+for _index in range(1, 25):
+    KEY_MAP[f"f{_index}"] = f"f{_index}"
+
+
+def normalize_key(key: str) -> str:
+    """把统一键名转成后端键名。未登记的键名原样返回（可能是后端特有键）。"""
+    return KEY_MAP.get(key.strip().lower(), key)
 
 
 def enable_dpi_awareness() -> None:
     """声明进程 DPI 感知（Per-Monitor V2 优先）。
 
-    必须在创建任何窗口 / 抓屏句柄之前调用。Windows 非 win32 平台上静默返回。
+    必须在创建任何窗口 / 抓屏句柄之前调用。非 win32 平台上静默返回。
     """
     if sys.platform != "win32":
         return
@@ -58,20 +121,78 @@ def enable_dpi_awareness() -> None:
 
 
 class WindowsWindowBackend:
-    """基于 win32gui 的窗口发现。"""
+    """基于 win32gui 的窗口发现与定位。"""
 
+    def __init__(self, *, client_area_only: bool = True) -> None:
+        self.client_area_only = client_area_only
+
+    # ------------------------------------------------------------------ #
+    # 内部
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _load() -> Any:
+        try:
+            import win32gui
+        except ImportError as exc:  # pragma: no cover
+            raise BackendUnavailable(
+                "缺少 pywin32，请执行: uv sync --extra windows"
+            ) from exc
+        return win32gui
+
+    def region_of(self, handle: int) -> Region:
+        """取窗口区域。``client_area_only`` 时只算客户区（不含标题栏 / 边框）。"""
+        win32gui = self._load()
+        if self.client_area_only:
+            _, _, width, height = win32gui.GetClientRect(handle)
+            left, top = win32gui.ClientToScreen(handle, (0, 0))
+        else:
+            left, top, right, bottom = win32gui.GetWindowRect(handle)
+            width, height = right - left, bottom - top
+        return Region(int(left), int(top), int(width), int(height))
+
+    # ------------------------------------------------------------------ #
+    # 协议
+    # ------------------------------------------------------------------ #
     def list_windows(self, keyword: str = "") -> list[WindowInfo]:
-        raise NotImplementedError("待实现：EnumWindows + GetWindowText + GetWindowRect")
+        """列出可见且未最小化的窗口。``keyword`` 非空时按标题子串过滤（不区分大小写）。"""
+        win32gui = self._load()
+        lowered = keyword.lower()
+        found: list[WindowInfo] = []
+
+        def callback(handle: int, _extra: Any) -> bool:
+            if not win32gui.IsWindowVisible(handle):
+                return True
+            # 最小化时 GetWindowRect 会返回 -32000 之类的垃圾坐标，必须跳过
+            if win32gui.IsIconic(handle):
+                return True
+            title = win32gui.GetWindowText(handle)
+            if not title:
+                return True
+            if lowered and lowered not in title.lower():
+                return True
+            try:
+                region = self.region_of(handle)
+            except Exception:
+                return True
+            if region.is_empty:
+                return True
+            found.append(WindowInfo(handle, title, region))
+            return True
+
+        win32gui.EnumWindows(callback, None)
+        return found
 
     def find_window(self, title_pattern: str) -> WindowInfo | None:
-        raise NotImplementedError("待实现：标题包含匹配，取第一个可见窗口")
+        """按标题关键字找窗口，取第一个（``EnumWindows`` 的顺序，通常是 Z 序）。"""
+        matches = self.list_windows(title_pattern)
+        return matches[0] if matches else None
 
 
 class WindowsScreenBackend:
     """mss 截图后端。
 
-    :param window_title: 非空时只抓该窗口客户区；为空则抓整个显示器。
-    :param monitor_index: mss 的显示器序号，``1`` 是主屏。
+    :param window_title: 非空时只抓该窗口；为空则抓整个显示器。
+    :param monitor_index: mss 的显示器序号，``1`` 是主屏（抓窗口时忽略）。
     :param client_area_only: True 只抓客户区（不含标题栏 / 边框）。
     """
 
@@ -86,46 +207,129 @@ class WindowsScreenBackend:
     ) -> None:
         if sys.platform != "win32":
             raise BackendUnavailable("windows 后端只能在 Windows 上使用")
+        # DPI 感知必须早于任何抓屏句柄
         enable_dpi_awareness()
         try:
             import mss  # noqa: F401
         except ImportError as exc:  # pragma: no cover
             raise BackendUnavailable("缺少 mss，请执行: uv sync") from exc
+
         self.window_title = window_title
         self.monitor_index = monitor_index
         self.client_area_only = client_area_only
         self._sct: Any = None
-        self._window: WindowsWindowBackend | None = None
-        self._region: Region | None = None
+        self._window = WindowsWindowBackend(client_area_only=client_area_only)
+        self._cached_region: Region | None = None
+        self._cached_at = 0.0
+        self._cache_ttl = 0.5
 
+    # ------------------------------------------------------------------ #
+    # 内部
+    # ------------------------------------------------------------------ #
+    def _engine(self) -> Any:
+        """懒建 mss 句柄并复用。每次 grab 都新建会明显变慢。"""
+        if self._sct is None:
+            import mss
+
+            self._sct = mss.mss()
+        return self._sct
+
+    def _monitor_region(self) -> Region:
+        monitor = self._engine().monitors[self.monitor_index]
+        return Region(
+            int(monitor["left"]),
+            int(monitor["top"]),
+            int(monitor["width"]),
+            int(monitor["height"]),
+        )
+
+    def source_region(self) -> Region:
+        """当前捕获区域在**屏幕坐标**下的位置。
+
+        窗口模式下是客户区矩形（会随窗口移动而变化，所以带短 TTL 缓存）；
+        全屏模式下是显示器矩形。
+        """
+        if not self.window_title:
+            return self._monitor_region()
+
+        now = time.monotonic()
+        if self._cached_region is not None and now - self._cached_at < self._cache_ttl:
+            return self._cached_region
+
+        info = self._window.find_window(self.window_title)
+        if info is None:
+            raise BackendError(f"未找到标题包含 {self.window_title!r} 的窗口")
+        self._cached_region = info.region
+        self._cached_at = now
+        return info.region
+
+    def invalidate(self) -> None:
+        """丢掉窗口区域的缓存（窗口刚被移动 / 缩放时调）。"""
+        self._cached_region = None
+        self._cached_at = 0.0
+
+    # ------------------------------------------------------------------ #
+    # 协议
+    # ------------------------------------------------------------------ #
     def screen_size(self) -> tuple[int, int]:
-        raise NotImplementedError("待实现：读 mss monitors[monitor_index] 或窗口客户区尺寸")
+        region = self.source_region()
+        return (region.w, region.h)
 
     def grab(self, region: Region | None = None) -> np.ndarray:
-        raise NotImplementedError(
-            "待实现：region 为源分辨率坐标，需叠加窗口在屏幕上的偏移；返回 BGR 副本"
+        """抓一帧。
+
+        :param region: **源坐标**（0 起点 = 捕获区左上角）。会叠加窗口/显示器的
+            屏幕偏移后再交给 mss。
+        :return: ``(H, W, 3)`` 的 BGR 数组，独立副本。
+        """
+        import numpy as np
+
+        base = self.source_region()
+        target = base if region is None else Region(
+            base.x + region.x, base.y + region.y, region.w, region.h
         )
+        if target.is_empty:
+            raise BackendError(f"截图区域为空: {target.to_tuple()}")
+
+        try:
+            raw = self._engine().grab(target.to_mss())
+        except Exception as exc:
+            raise BackendError(f"抓屏失败 {target.to_tuple()}: {exc}") from exc
+
+        # BGRA -> BGR，并强制一份连续内存的独立副本（mss 的缓冲区会被下一帧覆盖）
+        return np.ascontiguousarray(np.asarray(raw)[:, :, :3])
 
     def close(self) -> None:
         if self._sct is not None:
             self._sct.close()
             self._sct = None
 
+    def __repr__(self) -> str:
+        target = self.window_title or f"monitor#{self.monitor_index}"
+        return f"WindowsScreenBackend({target!r})"
+
 
 class WindowsInputBackend:
     """输入后端。
 
-    :param engine: ``"direct"`` 用 pydirectinput（游戏兼容好），``"pyautogui"`` 用通用实现。
+    :param engine: ``"direct"`` 用 pydirectinput（游戏兼容好），
+        ``"pyautogui"`` 用通用实现（组合键、中文输入更省事）。
+    :param key_hold: 组合键/拖拽时每个键按下的保持时间（秒）。
+        给 0 时部分游戏会漏收按键。
     """
 
     name = "windows-input"
 
-    def __init__(self, *, engine: str = "direct") -> None:
+    def __init__(self, *, engine: str = "direct", key_hold: float = 0.02) -> None:
         if sys.platform != "win32":
             raise BackendUnavailable("windows 后端只能在 Windows 上使用")
         self.engine = engine
+        self.key_hold = key_hold
         self._impl: Any = None
 
+    # ------------------------------------------------------------------ #
+    # 内部
+    # ------------------------------------------------------------------ #
     def _load(self) -> Any:
         if self._impl is not None:
             return self._impl
@@ -136,12 +340,33 @@ class WindowsInputBackend:
             raise BackendUnavailable(
                 f"缺少 {module}，请执行: uv sync --extra windows"
             ) from exc
-        self._impl.FAILSAFE = False  # 防止鼠标撞到屏幕角落时抛异常打断脚本
+        self._impl.FAILSAFE = False  # 鼠标撞到屏幕角落不该抛异常打断脚本
         self._impl.PAUSE = 0
+        log.debug("Windows 输入引擎: %s", module)
         return self._impl
 
+    def _set_clipboard(self, text: str) -> None:
+        """把文本塞进剪贴板（中文输入的唯一靠谱办法）。"""
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError as exc:  # pragma: no cover
+            raise BackendUnavailable(
+                "输入非 ASCII 文本需要剪贴板支持，请执行: uv sync --extra windows"
+            ) from exc
+
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+        finally:
+            win32clipboard.CloseClipboard()
+
+    # ------------------------------------------------------------------ #
+    # 协议
+    # ------------------------------------------------------------------ #
     def move_to(self, point: Point, duration: float = 0.2) -> None:
-        raise NotImplementedError("待实现：impl.moveTo(x, y, duration=duration)")
+        self._load().moveTo(point.x, point.y, duration=duration)
 
     def click(
         self,
@@ -151,7 +376,19 @@ class WindowsInputBackend:
         clicks: int = 1,
         interval: float = 0.1,
     ) -> None:
-        raise NotImplementedError("待实现：先 move_to 再 click，注意 clicks/interval 语义")
+        impl = self._load()
+        impl.moveTo(point.x, point.y, duration=0)
+        if clicks <= 1:
+            impl.click(button=button)
+            return
+        # 多次点击自己拆开：不同后端对 clicks/interval 的处理不一致，
+        # 显式 mouseDown/mouseUp + sleep 最可控（双击尤其明显）。
+        for index in range(clicks):
+            if index:
+                time.sleep(interval)
+            impl.mouseDown(button=button)
+            time.sleep(self.key_hold)
+            impl.mouseUp(button=button)
 
     def drag(
         self,
@@ -161,21 +398,73 @@ class WindowsInputBackend:
         duration: float = 0.5,
         button: str = "left",
     ) -> None:
-        raise NotImplementedError(
-            "待实现：mouseDown -> 分步 moveTo -> mouseUp（一步到位游戏常不认）"
-        )
+        impl = self._load()
+        impl.moveTo(start.x, start.y, duration=0)
+        impl.mouseDown(button=button)
+        try:
+            # 起点先停一下：部分游戏需要"按住"稳定后才认拖拽
+            time.sleep(max(self.key_hold, 0.05))
+            steps = max(2, min(60, int(duration / 0.02) or 2))
+            for step in range(1, steps + 1):
+                ratio = step / steps
+                impl.moveTo(
+                    round(start.x + (end.x - start.x) * ratio),
+                    round(start.y + (end.y - start.y) * ratio),
+                    duration=0,
+                )
+                time.sleep(duration / steps)
+        finally:
+            # 无论中途出什么错都要松开，否则会把整个桌面拖住
+            impl.mouseUp(button=button)
 
     def scroll(self, clicks: int, point: Point | None = None) -> None:
-        raise NotImplementedError("待实现：先 moveTo(point) 再 scroll(clicks)")
+        impl = self._load()
+        if point is not None:
+            impl.moveTo(point.x, point.y, duration=0)
+        impl.scroll(clicks)
 
     def type_text(self, text: str, *, interval: float = 0.05) -> None:
-        raise NotImplementedError("待实现：注意中文需要走剪贴板粘贴，pyautogui 打不出中文")
+        if not text:
+            return
+        impl = self._load()
+        if text.isascii():
+            impl.write(text, interval=interval)
+            return
+        # 非 ASCII（中文等）：剪贴板 + Ctrl+V
+        self._set_clipboard(text)
+        time.sleep(0.05)  # 等剪贴板真的生效
+        self.hotkey(["ctrl", "v"])
+        time.sleep(max(interval, 0.05))
 
     def press_key(self, key: str, *, presses: int = 1, interval: float = 0.1) -> None:
-        raise NotImplementedError("待实现：按键名映射，见 docs 的 key map")
+        impl = self._load()
+        backend_key = normalize_key(key)
+        for index in range(max(1, presses)):
+            if index:
+                time.sleep(interval)
+            impl.press(backend_key)
 
     def hotkey(self, keys: list[str]) -> None:
-        raise NotImplementedError("待实现：pydirectinput 组合键支持有限，需要 fallback")
+        if not keys:
+            return
+        impl = self._load()
+        backend_keys = [normalize_key(key) for key in keys]
+        if len(backend_keys) == 1:
+            impl.press(backend_keys[0])
+            return
+        pressed: list[str] = []
+        try:
+            for key in backend_keys:
+                impl.keyDown(key)
+                pressed.append(key)
+                time.sleep(self.key_hold)
+        finally:
+            # 倒序松开；出了异常也必须松，不然会留下"卡住的 Ctrl"
+            for key in reversed(pressed):
+                try:
+                    impl.keyUp(key)
+                except Exception:
+                    log.warning("释放按键失败: %s", key)
 
     def close(self) -> None:
         self._impl = None
@@ -197,9 +486,5 @@ def build_windows_backends(
             client_area_only=client_area_only,
         ),
         input=WindowsInputBackend(engine=input_engine),
-        window=WindowsWindowBackend(),
+        window=WindowsWindowBackend(client_area_only=client_area_only),
     )
-
-
-def _sleep(seconds: float) -> None:  # pragma: no cover - 预留
-    time.sleep(seconds)
