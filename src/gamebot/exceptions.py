@@ -20,6 +20,7 @@ __all__ = [
     "ConfigError",
     "FlowError",
     "GameBotError",
+    "StateError",
     "StepFailed",
     "TemplateNotFoundError",
     "TimeoutExceeded",
@@ -84,8 +85,16 @@ class TemplateNotFoundError(GameBotError):
 
 
 # --------------------------------------------------------------------------- #
-# 流程
+# 状态 / 流程
 # --------------------------------------------------------------------------- #
+class StateError(GameBotError):
+    """页面树定义非法：id 重复、父页面不存在、叠加层带了子页面……
+
+    和 :class:`FlowError` 分开：一个是"我认不出游戏"，
+    一个是"我不知道该干什么"，报错时得能分清是哪个错了。
+    """
+
+
 class FlowError(GameBotError):
     """流程定义非法：初始状态不存在、转移指向未定义状态、节点重复……"""
 

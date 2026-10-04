@@ -22,7 +22,8 @@ game-bot/
 ├── assets/templates/            # 模板图（按界面分子目录）
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
-│   └── atomic-inventory.md      #   49 个原子方法的清单与语义
+│   ├── atomic-inventory.md      #   49 个原子方法的清单与语义
+│   └── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）
@@ -169,8 +170,8 @@ atomic (原子层) ── 怎么做        L0~L5 共 49 个原子方法
 | 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现已写但未装依赖验证 |
 | 平台后端 | ✅ 完整 | windows（mss + pydirectinput/pyautogui）、android（adb） |
 | fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
-| 状态层 | 🟡 部分 | 定义/快照/黑板/存储已实现；`detect` / `update` 待实现 |
-| 流程层 | 🟡 部分 | 定义/节点/转移/状态机骨架已实现；`select` / `apply` / `validate` / `tick` 待实现 |
+| 状态层 | 🟡 部分 | ★ 页面树（`Page`/`PageTree`/`PageMatch`）结构与 ROI 继承已实现；`locate` 待实现。旧的扁平 `StateDefinition` 已被取代 |
+| 流程层 | 🟡 部分 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）决策与校验已实现；`FlowEngine.tick` 待实现。旧的 `FlowMachine` 已被取代 |
 | 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；`Executor.run` 待实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
 | 测试 | ✅ 250 个用例 | 结构契约 + 已实现部分的行为 |
