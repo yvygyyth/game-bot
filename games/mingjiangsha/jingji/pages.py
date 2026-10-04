@@ -1,25 +1,52 @@
 """竞技场 —— 本功能的页面。
 
-## 现在这里为什么是空的
+## 页面标识用什么
 
-竞技场的页面（点「竞技」之后到的那一页）需要它的模板才能定义，
-而那个模板还没做。**不放假页面** —— 一个没有识别条件的 Page 是校验错误，
-放个凑数的反而更糟。
+用**左上角的「竞技场」标题**（148x52）。实测它在三种状态下都是 **1.000** ——
+这正是页面标识该有的性质：那三种状态都是同一个页面。
 
-## 补上它的时候要做什么
+不能用的：**右侧队伍面板**。它在三种状态下长得完全不同
+（空位+创建队伍 / 空位+添加伙伴 / 两个已准备的头像+开始匹配），
+拿它当页面特征会导致"进到第二步就认不出自己在哪一页了"。
 
-1. 从竞技场那页的截图裁特征（顶部标题"竞技场"、左边的奖励/排行/竞技商店按钮
-   都行，**别用会随状态变的那块** —— 右侧队伍面板在三种状态下长得不一样）；
-2. 在这里加 ``Page("home/jingji", queries=(...), )``，父页面 ``home``；
-3. 在 :mod:`graph` 里加对应节点，并连上 ``home`` 那条边。
+也不能用的：**背景**。竞技场背景是活的 —— 那个骑马的角色披风一直在飘，
+三张图里背景像素完全不同。模板一旦框进背景，换一帧就废。
 
-别忘了 ROI：竞技场的特征如果在右侧面板附近，而那块会变，
-就把它排除在 ROI 之外。
+## ROI 为什么只框左上角
+
+`:data:`JINGJI_PAGE_ROI` 只覆盖标题那一块。除了"更快"，
+更重要的是**排除了中间那个「巅峰竞技场」大横幅** ——
+它也含"竞技场"三个字，不做限制会有误命中的风险。
 """
 
 from __future__ import annotations
 
+from gamebot.atomic.query import ImageQuery
 from gamebot.state import Page
+from gamebot.types import Region
 
-#: ``(页面, 父页面 id)``。目前这个功能不新增页面 —— 全部逻辑都挂在游戏级的 ``home`` 上。
-FEATURE_PAGES: list[tuple[Page, str | None]] = []
+from .steps import T_TITLE
+
+#: 页面标识的搜索区域（客户区坐标）：左上角那一块。
+#: 刻意避开中间的「巅峰竞技场」横幅 —— 它也含"竞技场"三个字。
+JINGJI_PAGE_ROI = Region(40, 0, 240, 90)
+
+#: 页面标识的阈值。实测三种状态都是 1.000，给 0.90 很宽裕。
+CONF_TITLE = 0.90
+
+FEATURE_PAGES: list[tuple[Page, str | None]] = [
+    (
+        Page(
+            "home/jingji",
+            name="竞技场",
+            roi=JINGJI_PAGE_ROI,
+            queries=(
+                # region 显式给上：页面树定位用它，直接跑 Query 时也用它，
+                # 两条路径都成立（页面 roi 只对前者生效）。
+                ImageQuery(T_TITLE, region=JINGJI_PAGE_ROI, confidence=CONF_TITLE),
+            ),
+            description="竞技场：三张图对应它的三种状态（建队前/建队后/已准备）",
+        ),
+        "home",
+    ),
+]

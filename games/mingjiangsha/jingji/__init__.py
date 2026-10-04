@@ -40,6 +40,8 @@ python -m games probe  mingjiangsha/jingji    # 真机探针：现在屏幕上�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from gamebot.config.schema import AppConfig
 from gamebot.flow import EngineOptions, Scenario, UnknownPolicy
 from gamebot.state import PageTree
@@ -50,7 +52,7 @@ from .pages import FEATURE_PAGES
 
 SLUG = "jingji"
 TITLE = "竞技场"
-DESCRIPTION = "首页点竞技 → 创建队伍 → 添加伙伴 → 开始匹配（当前只做到第一步）"
+DESCRIPTION = "首页点竞技 → 创建队伍 → 添加伙伴 → 开始匹配"
 
 TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
 
@@ -116,7 +118,10 @@ def prepare(*, force: bool = False) -> int:
 
 
 def selftest() -> list[str]:
-    """静态自检：不需要游戏在跑，但需要一张参考图（``prepare()`` 会抓）。"""
+    """静态自检：不需要游戏在跑，但需要参考图（``prepare()`` 抓）。
+
+    还会拿 ``assets/`` 里那四张真实截图做回归（存在时）。
+    """
     from .checks import run
 
     return run(build_config())
@@ -130,6 +135,11 @@ def probe() -> list[str]:
     from .checks import probe_live
 
     return probe_live(build_config())
+
+
+def _project_root() -> Path:
+    """项目根（checks 用它拼 fixtures 的路径）。"""
+    return _game.PROJECT_ROOT
 
 
 __all__ = [
