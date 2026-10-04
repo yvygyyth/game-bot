@@ -25,11 +25,17 @@
 | 达成 | ``success`` | ``success`` |
 | 没达成 | ``not_found`` | ``timeout`` |
 | 子查询**报错** | 原样透传 ``error`` | 立即 ``error`` 返回，不再重试 |
+| **截图失败** | 不适用 | 立即 ``error`` 返回，不再重试 |
 
 **为什么 error 要向上透传**：模板路径写错、OCR 没装、adb 掉线，这些
 重试一万次也不会好。如果把它们当成"没命中"，问题到上层就表现为
 "明明有这个按钮却找不到"，排查成本极高。唯一例外是 ``count_hits`` ——
 它在打分投票，错误不计入命中但在 ``meta["errors"]`` 里列出来。
+
+**为什么截图失败也要转成 error**：``Session.capture()`` 返回 ``Frame``，
+没法用返回值表达失败，所以窗口被关掉时它是抛异常的。跨帧组合子必须兜住它，
+否则"窗口没了"会变成一条穿过原子层的 traceback，而不是一个可处理的
+``ActionResult``。注意这是**异常路径兜底**，不是把异常当正常流程用。
 
 ## 效率约定
 
@@ -322,6 +328,25 @@ def _budget_left(started: float, timeout: float) -> bool:
     return perf_counter() - started < timeout
 
 
+def _capture_failure(exc: BaseException) -> ActionResult[Any]:
+    """把截图异常转成 ``error`` 结果。
+
+    跨帧组合子**必须**兜住 ``session.capture()``：它要返回 ``Frame``，没法用返回值
+    表达失败，所以窗口关闭、adb 掉线时它是**抛异常**的。而组合子的契约是
+    "失败一律给 ActionResult" —— 漏了这一步，异常会穿过组合子直接砸到流程层，
+    把"窗口没了"变成一条 traceback。
+
+    **不重试**：截图失败通常意味着目标已经消失或设备断开，重试只是把等待时间拖满。
+    要重试是执行层 ``StepPolicy`` 的事，原子层不掺和。
+    """
+    return ActionResult.error(f"截图失败，等待中止: {exc}", exc=exc)
+
+
+def _abort(failure: ActionResult[Any], started: float, frames: int) -> ActionResult[Any]:
+    """截图失败时中止等待：把已耗时和已轮询帧数补进结果里。"""
+    return failure.with_meta(frames=frames).with_elapsed(perf_counter() - started)
+
+
 def wait_any_of(
     session: Session,
     queries: Sequence[Query],
@@ -336,7 +361,8 @@ def wait_any_of(
 
     :return: 成功 ``success(value, frames=轮询帧数, frame=命中的那一帧)``；
              超时 ``timeout(message, last=最后一次结果, frames=N)``；
-             子查询报错立即 ``error`` 返回（重试不会让模板出现）。
+             子查询报错或**截图失败**立即 ``error`` 返回，不再重试
+             （模板不会自己出现，窗口也不会自己回来）。
     """
     items = list(queries)
     started = perf_counter()
@@ -344,7 +370,10 @@ def wait_any_of(
     last: ActionResult[Any] | None = None
 
     while True:
-        frame = session.capture()
+        try:
+            frame = session.capture()
+        except Exception as exc:  # 后端故障：窗口关闭 / 设备掉线
+            return _abort(_capture_failure(exc), started, frames)
         frames += 1
         last = find_any_of(frame, items, short_circuit=short_circuit)
 
@@ -389,7 +418,10 @@ def wait_all_of(
     last: ActionResult[Any] | None = None
 
     while True:
-        frame = session.capture()
+        try:
+            frame = session.capture()
+        except Exception as exc:  # 截图失败不重试，直接转成 error
+            return _abort(_capture_failure(exc), started, frames)
         frames += 1
         last = find_all_of(frame, items)
 
@@ -435,7 +467,10 @@ def wait_until(
     frames = 0
 
     while True:
-        frame = session.capture()
+        try:
+            frame = session.capture()
+        except Exception as exc:  # 截图失败不重试，直接转成 error
+            return _abort(_capture_failure(exc), started, frames)
         frames += 1
         try:
             matched = bool(predicate(frame))
@@ -504,7 +539,10 @@ def wait_stable(
     score = 0.0
 
     while True:
-        frame = session.capture_region(region)
+        try:
+            frame = session.capture_region(region)
+        except Exception as exc:  # 截图失败不重试，直接转成 error
+            return _abort(_capture_failure(exc), started, frames)
         frames += 1
         image = frame.to_numpy()
 
@@ -551,7 +589,10 @@ def wait_disappear(
     last: ActionResult[Any] | None = None
 
     while True:
-        frame = session.capture()
+        try:
+            frame = session.capture()
+        except Exception as exc:  # 截图失败不重试，直接转成 error
+            return _abort(_capture_failure(exc), started, frames)
         frames += 1
         last = _run_query(frame, query)
 
