@@ -9,6 +9,10 @@
 装了 `--extra ocr-rapid` 或 `--extra ocr-tesseract` 并改配置后才真正识字。
 平台后端：`--extra windows`（PC）/ `--extra android`（adb）。
 
+**跨帧组合子（32~36）与 `sleep`（49）都支持中止**：另一个线程调
+`session.request_stop()` 后，等待中的方法会在 **0.1ms** 内抛 `Cancelled`
+退出，而不是等满 timeout。详见 [architecture.md 决策 8](architecture.md)。
+
 ---
 
 ## L0 类型层 — `gamebot/types.py`

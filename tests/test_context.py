@@ -1,40 +1,113 @@
 """运行时上下文与假后端的测试。
 
-上下文是三个层共享的对象，它的行为（帧的新鲜度、可打断的 sleep、停止标志）
+上下文是三个层共享的对象，它的行为（帧的新鲜度、可中止的 sleep、中止信号）
 如果不对，上层会出现很难查的时序 bug。所以这里测得细一点。
+
+中止的**单一事实源是 session**，`RunContext` 只做转发 —— 所以这一组测试
+既测 session 上的原语，也测 `RunContext` 的转发确实通了。
 """
 
 from __future__ import annotations
 
+import threading
 import time
 
 import numpy as np
+import pytest
 
 from gamebot.atomic.backends.fake import FakeInputBackend, build_fake_backends
 from gamebot.atomic.session import BaseSession
-from gamebot.context import RunContext, StopFlag
+from gamebot.context import RunContext
+from gamebot.exceptions import Cancelled
 from gamebot.types import Point, Region
 
 
-class TestStopFlag:
-    def test_default_is_not_requested(self) -> None:
-        flag = StopFlag()
-        assert flag.requested is False
-        assert flag.reason == ""
+class TestStopSignal:
+    """中止信号（跑在 session 上，RunContext 转发）。"""
 
-    def test_request_records_reason(self) -> None:
-        flag = StopFlag()
-        flag.request("用户点了停止", now=5.0)
-        assert flag.requested is True
-        assert flag.reason == "用户点了停止"
-        assert flag.at == 5.0
+    def test_default_is_not_requested(self, session: BaseSession) -> None:
+        assert session.stop_requested is False
+        assert session.stop_reason == ""
 
-    def test_clear(self) -> None:
-        flag = StopFlag()
-        flag.request("x", now=1.0)
-        flag.clear()
-        assert flag.requested is False
-        assert flag.at == 0.0
+    def test_request_records_reason(self, session: BaseSession) -> None:
+        session.request_stop("用户点了停止")
+        assert session.stop_requested is True
+        assert session.stop_reason == "用户点了停止"
+
+    def test_request_is_idempotent_and_keeps_first_reason(self, session: BaseSession) -> None:
+        session.request_stop("第一次")
+        session.request_stop("第二次")
+        assert session.stop_reason == "第一次"
+
+    def test_request_without_reason_gets_a_default(self, session: BaseSession) -> None:
+        session.request_stop()
+        assert session.stop_requested is True
+        assert session.stop_reason
+
+    def test_clear(self, session: BaseSession) -> None:
+        session.request_stop("x")
+        session.clear_stop()
+        assert session.stop_requested is False
+        assert session.stop_reason == ""
+
+    def test_raise_if_stopped(self, session: BaseSession) -> None:
+        session.raise_if_stopped()  # 未请求时不应抛
+        session.request_stop("走开")
+        with pytest.raises(Cancelled) as excinfo:
+            session.raise_if_stopped()
+        assert excinfo.value.reason == "走开"
+
+    def test_cancelled_is_base_exception(self) -> None:
+        """必须继承 BaseException：否则会被到处存在的 `except Exception` 吞掉。"""
+        assert issubclass(Cancelled, BaseException)
+        assert not issubclass(Cancelled, Exception)
+
+    def test_sleep_wakes_immediately_on_stop(self, session: BaseSession) -> None:
+        session.request_stop("立刻停")
+        started = time.perf_counter()
+        with pytest.raises(Cancelled):
+            session.sleep(5.0)
+        assert time.perf_counter() - started < 0.5
+
+    def test_sleep_is_woken_from_another_thread(self, session: BaseSession) -> None:
+        """UI 线程点停止时，正在睡的等待方必须立刻醒 —— 这是"马上中止"的核心。"""
+        outcome: list[str] = []
+
+        def worker() -> None:
+            started = time.perf_counter()
+            try:
+                session.sleep(10.0)
+            except Cancelled:
+                outcome.append("cancelled")
+                outcome.append(f"{time.perf_counter() - started:.2f}")
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        time.sleep(0.15)
+        session.request_stop("外部中止")
+        thread.join(timeout=2.0)
+        assert not thread.is_alive(), "等待方没有被唤醒"
+        assert outcome[0] == "cancelled"
+        assert float(outcome[1]) < 1.0
+
+    def test_sleep_zero_still_checks(self, session: BaseSession) -> None:
+        session.request_stop("x")
+        with pytest.raises(Cancelled):
+            session.sleep(0)
+
+    def test_sleep_actually_waits(self, session: BaseSession) -> None:
+        started = time.perf_counter()
+        session.sleep(0.1)
+        assert time.perf_counter() - started >= 0.08
+
+    def test_stop_is_per_session(self) -> None:
+        from tests.conftest import FakeMatcher
+
+        first = BaseSession(build_fake_backends(), matcher=FakeMatcher())
+        second = BaseSession(build_fake_backends(), matcher=FakeMatcher())
+        first.request_stop("只停这个")
+        assert first.stop_requested is True
+        assert second.stop_requested is False
 
 
 class TestFrameLifecycle:
@@ -79,17 +152,33 @@ class TestFrameLifecycle:
 
 
 class TestStopHandling:
+    """RunContext 上的中止接口 —— 全部转发给 session。"""
+
     def test_request_stop(self, ctx: RunContext) -> None:
         assert ctx.stop_requested is False
         ctx.request_stop("测试停止")
         assert ctx.stop_requested is True
         assert ctx.stop_reason == "测试停止"
 
-    def test_sleep_returns_immediately_when_stopped(self, ctx: RunContext) -> None:
+    def test_forwarded_to_session(self, ctx: RunContext) -> None:
+        ctx.request_stop("转发")
+        assert ctx.session.stop_requested is True
+        assert ctx.session.stop_reason == "转发"
+
+    def test_sleep_raises_immediately_when_stopped(self, ctx: RunContext) -> None:
+        """中止是异常、不是"提前返回" —— 调用方必须知道这一觉没睡完。"""
         ctx.request_stop("立刻停")
         started = time.perf_counter()
-        ctx.sleep(5.0)
+        with pytest.raises(Cancelled) as excinfo:
+            ctx.sleep(5.0)
         assert time.perf_counter() - started < 0.5
+        assert excinfo.value.reason == "立刻停"
+
+    def test_raise_if_stopped_forwards(self, ctx: RunContext) -> None:
+        ctx.raise_if_stopped()
+        ctx.request_stop("走开")
+        with pytest.raises(Cancelled):
+            ctx.raise_if_stopped()
 
     def test_sleep_zero_is_noop(self, ctx: RunContext) -> None:
         ctx.sleep(0)

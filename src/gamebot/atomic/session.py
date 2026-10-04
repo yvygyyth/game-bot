@@ -20,11 +20,12 @@
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..exceptions import BackendUnavailable
+from ..exceptions import BackendUnavailable, Cancelled
 from ..types import ActionResult, Point, Region
 from ..utils.logging import get_logger
 from .backends.base import BackendBundle, InputBackend, ScreenBackend, WindowBackend
@@ -36,6 +37,9 @@ if TYPE_CHECKING:
 __all__ = ["BaseSession", "CoordinateMapper", "Session"]
 
 log = get_logger("atomic.session")
+
+# 懒建取消事件时的互斥，保证多线程首次访问只建一个
+_CANCEL_LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +120,15 @@ class Session(ABC):
 
     只有 3 个截图方法（``capture`` / ``capture_region`` / ``get_screen_size``），
     外加坐标系换算和输入通道 —— 这就是 L5 动作层所需要的全部。
+
+    另外提供**中止能力**（``request_stop`` / ``raise_if_stopped`` / ``sleep``）。
+    为什么挂在 Session 上而不是给每个方法加一个 ``signal`` 参数：
+    Session 是原子层**唯一**已经拿到手的上下文对象（等价于 Go 的 ``ctx``、
+    .NET 的 ``CancellationToken``、前端的 ``AbortSignal``），
+    所以"取消"不需要改任何方法签名，也不需要调用方记得往下传。
+
+    层级影响：L4 组合子只调 ``session.raise_if_stopped()`` /
+    ``session.sleep()``，**完全不需要知道 Cancelled 这个异常类型存在**。
     """
 
     # -- 截图（设计文档 L1 的 1~3 号方法）-------------------------------------
@@ -166,6 +179,88 @@ class Session(ABC):
         """输入后端。动作层通过它发事件。"""
         raise NotImplementedError
 
+    # -- 中止（可取消性）------------------------------------------------------
+    def _cancel_event(self) -> threading.Event:
+        """懒建、每实例一个的取消事件。
+
+        懒建是为了兼容自己写 ``__init__`` 而不调 ``super().__init__()`` 的子类；
+        走 ``self.__dict__`` 是为了兼容定义了 ``__slots__`` 的子类。
+        """
+        event = self.__dict__.get("_stop_event")
+        if event is None:
+            with _CANCEL_LOCK:
+                event = self.__dict__.get("_stop_event")
+                if event is None:
+                    event = threading.Event()
+                    self.__dict__["_stop_event"] = event
+        return event
+
+    @property
+    def stop_requested(self) -> bool:
+        """是否已请求中止。可以从别的线程读（UI 的停止按钮）。"""
+        return self._cancel_event().is_set()
+
+    @property
+    def stop_reason(self) -> str:
+        """中止原因。没请求过时是空串。"""
+        return str(self.__dict__.get("_stop_reason", ""))
+
+    def request_stop(self, reason: str = "") -> None:
+        """请求中止。**幂等，可从任意线程调用。**
+
+        只有第一次调用生效，之后的原因会被忽略 —— **第一个原因才是根因**，
+        后面的（看门狗超时、超预算）都是它的后果。报告里写"用户点了停止"
+        比写"超过总时长预算"有用得多。
+
+        ⚠️ 只设标志，**不会**关掉 session —— 那一刻可能正有一帧 ``capture()``
+        在飞。正确收尾顺序是::
+
+            session.request_stop("用户点了停止")   # 任意线程
+            工作线程自己退出（Cancelled 穿透到引擎）
+            session.close()                       # 最后才关
+
+        用 ``threading.Event`` 而不是 bool：它跨线程安全，并且能**立刻唤醒**
+        正在 ``sleep`` 的等待方。
+        """
+        event = self._cancel_event()
+        # 加锁保证"检查 + 写入 + set"是一个原子操作，多个线程同时请求时只有一个赢
+        with _CANCEL_LOCK:
+            if event.is_set():
+                return
+            self.__dict__["_stop_reason"] = reason or "已请求中止"
+            event.set()
+
+    def clear_stop(self) -> None:
+        """清空中止标志。新一轮运行开始前调用。"""
+        self.__dict__["_stop_reason"] = ""
+        self._cancel_event().clear()
+
+    def raise_if_stopped(self) -> None:
+        """已请求中止就抛 ``Cancelled``。
+
+        原子层的每个阻塞循环都在检查点调用它 —— 检查得越密，响应越快。
+        典型检查点：循环开头、每次抓帧之前。
+
+        :raises Cancelled: 已请求中止。
+        """
+        if self.stop_requested:
+            raise Cancelled(self.stop_reason or "已请求中止")
+
+    def sleep(self, seconds: float) -> None:
+        """**可被中止立刻唤醒**的等待 —— ``time.sleep`` 的可取消版本。
+
+        ``Event.wait()`` 既睡眠又能被 ``request_stop()`` 立即唤醒，
+        比"切成 50ms 小片轮询标志"既精确又不空转。
+
+        :raises Cancelled: 等待期间被中止（醒来立刻抛，不会等满）。
+        """
+        if seconds <= 0:
+            # 即使不睡，也走一次检查：调用方把它当检查点用
+            self.raise_if_stopped()
+            return
+        if self._cancel_event().wait(seconds):
+            raise Cancelled(self.stop_reason or "已请求中止")
+
     # -- 生命周期 -------------------------------------------------------------
     @abstractmethod
     def close(self) -> None:
@@ -200,6 +295,8 @@ class BaseSession(Session):
         self._reader: TextReader = reader or UnavailableTextReader()
         self._default_confidence = default_confidence
         self._closed = False
+        # 提前建好取消事件，省掉 _cancel_event() 里的锁路径
+        self.__dict__["_stop_event"] = threading.Event()
         self._mapper = CoordinateMapper.detect(self._backends.screen.screen_size(), logic_size)
         log.debug("Session 就绪: %s, mapper=%s", self._backends, self._mapper)
 

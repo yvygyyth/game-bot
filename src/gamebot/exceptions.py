@@ -6,6 +6,9 @@
   因为失败是常态（找不到图、超时），异常太贵也太吵。
 * 只有"装配期 / 不可恢复"的问题才抛异常：配置写错、后端库没装、
   模板目录不存在、流程定义自相矛盾……这些应该在启动时就炸，而不是跑一半才炸。
+
+**唯一的例外是 :class:`Cancelled`** —— 它不表示"失败"，表示"别再继续了"。
+返回值表达"这次尝试的结果"，异常表达"中止"，这个分界见它的 docstring。
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 __all__ = [
     "BackendError",
     "BackendUnavailable",
+    "Cancelled",
     "ConfigError",
     "FlowError",
     "GameBotError",
@@ -24,6 +28,34 @@ __all__ = [
 
 class GameBotError(Exception):
     """本框架所有异常的基类。"""
+
+
+class Cancelled(BaseException):
+    """中止请求。**不是错误，是控制流。**
+
+    中断长等待（``wait_any_of`` / ``wait_all_of`` / ``wait_until`` /
+    ``wait_stable`` / ``wait_disappear`` / ``Session.sleep``）靠它。
+
+    ⚠️ 刻意继承 ``BaseException`` 而不是 ``Exception``：
+
+    框架里到处是 ``except Exception as exc: return ActionResult.error(...)``，
+    用途是把后端故障（模板缺失、adb 掉线）转成结果。中止**绝不能**被它们吞掉 ——
+    否则"点了停止没反应"会变成最难查的一类 bug。
+    ``KeyboardInterrupt`` / ``SystemExit`` 出于同样的理由也是 ``BaseException``。
+
+    ⚠️ 不要写裸 ``except:``。它会连中止一起吞掉。
+
+    传播途中 ``finally`` 照常执行，这一点很关键：``hotkey`` 的按键释放、
+    ``drag`` 的 ``mouseUp`` 不会被跳过 —— 中止不会留下卡住的 Ctrl
+    或被拖住的整个桌面。
+
+    它**不进任何重试逻辑**：``RetryPolicy.retry_on`` 枚举的是
+    ``ActionStatus``，而中止是异常，天然不参与重试。
+    """
+
+    def __init__(self, reason: str = "已请求中止") -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 # --------------------------------------------------------------------------- #

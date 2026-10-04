@@ -138,6 +138,68 @@ Windows（mss + pydirectinput）和 Android（adb）的差异被压到
 **每步记录"看到什么 + 做了什么 + 结果如何"，攒够了就是模仿学习的样本。**
 第一天就让格式带上帧路径、坐标、置信度，比事后补要便宜得多。
 
+### 8. 中止（取消）挂在 Session 上，用异常传播
+
+`wait_any_of(timeout=60)` 卡在那里时点"停止"，**必须立刻响应**，否则用户会强杀进程 ——
+而强杀会让 `finally` 不执行，于是 `hotkey` 不松键、`drag` 不做 `mouseUp`，
+留下一个卡住的 Ctrl 或者被拖住的整个桌面。
+
+**三条路里只有一条同时满足"立即"和"能收尾"**：
+
+| 做法 | 立即？ | 能收尾？ |
+|---|---|---|
+| 协作式检查（本项目） | ✅ 0.1ms | ✅ `finally` 照常执行 |
+| 跑在线程里直接弃掉 | ✅ | ❌ Python 没有安全的 `Thread.kill`，`finally` 不跑 |
+| kill 子进程 | ✅ | ❌ kill 就是 kill，同样不跑 `finally` |
+
+**状态放在 `Session` 上，而不是给方法加 `signal` 参数。** 因为 `Session`
+是原子层**唯一**已经拿到手的上下文对象 —— 等价于 Go 的 `ctx`、
+.NET 的 `CancellationToken`、前端的 `AbortSignal`，只不过"传参"这件事
+早就做完了。于是：
+
+* **零签名改动**：49 个原子方法的对外契约一行没变；
+* **没有"忘了传"这个失败模式**：不需要调用方记得往下递；
+* **L4 连异常类型都不用知道**：只调 `session.raise_if_stopped()` 和
+  `session.sleep()`，中止机制整个封在 L1 里。
+
+**传播靠 `Cancelled(BaseException)`，不靠返回值。** 返回值表达"这次尝试的结果"，
+异常表达"别再继续了"。继承 `BaseException` 是关键 —— 框架里到处是
+`except Exception: return ActionResult.error(...)`（用来兜后端故障），
+中止绝不能被它们吞掉，否则"点了停止没反应"会变成最难查的一类 bug。
+`KeyboardInterrupt` / `SystemExit` 出于同样的理由也是 `BaseException`。
+
+实现细节：`threading.Event` 而不是 bool，因为 `Event.wait()` 能被 `set()`
+**立刻唤醒** —— 既睡眠又无需分片轮询。实测响应 **0.1ms**。
+
+⛔ **中止绝不能被重试。** `RetryPolicy.retry_on` 枚举的是 `ActionStatus`，
+而中止是异常，天然不参与 —— 但这个性质很脆弱：一旦有人把重试条件改写成
+"非成功即可重试"，中止就会变成死循环。所以 `policy.py` 里专门写了警告注释。
+
+实测（另一个线程扮演 UI 停止按钮）：
+
+```
+wait_any_of(60s)       Cancelled(测试中止)   中止响应=0.1ms
+wait_all_of(60s)       Cancelled(测试中止)   中止响应=0.1ms
+wait_until(60s)        Cancelled(测试中止)   中止响应=0.1ms
+wait_stable(60s)       Cancelled(测试中止)   中止响应=0.1ms
+wait_disappear(60s)    Cancelled(测试中止)   中止响应=0.1ms
+actions.sleep(30)      Cancelled(测试中止)   中止响应=0.1ms
+```
+
+**改不动的部分**（诚实记下来）：`adb exec-out screencap` 是子进程调用，
+上限是 `AdbClient.timeout`（默认 20s）；OCR 推理中途也无法打断。
+Windows 上单次抓屏是毫秒级，所以现实上限 ≈ 一次抓帧。
+
+**收尾顺序**（UI 必须遵守）：
+
+```
+session.request_stop("用户点了停止")   # 任意线程，只设标志
+工作线程自己退出（Cancelled 穿透到 FlowEngine）
+session.close()                       # 最后才关
+```
+
+⚠️ **不要在另一个线程里直接 `close()`** —— 那一刻可能正有一帧 `capture()` 在飞。
+
 ## 四、一次 tick 的完整数据流
 
 ```

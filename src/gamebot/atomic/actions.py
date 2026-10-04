@@ -465,15 +465,19 @@ def hotkey(session: Session, keys: list[str]) -> ActionResult[list[str]]:
 # --------------------------------------------------------------------------- #
 # 等待
 # --------------------------------------------------------------------------- #
-def sleep(seconds: float) -> ActionResult[float]:
+def sleep(seconds: float, session: Session | None = None) -> ActionResult[float]:
     """固定等待。
 
-    返回 ``success(value=实际等待秒数)``，让执行层能把它算进时间预算。
-    ``seconds <= 0`` 时立即返回（不报错）。
+    :param session: 给了就走 ``session.sleep()`` —— **可被中止立刻唤醒**；
+        没给就是最朴素的 ``time.sleep``（不知道上下文的场合用）。
+        强烈建议在有 session 的地方都传进来，否则点了停止要等满这一觉。
 
-    ⚠️ 需要"可被停止请求打断"的等待请用 ``RunContext.sleep``；
-    这是给不知道上下文的地方（比如纯脚本 / 测试）用的最朴素版本。
+    :return: ``success(value=请求的秒数, elapsed=实际耗时)``。
+    :raises Cancelled: 等待期间被中止（只在传了 session 时可能发生）。
     """
-    if seconds > 0:
+    started = perf_counter()
+    if session is not None:
+        session.sleep(seconds)
+    elif seconds > 0:
         time.sleep(seconds)
-    return ActionResult.success(seconds)
+    return ActionResult.success(seconds, elapsed=perf_counter() - started)

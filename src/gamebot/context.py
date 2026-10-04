@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,27 +35,7 @@ if TYPE_CHECKING:
 
 log = get_logger("context")
 
-__all__ = ["RunContext", "StopFlag"]
-
-
-@dataclass(slots=True)
-class StopFlag:
-    """停止请求的载体。用独立对象而不是 bool，是为了让执行层 / hooks
-    都能拿到它并写入（GUI 的"停止"按钮、信号处理器、超时看门狗）。"""
-
-    requested: bool = False
-    reason: str = ""
-    at: float = 0.0
-
-    def request(self, reason: str = "", *, now: float = 0.0) -> None:
-        self.requested = True
-        self.reason = reason
-        self.at = now or time.perf_counter()
-
-    def clear(self) -> None:
-        self.requested = False
-        self.reason = ""
-        self.at = 0.0
+__all__ = ["RunContext"]
 
 
 class RunContext:
@@ -65,6 +44,10 @@ class RunContext:
     :param session: L1 截图层实例。
     :param config: 应用配置。
     :param frame_ttl: 帧的新鲜度上限（秒）。超过就自动重截。
+
+    **中止的单一事实源是 ``session``**，不是这里。本类只做转发 ——
+    因为原子层的等待循环拿不到 ``RunContext``，只拿得到 ``session``；
+    两处各存一份标志迟早会不同步（UI 停了、原子层还在等）。
     """
 
     def __init__(
@@ -84,7 +67,6 @@ class RunContext:
         self.executor = executor
         self.states = states or StateStore()
         self.blackboard = blackboard or Blackboard()
-        self.stop_flag = StopFlag()
         self._clock = clock or time.perf_counter
         self._frame: Frame | None = None
         self._frame_at: float = 0.0
@@ -98,19 +80,14 @@ class RunContext:
         return self._clock()
 
     def sleep(self, seconds: float) -> None:
-        """可被停止请求打断的等待。
+        """可被中止打断的等待。直接转发给 ``session.sleep()``。
 
-        用 ``min(0.05, seconds)`` 分片，是为了让"停止"按钮最多 50ms 内生效 ——
-        否则一个 ``sleep(10)`` 会让用户以为程序卡死了。
+        实现是 ``Event.wait()``：既睡眠又能被 ``request_stop()`` 立刻唤醒，
+        比"切成 50ms 小片轮询标志"既精确又不空转。
+
+        :raises Cancelled: 等待期间被中止。
         """
-        if seconds <= 0:
-            return
-        deadline = self.now() + seconds
-        while True:
-            remaining = deadline - self.now()
-            if remaining <= 0 or self.stop_flag.requested:
-                return
-            time.sleep(min(0.05, remaining))
+        self.session.sleep(seconds)
 
     # ------------------------------------------------------------------ #
     # 帧
@@ -154,19 +131,26 @@ class RunContext:
         self._frame_at = 0.0
 
     # ------------------------------------------------------------------ #
-    # 停止
+    # 中止（全部转发给 session —— 单一事实源，见类 docstring）
     # ------------------------------------------------------------------ #
     @property
     def stop_requested(self) -> bool:
-        return self.stop_flag.requested
+        return self.session.stop_requested
 
     @property
     def stop_reason(self) -> str:
-        return self.stop_flag.reason
+        return self.session.stop_reason
 
     def request_stop(self, reason: str = "") -> None:
-        """请求停止（执行层在 ``ErrorMode.STOP_FLOW`` 时调它）。"""
-        self.stop_flag.request(reason, now=self.now())
+        """请求中止。**可以从任意线程调**（UI 的停止按钮、超时看门狗）。
+
+        执行层在 ``ErrorMode.STOP_FLOW`` 时也调它。
+        """
+        self.session.request_stop(reason)
+
+    def raise_if_stopped(self) -> None:
+        """已请求中止就抛 ``Cancelled``。转发给 session。"""
+        self.session.raise_if_stopped()
 
     # ------------------------------------------------------------------ #
     # 便捷查询（给 hooks / 临时逻辑用，步骤实现里请直接调原子层）
@@ -205,10 +189,10 @@ class RunContext:
     # 生命周期
     # ------------------------------------------------------------------ #
     def reset(self) -> None:
-        """清空运行期状态，准备下一次运行。"""
+        """清空运行期状态，准备下一次运行（含清掉中止标志）。"""
         self.states.reset()
         self.blackboard.clear()
-        self.stop_flag.clear()
+        self.session.clear_stop()
         self.invalidate_frame()
         self.capture_count = 0
 

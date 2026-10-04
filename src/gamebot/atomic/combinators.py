@@ -47,12 +47,11 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Sequence
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from ..types import ActionResult, ActionStatus
+from ..types import ActionResult, ActionStatus, Region
 from ..utils.logging import get_logger
 from ..utils.timing import humanize
 
@@ -324,10 +323,6 @@ def count_hits(
 # --------------------------------------------------------------------------- #
 # 跨帧组合子（自己循环截图）
 # --------------------------------------------------------------------------- #
-def _budget_left(started: float, timeout: float) -> bool:
-    return perf_counter() - started < timeout
-
-
 def _capture_failure(exc: BaseException) -> ActionResult[Any]:
     """把截图异常转成 ``error`` 结果。
 
@@ -342,9 +337,55 @@ def _capture_failure(exc: BaseException) -> ActionResult[Any]:
     return ActionResult.error(f"截图失败，等待中止: {exc}", exc=exc)
 
 
-def _abort(failure: ActionResult[Any], started: float, frames: int) -> ActionResult[Any]:
-    """截图失败时中止等待：把已耗时和已轮询帧数补进结果里。"""
-    return failure.with_meta(frames=frames).with_elapsed(perf_counter() - started)
+def _poll(
+    session: Session,
+    *,
+    timeout: float,
+    interval: float,
+    step: Callable[[Frame], ActionResult[Any] | None],
+    on_timeout: Callable[[int], ActionResult[Any]],
+    region: Region | None = None,
+) -> ActionResult[Any]:
+    """跨帧轮询骨架 —— 5 个 ``wait_*`` 共用。
+
+    把所有"容易在 5 个地方各写漏一次"的事收在一处：
+
+    * ``session.raise_if_stopped()`` —— 响应中止（毫秒级，不必等满 timeout）
+    * 兜住 ``capture()`` 的异常 —— 转成 ``error`` 而不是让 traceback 穿出去
+    * 计时与超时判定
+    * ``session.sleep(interval)`` —— 可被中止立刻唤醒的间隔等待
+
+    :param step: 每帧调一次。返回非 None 表示"可以结束了"，直接作为结果返回；
+                 返回 None 表示继续轮询。跨帧状态（如上一次的图、连击计数）
+                 由调用方用闭包持有 —— 骨架不需要知道。
+    :param on_timeout: 超时时调用，参数是已轮询帧数，返回 timeout 结果。
+                       ``frames`` / ``elapsed`` 由骨架统一补上。
+    :param region: 给了就抓该区域（``wait_stable`` 用），否则抓整帧。
+    """
+    started = perf_counter()
+    frames = 0
+
+    while True:
+        session.raise_if_stopped()
+
+        try:
+            frame = session.capture() if region is None else session.capture_region(region)
+        except Exception as exc:  # 截图失败不重试，直接转成 error
+            return _capture_failure(exc).with_meta(frames=frames).with_elapsed(
+                perf_counter() - started
+            )
+        frames += 1
+
+        outcome = step(frame)
+        if outcome is not None:
+            return outcome.with_meta(frames=frames).with_elapsed(perf_counter() - started)
+
+        if perf_counter() - started >= timeout:
+            return on_timeout(frames).with_meta(frames=frames).with_elapsed(
+                perf_counter() - started
+            )
+
+        session.sleep(interval)
 
 
 def wait_any_of(
@@ -363,42 +404,27 @@ def wait_any_of(
              超时 ``timeout(message, last=最后一次结果, frames=N)``；
              子查询报错或**截图失败**立即 ``error`` 返回，不再重试
              （模板不会自己出现，窗口也不会自己回来）。
+    :raises Cancelled: 收到中止请求时**立即**抛出，不会等满 timeout。
     """
     items = list(queries)
-    started = perf_counter()
-    frames = 0
     last: ActionResult[Any] | None = None
 
-    while True:
-        try:
-            frame = session.capture()
-        except Exception as exc:  # 后端故障：窗口关闭 / 设备掉线
-            return _abort(_capture_failure(exc), started, frames)
-        frames += 1
+    def step(frame: Frame) -> ActionResult[Any] | None:
+        nonlocal last
         last = find_any_of(frame, items, short_circuit=short_circuit)
-
         if last.ok:
-            return ActionResult.success(
-                last.value,
-                elapsed=perf_counter() - started,
-                frames=frames,
-                frame=frame,
-                result=last,
-            )
+            return ActionResult.success(last.value, frame=frame, result=last)
         if last.status is ActionStatus.ERROR:
-            return ActionResult.error(
-                last.message, elapsed=perf_counter() - started, frames=frames, last=last
-            )
-        if not _budget_left(started, timeout):
-            break
-        time.sleep(interval)
+            return last  # 子查询报错原样透传（frames / elapsed 由 _poll 补）
+        return None
 
-    return ActionResult.timeout(
-        f"等待 {len(items)} 个条件命中超时（{humanize(timeout)}，轮询 {frames} 次）",
-        elapsed=perf_counter() - started,
-        frames=frames,
-        last=last,
-    )
+    def on_timeout(frames: int) -> ActionResult[Any]:
+        return ActionResult.timeout(
+            f"等待 {len(items)} 个条件命中超时（{humanize(timeout)}，轮询 {frames} 次）",
+            last=last,
+        )
+
+    return _poll(session, timeout=timeout, interval=interval, step=step, on_timeout=on_timeout)
 
 
 def wait_all_of(
@@ -411,42 +437,28 @@ def wait_all_of(
 
     **重要语义**：全部命中必须在**同一帧**里成立。跨帧"先看到 A、再看到 B"
     不算数 —— 否则会漏掉"加载动画一闪而过"这类竞态。
+
+    :raises Cancelled: 收到中止请求时立即抛出。
     """
     items = list(queries)
-    started = perf_counter()
-    frames = 0
     last: ActionResult[Any] | None = None
 
-    while True:
-        try:
-            frame = session.capture()
-        except Exception as exc:  # 截图失败不重试，直接转成 error
-            return _abort(_capture_failure(exc), started, frames)
-        frames += 1
+    def step(frame: Frame) -> ActionResult[Any] | None:
+        nonlocal last
         last = find_all_of(frame, items)
-
         if last.ok:
-            return ActionResult.success(
-                last.value,
-                elapsed=perf_counter() - started,
-                frames=frames,
-                frame=frame,
-                result=last,
-            )
+            return ActionResult.success(last.value, frame=frame, result=last)
         if last.status is ActionStatus.ERROR:
-            return ActionResult.error(
-                last.message, elapsed=perf_counter() - started, frames=frames, last=last
-            )
-        if not _budget_left(started, timeout):
-            break
-        time.sleep(interval)
+            return last
+        return None
 
-    return ActionResult.timeout(
-        f"等待 {len(items)} 个条件全部命中超时（{humanize(timeout)}，轮询 {frames} 次）",
-        elapsed=perf_counter() - started,
-        frames=frames,
-        last=last,
-    )
+    def on_timeout(frames: int) -> ActionResult[Any]:
+        return ActionResult.timeout(
+            f"等待 {len(items)} 个条件全部命中超时（{humanize(timeout)}，轮询 {frames} 次）",
+            last=last,
+        )
+
+    return _poll(session, timeout=timeout, interval=interval, step=step, on_timeout=on_timeout)
 
 
 def wait_until(
@@ -462,37 +474,22 @@ def wait_until(
 
     :return: 成功时 ``success(value=命中的那帧)`` —— 把帧交出去，
              调用方可以继续在同一帧上做后续判断，避免时序漂移。
+    :raises Cancelled: 收到中止请求时立即抛出。
     """
-    started = perf_counter()
-    frames = 0
 
-    while True:
-        try:
-            frame = session.capture()
-        except Exception as exc:  # 截图失败不重试，直接转成 error
-            return _abort(_capture_failure(exc), started, frames)
-        frames += 1
+    def step(frame: Frame) -> ActionResult[Any] | None:
         try:
             matched = bool(predicate(frame))
-        except Exception as exc:
-            return ActionResult.error(
-                f"谓词执行异常: {exc}",
-                exc=exc,
-                elapsed=perf_counter() - started,
-                frames=frames,
-            )
+        except Exception as exc:  # 谓词的 bug 不该被当成"条件未成立"而静默等超时
+            return ActionResult.error(f"谓词执行异常: {exc}", exc=exc)
+        return ActionResult.success(frame) if matched else None
 
-        if matched:
-            return ActionResult.success(frame, elapsed=perf_counter() - started, frames=frames)
-        if not _budget_left(started, timeout):
-            break
-        time.sleep(interval)
+    def on_timeout(frames: int) -> ActionResult[Any]:
+        return ActionResult.timeout(
+            f"等待条件成立超时（{humanize(timeout)}，轮询 {frames} 次）"
+        )
 
-    return ActionResult.timeout(
-        f"等待条件成立超时（{humanize(timeout)}，轮询 {frames} 次）",
-        elapsed=perf_counter() - started,
-        frames=frames,
-    )
+    return _poll(session, timeout=timeout, interval=interval, step=step, on_timeout=on_timeout)
 
 
 def _similarity(previous: Any, current: Any) -> float:
@@ -530,45 +527,39 @@ def wait_stable(
         内部会按至少 2 处理，即第 ``stable_frames`` 帧返回。
 
     :return: 成功时返回"确认稳定"的那一帧（可直接复用做查询）。
+    :raises Cancelled: 收到中止请求时立即抛出。
     """
-    started = perf_counter()
+    needed = max(2, stable_frames)
     previous: Any = None
     streak = 0
-    frames = 0
-    needed = max(2, stable_frames)
     score = 0.0
 
-    while True:
-        try:
-            frame = session.capture_region(region)
-        except Exception as exc:  # 截图失败不重试，直接转成 error
-            return _abort(_capture_failure(exc), started, frames)
-        frames += 1
+    def step(frame: Frame) -> ActionResult[Any] | None:
+        nonlocal previous, streak, score
         image = frame.to_numpy()
 
         if previous is not None:
             score = _similarity(previous, image)
             streak = streak + 1 if score >= threshold else 0
             if streak >= needed - 1:
-                return ActionResult.success(
-                    frame,
-                    elapsed=perf_counter() - started,
-                    frames=frames,
-                    score=score,
-                    stable_frames=needed,
-                )
+                return ActionResult.success(frame, score=score, stable_frames=needed)
         previous = image
+        return None
 
-        if not _budget_left(started, timeout):
-            break
-        time.sleep(interval)
+    def on_timeout(frames: int) -> ActionResult[Any]:
+        return ActionResult.timeout(
+            f"等待画面稳定超时（{humanize(timeout)}，轮询 {frames} 次，"
+            f"连续稳定 {streak + 1}/{needed} 帧）",
+            streak=streak,
+        )
 
-    return ActionResult.timeout(
-        f"等待画面稳定超时（{humanize(timeout)}，轮询 {frames} 次，"
-        f"连续稳定 {streak + 1}/{needed} 帧）",
-        elapsed=perf_counter() - started,
-        frames=frames,
-        streak=streak,
+    return _poll(
+        session,
+        timeout=timeout,
+        interval=interval,
+        step=step,
+        on_timeout=on_timeout,
+        region=region,
     )
 
 
@@ -583,34 +574,23 @@ def wait_disappear(
     用途：等 loading 转圈消失、等弹窗关闭。
 
     :return: 成功时返回"确认消失"的那一帧。
+    :raises Cancelled: 收到中止请求时立即抛出。
     """
-    started = perf_counter()
-    frames = 0
     last: ActionResult[Any] | None = None
 
-    while True:
-        try:
-            frame = session.capture()
-        except Exception as exc:  # 截图失败不重试，直接转成 error
-            return _abort(_capture_failure(exc), started, frames)
-        frames += 1
+    def step(frame: Frame) -> ActionResult[Any] | None:
+        nonlocal last
         last = _run_query(frame, query)
-
         if last.status is ActionStatus.ERROR:
-            return ActionResult.error(
-                last.message, elapsed=perf_counter() - started, frames=frames, last=last
-            )
+            return last
         if not last.ok:
-            return ActionResult.success(
-                frame, elapsed=perf_counter() - started, frames=frames, last=last
-            )
-        if not _budget_left(started, timeout):
-            break
-        time.sleep(interval)
+            return ActionResult.success(frame, last=last)
+        return None
 
-    return ActionResult.timeout(
-        f"等待目标消失超时（{humanize(timeout)}，轮询 {frames} 次，仍然可见）",
-        elapsed=perf_counter() - started,
-        frames=frames,
-        last=last,
-    )
+    def on_timeout(frames: int) -> ActionResult[Any]:
+        return ActionResult.timeout(
+            f"等待目标消失超时（{humanize(timeout)}，轮询 {frames} 次，仍然可见）",
+            last=last,
+        )
+
+    return _poll(session, timeout=timeout, interval=interval, step=step, on_timeout=on_timeout)

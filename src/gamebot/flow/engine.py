@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ..exceptions import Cancelled
 from ..state.definition import StateId
 from ..state.detector import StateDetector
 from ..state.snapshot import StateChange
@@ -248,6 +249,10 @@ class FlowEngine:
                     self.ctx.sleep(self._tick_interval())
         except KeyboardInterrupt:  # pragma: no cover - 人工中断
             self.stop(StopReason.USER, "用户中断 (Ctrl+C)")
+        except Cancelled as cancelled:
+            # 中止不是错误：报告里必须写成"用户/外部请求停止"，
+            # 否则一次正常的中止会被记成 ERROR，看报告的人会以为脚本崩了。
+            self.stop(StopReason.USER, cancelled.reason)
         except Exception as exc:
             log.exception("流程异常终止")
             self.report.errors.append(f"{type(exc).__name__}: {exc}")
