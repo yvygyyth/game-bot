@@ -36,15 +36,19 @@ while True:
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ 流程层 flow/            "接下来做什么"                            │
-│   FlowDefinition / FlowNode / Transition / FlowMachine / Engine   │
-│   · 状态机 + 主循环 + 节奏与预算控制                              │
+│   Scenario = PageTree + Graph + EngineOptions                     │
+│   Node / Edge / Graph（蓝图）/ GraphCursor（运行游标）/ Engine     │
+│   · 有向图 + 主循环 + 节奏与预算控制                              │
 │   · 不认图、不点鼠标                                              │
 └───────────────────────────┬──────────────────────────────────────┘
                             │ 依赖
 ┌───────────────────────────▼──────────────────────────────────────┐
-│ 状态层 state/           "现在是什么状态"                          │
-│   StateDefinition / StateDetector / StateStore / Blackboard       │
-│   · 识别 = 一组 Query 的组合，带优先级与连续帧确认                 │
+│ 状态层 state/           "我现在在哪个页面"                        │
+│   page.py    Page / PageTree / PageMatch（单帧的纯匹配）          │
+│   tracker.py PageTracker / PageState / PageChange（跨帧持续性）    │
+│   store.py   Blackboard（业务共享数据）                           │
+│   · 页面按模块组成树，子页面继承父页面的 ROI                       │
+│   · 叠加层（弹窗）和主页面**同时成立**                            │
 │   · 认不出来是常态，有显式策略                                    │
 │   · 不做决定                                                      │
 └───────────────────────────┬──────────────────────────────────────┘
@@ -105,16 +109,26 @@ while True:
 同时帧有 TTL（默认 `2 × tick_interval`）：卡在某个界面 30 秒后，
 一帧旧图会骗过所有查询。TTL 到期自动重截，不需要人工干预。
 
-### 4. "未知状态"是一等公民
+### 4. "认不出来"是一等公民
 
-认不出状态不是异常，是最常见的情况（过场动画、加载、切场景）。
-所以：
+认不出页面不是异常，是最常见的情况（过场动画、加载、切场景）。所以：
 
-- `detect()` 即使什么都没认出来也返回 `success`，value 是 `UNKNOWN_STATE` 快照；
+- `PageTree.locate()` 即使什么都没认出来也返回 `success`，
+  value 是 `PageMatch(id=UNKNOWN_PAGE)`；
 - `unknown_grace` 给一段宽容期，期间只等不动作；
 - 之后按 `on_unknown` 策略走（`wait` / `reload_tick` / `recovery` / `stop`）。
 
 没有这套东西，脚本会在每次场景切换时误判并开始乱点。
+
+### 4b. 页面是树，流程是图 —— 两者不能合并
+
+游戏界面分模块，所以"我在哪"是棵树；但"接下来做什么"是带环的有向图
+（`结算 → 首页` 这种跨分支跳回，树里没有这条边）。反过来，图的层级剪枝
+和 ROI 继承也是树独有的。
+
+**树管空间、图管时间**，唯一的接口是 `Node.page`：节点声明"我该在哪个页面上"，
+实测不符就**一步动作都不做**。详见
+[state-and-flow.md](state-and-flow.md)。
 
 ### 5. 平台差异收敛在后端
 
@@ -207,29 +221,36 @@ FlowEngine.tick()
   │
   ├─① ctx.frame()                    # 拿帧（TTL 内复用，否则重截）
   │
-  ├─② StateDetector.detect(frame)    # 状态层
-  │     ├─ 按 priority 降序遍历 StateDefinition
-  │     ├─ 先求 exclude（否决），再求 queries（默认 AND）
-  │     ├─ 子结果置信度取均值
-  │     └─ 连续命中计数（min_stable_frames）
-  │     -> StateSnapshot
+  ├─② PageTree.locate(frame, hint)   # 状态层：单帧、纯匹配
+  │     ├─ 沿 hint 的路径逐层确认，不成立就退回最近的祖先
+  │     │  （hint 只影响尝试顺序，不影响正确性）
+  │     ├─ 每层在 effective_roi 算出的区域里跑 queries（默认 AND）
+  │     ├─ 同级按 priority 降序试
+  │     ├─ 走到走不动为止，最深命中者 = 当前页面
+  │     └─ 再扫叠加层（OVERLAY 子节点 + 全局弹窗）
+  │     -> PageMatch（一个主页面 + 若干叠加层）
   │
-  ├─③ StateStore.update(snapshot)    # 记录 + 判断是否切换
-  │     -> StateChange | None
+  ├─③ PageTracker.update(match)      # 跟踪层：连续几帧 / 从何时起
+  │     -> PageChange | None（含"只换了叠加层"的情况）
   │
-  ├─④ 终态判断（stop_states / terminal）
+  ├─④ 终态判断（stop_pages / Page.terminal）
   │
-  ├─⑤ FlowMachine.select(...)        # 流程层：挑转移
-  │     ├─ candidates = transitions_from(current)，按 priority 降序
-  │     ├─ 检查 max_times / cooldown
-  │     ├─ 求 guard（在当前帧上跑 Query）
-  │     └─ 挑到 -> apply() -> on_enter 子步骤
-  │     没挑到 -> 继续做当前节点的事（正常分支）
+  ├─⑤ 未知页面处理（宽容期内只等）
   │
-  ├─⑥ Executor.run_many(node.steps)  # 执行层
-  │     └─ 每个 Step：precondition/skip_if -> 重试循环 -> on_error -> journal
+  ├─⑥ 位置对齐                       # ★ 安全闸
+  │     实测页面 == 当前节点声明的 page?
+  │       否 -> graph.node_for_page(实测页面) 跳过去
+  │             没人认领 -> 什么都不做
   │
-  └─⑦ 检查预算（max_runtime / max_ticks）-> ctx.sleep(tick_interval)
+  ├─⑦ GraphCursor.should_run(ctx)    # 确认进入 + 位置对 + 未超次数 + 冷却过
+  │     └─ Executor.run_many(node.steps)   # 执行层
+  │          每个 Step：precondition/skip_if -> 重试 -> on_error -> journal
+  │
+  ├─⑧ GraphCursor.step(ctx)          # 流程层：条件满足就换目标
+  │     -> Decision（含"为什么没走这条边"的痕迹）
+  │     没挑到 -> 原地不动（正常分支，不是失败）
+  │
+  └─⑨ 检查预算（max_runtime / max_ticks）-> ctx.sleep(tick_interval)
 ```
 
 ## 五、调试方法论（重要）

@@ -87,19 +87,26 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    """校验配置 + 流程 + 模板存在性。CI 里跑这个能挡住大部分低级错误。"""
+    """校验配置 + 脚本定义 + 模板存在性。CI 里跑这个能挡住大部分低级错误。"""
     from .bootstrap import check_templates
     from .config.loader import load_config
-    from .flow.loader import load_flow
+    from .flow.loader import load_scenario
 
     config = load_config(args.config)
-    definition = load_flow(config.paths.resolve(config.flow_file))
-    definition.validate()
+    scenario = load_scenario(config.paths.resolve(config.flow_file))
+    scenario.validate()
     print(f"✓ 配置 OK: {args.config}")
-    print(f"✓ 流程 OK: {definition.name} ({len(definition.states)} 状态 / "
-          f"{len(definition.transitions)} 转移)")
+    print(
+        f"✓ 脚本 OK: {scenario.name} "
+        f"({len(scenario.tree)} 页面 / {len(scenario.graph)} 节点 / "
+        f"{len(scenario.graph.edges)} 边)"
+    )
 
-    missing = check_templates(config, definition)
+    unclaimed = scenario.unclaimed_pages()
+    if unclaimed:
+        print(f"· 以下页面没有节点认领（只观察不动作）: {', '.join(unclaimed)}")
+
+    missing = check_templates(config, scenario)
     if missing:
         print(f"✗ 缺失 {len(missing)} 个模板文件:")
         for name in missing:
@@ -164,8 +171,8 @@ def cmd_grab(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """跑流程。"""
-    from .bootstrap import run_flow
+    """跑脚本。"""
+    from .bootstrap import run_scenario
 
     overrides: dict[str, object] = {}
     if args.dry_run:
@@ -173,7 +180,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.window is not None:
         overrides["screen.window_title"] = args.window
 
-    report = run_flow(args.config, overrides=overrides or None, log_journal=not args.no_journal)
+    report = run_scenario(args.config, overrides=overrides or None, log_journal=not args.no_journal)
     print(report.summary())
     if report.failed_steps:
         print(f"  失败步骤 {len(report.failed_steps)} 个:")

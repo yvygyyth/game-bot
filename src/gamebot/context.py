@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .config.schema import AppConfig
-from .state.store import Blackboard, StateStore
+from .state.page import PageMatch, PageTree
+from .state.store import Blackboard
+from .state.tracker import PageTracker
 from .types import ActionResult, Region
 from .utils.logging import get_logger
 
@@ -43,6 +45,7 @@ class RunContext:
 
     :param session: L1 截图层实例。
     :param config: 应用配置。
+    :param tree: 页面树。跟踪器需要它来查 ``min_stable_frames`` / ``timeout``。
     :param frame_ttl: 帧的新鲜度上限（秒）。超过就自动重截。
 
     **中止的单一事实源是 ``session``**，不是这里。本类只做转发 ——
@@ -55,9 +58,10 @@ class RunContext:
         session: Session,
         config: AppConfig,
         *,
+        tree: PageTree | None = None,
         frame_ttl: float = 1.0,
         executor: Executor | None = None,
-        states: StateStore | None = None,
+        pages: PageTracker | None = None,
         blackboard: Blackboard | None = None,
         clock: Any = None,
     ) -> None:
@@ -65,7 +69,7 @@ class RunContext:
         self.config = config
         self.frame_ttl = frame_ttl
         self.executor = executor
-        self.states = states or StateStore()
+        self.pages = pages or PageTracker(tree)
         self.blackboard = blackboard or Blackboard()
         self._clock = clock or time.perf_counter
         self._frame: Frame | None = None
@@ -109,7 +113,7 @@ class RunContext:
         self.capture_count += 1
         log.debug(
             "新帧 #%d (id=%d, 抓帧数=%d)",
-            self.states.tick,
+            self.pages.tick,
             frame.frame_id,
             self.capture_count,
         )
@@ -153,6 +157,37 @@ class RunContext:
         self.session.raise_if_stopped()
 
     # ------------------------------------------------------------------ #
+    # 页面状态（跟踪器，转发几个最常用的）
+    # ------------------------------------------------------------------ #
+    @property
+    def page(self) -> PageMatch | None:
+        """当前页面的**单帧**观测；还没定位过时是 None。
+
+        ``flow.graph.GraphCursor.should_run()`` 通过它读"实际在哪个页面"来做
+        位置守卫 —— 实际页面 ≠ 节点期望页面时拒绝执行动作。
+        没有它，那个守卫会被静默跳过（只认位置不认人）。
+        """
+        state = self.pages.current
+        if state is None:
+            return None
+        return PageMatch(
+            id=state.id,
+            path=state.path,
+            overlays=state.overlays,
+            confidence=state.confidence,
+            frame_id=state.frame_id,
+        )
+
+    @property
+    def page_id(self) -> str:
+        """当前页面 id 的简写（含"认不出来"时返回 ``unknown``）。"""
+        return self.pages.current_id
+
+    def is_(self, page_id: str) -> bool:
+        """当前页面（或任一叠加层）是不是它。"""
+        return self.pages.is_(page_id)
+
+    # ------------------------------------------------------------------ #
     # 便捷查询（给 hooks / 临时逻辑用，步骤实现里请直接调原子层）
     # ------------------------------------------------------------------ #
     def query(self, query: Any, *, fresh: bool = False) -> ActionResult[Any]:
@@ -190,7 +225,7 @@ class RunContext:
     # ------------------------------------------------------------------ #
     def reset(self) -> None:
         """清空运行期状态，准备下一次运行（含清掉中止标志）。"""
-        self.states.reset()
+        self.pages.reset()
         self.blackboard.clear()
         self.session.clear_stop()
         self.invalidate_frame()
@@ -209,6 +244,6 @@ class RunContext:
 
     def __repr__(self) -> str:
         return (
-            f"RunContext(state={self.states.current_id!r}, tick={self.states.tick}, "
+            f"RunContext(page={self.pages.current_id!r}, tick={self.pages.tick}, "
             f"captures={self.capture_count}, frame_age={self.frame_age:.2f}s)"
         )

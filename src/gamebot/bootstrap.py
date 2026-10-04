@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .atomic.session import Session, build_session
 from .atomic.vision import Matcher, TextReader, UnavailableTextReader
@@ -30,14 +30,10 @@ from .context import RunContext
 from .exceptions import ConfigError, GameBotError, TemplateNotFoundError
 from .execution.executor import Executor, ExecutorHooks
 from .execution.journal import Journal, JsonlJournal, NullJournal
-from .flow.definition import FlowDefinition
-from .flow.engine import EngineOptions, FlowEngine, RunReport
-from .flow.loader import load_flow
-from .state.detector import StateDetector
+from .flow.engine import FlowEngine, RunReport
+from .flow.loader import load_scenario
+from .flow.scenario import Scenario
 from .utils.logging import get_logger, setup_logging
-
-if TYPE_CHECKING:
-    pass
 
 log = get_logger("bootstrap")
 
@@ -48,8 +44,9 @@ __all__ = [
     "build_matcher",
     "build_reader",
     "build_session_from_config",
+    "check_config_paths",
     "check_templates",
-    "run_flow",
+    "run_scenario",
 ]
 
 
@@ -152,17 +149,52 @@ def build_session_from_config(config: AppConfig) -> Session:
 # --------------------------------------------------------------------------- #
 # 装配期检查
 # --------------------------------------------------------------------------- #
-def check_templates(config: AppConfig, definition: FlowDefinition) -> list[str]:
-    """检查流程引用的模板文件是否都存在，返回缺失列表。
+def check_templates(config: AppConfig, scenario: Scenario) -> list[str]:
+    """检查页面树引用的模板文件是否都存在，返回缺失列表。
 
     **这是装配期最有价值的一个检查**。模板名拼错、导出时忘了放进 assets、
-    大小写不一致……这些问题在运行期表现为"莫名其妙找不到图"，
-    排查成本极高；在这里只是一行路径比较。
+    大小写不一致……这些问题在运行期表现为"莫名其妙找不到图"（而且是在
+    某个分支才出现，跑了十分钟才撞上），排查成本极高；
+    在这里只是一行路径比较。
 
-    做法：遍历 definition 里所有 Query 的 ``template`` 字段（含嵌套组合查询），
+    做法：遍历页面树里所有 Query 的 ``template`` 字段（含嵌套组合查询），
     逐个 ``config.template_path()`` 查存在性。
     """
-    raise NotImplementedError("待实现：递归提取 template 字段 -> 查文件存在性 -> 返回缺失列表")
+    missing: list[str] = []
+    seen: set[str] = set()
+
+    for template in sorted(_collect_templates(scenario.tree)):
+        if template in seen:
+            continue
+        seen.add(template)
+        if not config.template_path(template).is_file():
+            missing.append(template)
+    return missing
+
+
+def _collect_templates(tree: Any) -> set[str]:
+    """递归提取页面树里所有查询用到的模板名。"""
+    found: set[str] = set()
+
+    def walk(obj: Any, depth: int = 0) -> None:
+        if depth > 8:  # 组合查询最多嵌几层，防手滑写出环
+            return
+        template = getattr(obj, "template", None)
+        if isinstance(template, str) and template:
+            found.add(template)
+        for attr in ("queries", "query", "exclude"):
+            nested = getattr(obj, attr, None)
+            if nested is None:
+                continue
+            if isinstance(nested, (list, tuple)):
+                for item in nested:
+                    walk(item, depth + 1)
+            else:
+                walk(nested, depth + 1)
+
+    for page in tree.walk():
+        walk(page)
+    return found
 
 
 def check_config_paths(config: AppConfig) -> None:
@@ -176,15 +208,21 @@ def check_config_paths(config: AppConfig) -> None:
 def build_context(
     config: AppConfig,
     *,
+    scenario: Scenario | None = None,
     session: Session | None = None,
     journal: Journal | None = None,
     hooks: ExecutorHooks | None = None,
 ) -> RunContext:
-    """装配 RunContext（含 Session 与 Executor）。"""
+    """装配 RunContext（含 Session 与 Executor）。
+
+    ``scenario`` 用来构造页面跟踪器 —— 跟踪器需要页面树才能查
+    ``min_stable_frames`` / ``timeout``。没给就是一棵空树（跟踪器退化，但仍可用）。
+    """
     session = session or build_session_from_config(config)
     ctx = RunContext(
         session,
         config,
+        tree=scenario.tree if scenario is not None else None,
         frame_ttl=max(0.2, config.timing.tick_interval * 2),
     )
     ctx.executor = Executor(
@@ -199,19 +237,10 @@ def build_context(
 def build_engine(
     config: AppConfig,
     ctx: RunContext,
-    definition: FlowDefinition,
-    *,
-    options: EngineOptions | None = None,
+    scenario: Scenario,
 ) -> FlowEngine:
     """装配流程引擎。"""
-    detector = StateDetector(definition.states)
-    return FlowEngine(
-        definition,
-        ctx,
-        detector=detector,
-        executor=ctx.executor,
-        options=options or EngineOptions.from_definition(definition),
-    )
+    return FlowEngine(scenario, ctx, executor=ctx.executor)
 
 
 def bootstrap(
@@ -220,7 +249,7 @@ def bootstrap(
     overrides: dict[str, Any] | None = None,
     journal: Journal | None = None,
 ) -> tuple[RunContext, FlowEngine]:
-    """一次完整的装配：配置 -> 日志 -> 目录 -> 视觉 -> Session -> 流程 -> 引擎。
+    """一次完整的装配：配置 -> 日志 -> 目录 -> 视觉 -> Session -> 脚本 -> 引擎。
 
     :return: ``(ctx, engine)``，调用方接着 ``engine.run()``。
     """
@@ -236,28 +265,36 @@ def bootstrap(
         config.vision.roi.update(regions)
         log.debug("已加载 %d 个命名区域", len(regions))
 
-    definition = load_flow(config.paths.resolve(config.flow_file))
-    missing = check_templates(config, definition)
+    scenario = load_scenario(config.paths.resolve(config.flow_file))
+    missing = check_templates(config, scenario)
     if missing:
         raise TemplateNotFoundError(
-            "以下模板图不存在（检查 assets/templates 与流程配置里的路径）:\n  - "
+            "以下模板图不存在（检查 assets/templates 与页面树里的路径）:\n  - "
             + "\n  - ".join(missing)
         )
 
-    ctx = build_context(config, journal=journal)
-    engine = build_engine(config, ctx, definition)
-    log.info("装配完成: flow=%r, states=%d, transitions=%d",
-             definition.name, len(definition.states), len(definition.transitions))
+    ctx = build_context(config, scenario=scenario, journal=journal)
+    engine = build_engine(config, ctx, scenario)
+    log.info(
+        "装配完成: %r, %d 页面 / %d 节点 / %d 边",
+        scenario.name,
+        len(scenario.tree),
+        len(scenario.graph),
+        len(scenario.graph.edges),
+    )
+    unclaimed = scenario.unclaimed_pages()
+    if unclaimed:
+        log.info("以下页面没有节点认领（只观察不动作）: %s", ", ".join(unclaimed))
     return ctx, engine
 
 
-def run_flow(
+def run_scenario(
     config_path: str | Path = "config/app.yaml",
     *,
     overrides: dict[str, Any] | None = None,
     log_journal: bool = True,
 ) -> RunReport:
-    """装配并跑完一次流程，返回报告。CLI 的主入口之一。"""
+    """装配并跑完一次脚本，返回报告。CLI 的主入口之一。"""
     ctx: RunContext | None = None
     journal: Journal | None = None
     try:

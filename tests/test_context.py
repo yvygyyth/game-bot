@@ -191,11 +191,11 @@ class TestStopHandling:
     def test_reset_clears_everything(self, ctx: RunContext) -> None:
         ctx.capture()
         ctx.blackboard.set("a", 1)
-        ctx.states.advance_tick()
+        ctx.pages.advance_tick()
         ctx.request_stop("x")
         ctx.reset()
         assert ctx.blackboard.as_dict() == {}
-        assert ctx.states.tick == 0
+        assert ctx.pages.tick == 0
         assert ctx.stop_requested is False
         assert ctx.capture_count == 0
 

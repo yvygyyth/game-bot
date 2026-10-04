@@ -230,24 +230,67 @@ class TestShippedSamples:
         assert regions["full"] == Region(0, 0, 1920, 1080)
         assert all(isinstance(r, Region) for r in regions.values())
 
-    def test_example_flow_yaml_is_wellformed(self) -> None:
+    def test_example_script_yaml_is_wellformed(self) -> None:
+        """示例脚本定义（页面树 + 流程图）必须是自洽的。
+
+        没法用 ``load_scenario`` 检查 —— 它还依赖 ``query_from_dict`` /
+        ``step_from_dict`` 两个还没实现的函数。所以这里直接按 schema 逐条校验，
+        至少保证"页面 id / 节点 id 对得上"这类问题不会漏到运行期。
+        """
         yaml = pytest.importorskip("yaml")
 
         path = PROJECT_ROOT / "config" / "flows" / "example_flow.yaml"
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert data["name"] == "example_flow"
-        # initial 允许是内置的 unknown（"还没认出来"），否则必须是已定义状态
-        known = set(data["states"]) | set(data.get("stop_states", []))
-        assert data["initial"] in known | {"unknown"}
-        for transition in data["transitions"]:
-            assert transition["to"] in known, f"转移指向未定义状态: {transition['to']}"
-            for source in transition.get("from", []):
-                assert source in known, f"转移来源未定义: {source}"
-        # 每个状态里引用的模板文件路径形态要合理
-        for state_id, state in data["states"].items():
-            for query in state.get("queries", []):
-                assert "template" in query or query["type"] in (
-                    "AndQuery",
-                    "OrQuery",
-                    "NotQuery",
-                ), f"状态 {state_id} 的查询缺少 template"
+        assert data["name"] == "example"
+
+        # ① 页面 id 由嵌套位置推导成路径形式
+        page_ids: list[str] = []
+
+        def collect(pages: dict, prefix: str = "") -> None:
+            for key, page in pages.items():
+                page_id = f"{prefix}/{key}" if prefix else key
+                page_ids.append(page_id)
+                collect(page.get("children", {}) or {}, page_id)
+
+        collect(data["pages"])
+        assert "home" in page_ids
+        assert "home/qianli/battle/result" in page_ids
+        assert "network_error" in page_ids
+
+        # ② 节点的 page 必须在页面树里；没有 page 的节点是允许的（纯观察）
+        node_ids = set(data["nodes"])
+        for node_id, node in data["nodes"].items():
+            if node.get("page"):
+                assert node["page"] in page_ids, f"节点 {node_id} 声明了不存在的页面 {node['page']}"
+
+        # ③ initial 和每条边的端点必须在节点表里
+        assert data["initial"] in node_ids
+        for edge in data["edges"]:
+            assert edge["source"] in node_ids, f"边来源未定义: {edge['source']}"
+            assert edge["target"] in node_ids, f"边目标未定义: {edge['target']}"
+
+        # ④ stop_pages / recovery_node 也必须存在
+        for page_id in data.get("stop_pages", []):
+            assert page_id in page_ids
+        if data.get("recovery_node"):
+            assert data["recovery_node"] in node_ids
+
+        # ⑤ 非组合查询必须给 template；叠加层必须显式声明 kind
+        composites = {"AndQuery", "OrQuery", "NotQuery"}
+
+        def check_queries(queries: list, where: str) -> None:
+            for query in queries:
+                assert "template" in query or query["type"] in composites, (
+                    f"{where} 的查询缺少 template"
+                )
+
+        def walk_pages(pages: dict, prefix: str = "") -> None:
+            for key, page in pages.items():
+                page_id = f"{prefix}/{key}" if prefix else key
+                check_queries(page.get("queries", []), f"页面 {page_id}")
+                walk_pages(page.get("children", {}) or {}, page_id)
+
+        walk_pages(data["pages"])
+
+        # ⑥ 顶层叠加层：有 kind: overlay 的不属于任何父页面
+        assert data["pages"]["network_error"]["kind"] == "overlay"

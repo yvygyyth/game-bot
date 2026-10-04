@@ -135,17 +135,33 @@ pages:
 
 ## 五、还没定的两件事
 
-1. **搭桥层放哪**。上面第 ③④⑤ 步需要一个执行者。它要么长在
-   `FlowEngine.tick()` 里，要么单独一个 `flow/runner.py`。
-   我倾向后者：`FlowEngine` 继续管预算/节奏/报告，
-   `Runner` 管"定位 → 对齐 → 执行 → 转移"这一套，职责更干净。
-2. **`RunContext` 要加一个 `page` 槽位**（存 `PageMatch`）。
-   `GraphCursor.should_run()` 现在用 `getattr(ctx, "page", None)` 读它 ——
-   加上这个槽位，`Node.page` 的守卫才会真正生效；不加就一直跳过检查。
+1. **`query_from_dict` / `step_from_dict`** —— 让 YAML 真正驱动流程的那两块拼图。
+   查询注册表（`query_registry()`）和步骤注册表（`step_registry()`）都已经就绪，
+   实现是"查表 + 递归构造 + 处理 policy 子字典"。补上之后 `gamebot check`
+   就能真正校验配置了。
+2. **`PageTree.locate()` 的定位算法**。算法已经写进它的 docstring（6 步），
+   要拍板的是细节：hint 只影响尝试顺序这一点是否照做、叠加层扫到几层。
 
-## 六、和旧实现的关系
+## 六、已经定下来的事
 
-`state/definition.py`、`state/detector.py`、`flow/node.py`、`flow/transition.py`、
-`flow/machine.py` 都已被取代（各自 docstring 顶部有说明）。
-它们功能上都是新实现的子集，保留只是为了让已有测试和代码继续跑。
-**迁移完成后应该删掉**，否则两套概念并存，改的时候不知道该改哪边。
+* **搭桥层放在 `FlowEngine.tick()` 里**（暂时）。上面 ③④⑤ 步就是 `tick()` 的骨架，
+  已经写成了带完整注释的桩。以后如果它长到难以阅读，再抽 `flow/runner.py`。
+* **`RunContext.page` 已经有了**（属性，返回 `PageMatch | None`，从跟踪器读）。
+  所以 `Node.page` 的位置守卫是**生效**的，不是可选项：
+  `GraphCursor.should_run()` 会拿实测页面和节点声明的页面比，不一致就拒绝执行。
+* **旧的扁平实现已经删干净了**：`state/definition.py`、`state/detector.py`、
+  `state/snapshot.py`、`flow/node.py`、`flow/transition.py`、`flow/machine.py`、
+  `flow/definition.py` 全部移除，不向后兼容。现在的状态层是
+  `page.py`（单帧定位）+ `tracker.py`（跨帧持续性）+ `store.py`（黑板），
+  流程层是 `graph.py`（图）+ `scenario.py`（蓝图）+ `engine.py`（主循环）。
+
+## 七、加一个页面时要动的地方
+
+1. `config/flows/*.yaml` 的 `pages:` 里加节点（嵌套位置就是 id）；
+2. 如果这个页面需要动作，在 `nodes:` 里加一个节点并写上 `page:`；
+3. 加边决定什么时候进、什么时候走。
+
+**页面的 id 是路径形式**（`home/qianli/battle`），所以改父节点的 key
+会连带改掉所有子节点的 id —— 那时 `nodes[].page` 也得跟着改。
+`Scenario.validate()` 会检查这件事，写错会在启动时报错而不是静默不动作。
+
