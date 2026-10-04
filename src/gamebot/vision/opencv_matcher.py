@@ -55,6 +55,10 @@ class OpenCvMatcher:
     :param templates_dir: 模板根目录。相对模板名都从这里解析。
     :param grayscale: 实例级默认。为 False 时强制彩色匹配（同形状不同颜色时用）。
     :param use_pyramid: 实例级默认，是否多尺度。单次调用可以覆盖。
+    :param templates_dir: 主模板根。相对模板名都从这里解析。
+    :param extra_dirs: **附加模板根，优先于主根搜索**。顺序即优先级，靠前的先搜。
+        用途：每个脚本功能把自己的图片放在自己目录里
+        （``games/<游戏>/<功能>/templates/``），并且可以覆盖游戏级公共模板。
     :param scales: 金字塔缩放系数。把 1.0 放最前面，最常见的情况先算。
     :param preload: 启动时预加载整个模板目录。会明显缩短第一次查询的延迟。
     """
@@ -63,12 +67,18 @@ class OpenCvMatcher:
         self,
         templates_dir: Any,
         *,
+        extra_dirs: tuple[Any, ...] = (),
         grayscale: bool = True,
         use_pyramid: bool = True,
         scales: tuple[float, ...] = (1.0, 0.9, 1.1, 0.8, 1.25),
         preload: bool = True,
     ) -> None:
         self.templates_dir = Path(templates_dir)
+        #: 搜索顺序：附加根（更具体）在前，主根垫底
+        self.roots: tuple[Path, ...] = (
+            *(Path(d) for d in extra_dirs),
+            self.templates_dir,
+        )
         self.grayscale = grayscale
         self.use_pyramid = use_pyramid
         self.scales = tuple(scales)
@@ -90,15 +100,20 @@ class OpenCvMatcher:
         return self._load_raw(template)
 
     def preload(self) -> int:
-        """预加载模板目录下所有图片，返回加载数量。目录不存在时返回 0。"""
-        if not self.templates_dir.is_dir():
-            return 0
+        """预加载**所有模板根**下的图片，返回加载数量。
+
+        按 ``roots`` 顺序遍历，所以同一个相对名在两个根里都有时，
+        先到的（更具体的那个根）赢 —— 和 :meth:`_resolve_path` 的顺序一致。
+        """
         count = 0
-        for path in sorted(self.templates_dir.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in _IMAGE_SUFFIXES:
+        for root in self.roots:
+            if not root.is_dir():
                 continue
-            self._load_raw(path.relative_to(self.templates_dir).as_posix())
-            count += 1
+            for path in sorted(root.rglob("*")):
+                if not path.is_file() or path.suffix.lower() not in _IMAGE_SUFFIXES:
+                    continue
+                self._load_raw(path.relative_to(root).as_posix())
+                count += 1
         return count
 
     def clear_cache(self) -> None:
@@ -111,8 +126,19 @@ class OpenCvMatcher:
         return sorted(self._raw)
 
     def _resolve_path(self, template: str) -> Path:
+        """把模板名解析成实际文件路径。
+
+        按 ``roots`` 顺序找第一个存在的；都不存在时返回主根下的路径 ——
+        报错信息里给个合理的猜测，比返回 None 好排查。
+        """
         path = Path(template)
-        return path if path.is_absolute() else self.templates_dir / path
+        if path.is_absolute():
+            return path
+        for root in self.roots:
+            candidate = root / path
+            if candidate.is_file():
+                return candidate
+        return self.roots[-1] / path
 
     def _cache_key(self, template: str) -> str:
         # 文件系统不区分大小写，缓存键也统一，避免同一个文件被缓存两次

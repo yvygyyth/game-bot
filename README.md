@@ -22,7 +22,7 @@ game-bot/
 ├── assets/templates/            # 模板图（按界面分子目录）
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
-│   ├── atomic-inventory.md      #   49 个原子方法的清单与语义
+│   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
 │   └── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
@@ -56,9 +56,15 @@ game-bot/
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
 │   ├── config/                  # 配置模型与加载
 │   └── utils/                   # 日志、计时
+├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
+│   └── <游戏>/<功能>/            #   页面 / 流程 / 专用步骤 / 图片资源
 ├── tests/                       # 结构测试 + 已实现部分的测试
 └── main.py                      # 不安装也能跑：python main.py run
 ```
+
+**框架和业务是分开的**：`src/gamebot/` 不认识任何具体游戏；
+`games/` 才是认识游戏的地方（一级按游戏、二级按脚本功能）。
+写业务代码只碰 `games/`，改框架才碰 `src/gamebot/`。
 
 ## 快速开始
 
@@ -81,6 +87,18 @@ uv run gamebot run                # 真跑
 ```bash
 python main.py capture -o a.png
 ```
+
+### 写脚本（业务层）
+
+```bash
+python -m games list                            # 有哪些脚本
+python -m games describe mingjiangsha/qianli    # 页面树 + 流程图长什么样（不连游戏）
+python -m games check mingjiangsha/qianli       # 定义对不对、缺哪些图
+```
+
+`games/` 里已经放了两个可跑的样板：`daily`（最简单的直线流程）和
+`qianli`（多页面循环 + roi + 兜底边）。约定见
+[games/README.md](games/README.md)。
 
 ### CLI 子命令
 
@@ -143,7 +161,7 @@ state (状态层) ──  我在哪个页面    页面树（单帧定位）+ 跟
   ↑
 execution (执行层) ── 可靠地做一次  步骤 + 重试 + 失败代价 + 记账
   ↑
-atomic (原子层) ── 怎么做        L0~L5 共 49 个原子方法
+atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 ```
 
 **依赖只能向下**，由 `tests/test_structure.py` 用 AST 静态检查强制。

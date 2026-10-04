@@ -49,6 +49,7 @@ log = get_logger("atomic.actions")
 __all__ = [
     "click_image",
     "click_point",
+    "click_source_point",
     "click_text",
     "double_click",
     "drag",
@@ -224,6 +225,31 @@ def click_image(
         offset=offset,
         score=found.meta.get("score"),
     )
+
+
+def click_source_point(
+    session: Session,
+    point: Point,
+    button: str = "left",
+    clicks: int = 1,
+    interval: float = 0.1,
+) -> ActionResult[Point]:
+    """按**源坐标**点击 —— 给"已经拿到屏幕像素点"的调用方用。
+
+    :param point: **源坐标**（截图上的真实像素），不做任何换算。
+
+    什么时候用它：点一个**不是** ``find_image`` 单点结果的坐标。典型场景是
+    ``find_all_images`` 拿到的点列表（关卡列表、背包格子、技能栏里的第 3 个技能）::
+
+        found = ctx.frame().find_all_images("stage_button.png")
+        if found.ok and len(found.value) > 2:
+            click_source_point(ctx.session, found.value[2])   # 第 3 个关卡
+
+    ⚠️ 这类坐标**不能再走一次** :func:`click_point`：那个收的是逻辑坐标，
+    配了 ``logic_size`` 缩放时会二次换算，点偏。这也是它单独存在的原因 ——
+    两个坐标系必须有各自的入口，混用是这类脚本最常见的坐标 bug。
+    """
+    return _click_source(session, point, button=button, clicks=clicks, interval=interval)
 
 
 def click_text(

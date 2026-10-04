@@ -63,14 +63,22 @@ def build_matcher(config: AppConfig) -> Matcher:
     """
     from .vision.opencv_matcher import OpenCvMatcher
 
+    roots = config.template_roots()
     matcher = OpenCvMatcher(
-        templates_dir=config.paths.resolve(config.vision.templates_dir),
+        templates_dir=roots[-1],
+        # 前面的都是附加根（功能级），优先搜索
+        extra_dirs=roots[:-1],
         grayscale=config.vision.grayscale,
         use_pyramid=config.vision.use_pyramid,
         preload=True,
     )
-    log.info("模板匹配就绪: %d 个模板, 灰度=%s, 多尺度=%s",
-             len(matcher.cached_templates), matcher.grayscale, matcher.use_pyramid)
+    log.info(
+        "模板匹配就绪: %d 个模板, %d 个模板根, 灰度=%s, 多尺度=%s",
+        len(matcher.cached_templates),
+        len(roots),
+        matcher.grayscale,
+        matcher.use_pyramid,
+    )
     return matcher
 
 
@@ -150,33 +158,39 @@ def build_session_from_config(config: AppConfig) -> Session:
 # 装配期检查
 # --------------------------------------------------------------------------- #
 def check_templates(config: AppConfig, scenario: Scenario) -> list[str]:
-    """检查页面树引用的模板文件是否都存在，返回缺失列表。
+    """检查脚本引用的模板文件是否都存在，返回缺失列表。
 
     **这是装配期最有价值的一个检查**。模板名拼错、导出时忘了放进 assets、
     大小写不一致……这些问题在运行期表现为"莫名其妙找不到图"（而且是在
     某个分支才出现，跑了十分钟才撞上），排查成本极高；
     在这里只是一行路径比较。
 
-    做法：遍历页面树里所有 Query 的 ``template`` 字段（含嵌套组合查询），
-    逐个 ``config.template_path()`` 查存在性。
+    查两个来源：
+
+    1. **页面树**里所有 Query 的 ``template``（含嵌套组合查询）——
+       决定"能不能认出来是哪一页"；
+    2. **流程图**里所有 Step 的 :meth:`Step.used_templates` ——
+       决定"点不点得动"。
+
+    第 2 条容易漏：页面条件用的图往往就那几张，真正多的是各种按钮。
+    只查第 1 条会让检查给出"模板齐全"的假安全感。
+    自定义步骤请覆写 ``used_templates()``，否则查不到（漏报，不误伤）。
     """
     missing: list[str] = []
-    seen: set[str] = set()
+    roots = config.template_roots()
 
-    for template in sorted(_collect_templates(scenario.tree)):
-        if template in seen:
-            continue
-        seen.add(template)
-        if not config.template_path(template).is_file():
+    for template in sorted(_collect_templates(scenario)):
+        # 任何一个模板根里有就算找到（附加根优先，但对"存在性"检查无所谓顺序）
+        if not any((root / template).is_file() for root in roots):
             missing.append(template)
     return missing
 
 
-def _collect_templates(tree: Any) -> set[str]:
-    """递归提取页面树里所有查询用到的模板名。"""
+def _collect_templates(scenario: Scenario) -> set[str]:
+    """提取整份脚本会用到的模板名：页面查询 + 步骤。"""
     found: set[str] = set()
 
-    def walk(obj: Any, depth: int = 0) -> None:
+    def walk_query(obj: Any, depth: int = 0) -> None:
         if depth > 8:  # 组合查询最多嵌几层，防手滑写出环
             return
         template = getattr(obj, "template", None)
@@ -188,12 +202,19 @@ def _collect_templates(tree: Any) -> set[str]:
                 continue
             if isinstance(nested, (list, tuple)):
                 for item in nested:
-                    walk(item, depth + 1)
+                    walk_query(item, depth + 1)
             else:
-                walk(nested, depth + 1)
+                walk_query(nested, depth + 1)
 
-    for page in tree.walk():
-        walk(page)
+    for page in scenario.tree.walk():
+        walk_query(page)
+
+    for node in scenario.graph.nodes.values():
+        for step in (*node.steps, *node.on_enter, *node.on_exit):
+            used = getattr(step, "used_templates", None)
+            if callable(used):
+                found.update(t for t in used() if t)
+
     return found
 
 

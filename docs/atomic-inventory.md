@@ -1,6 +1,7 @@
 # 原子化方法清单（L0 ~ L5）
 
-共 **49** 个原子方法（设计稿 47 个 + `AllTextsQuery` + `VisibleQuery`，见文末说明）。
+共 **50** 个原子方法（设计稿 47 个 + `AllTextsQuery` + `VisibleQuery` +
+`click_source_point`，见文末说明）。
 
 图例：`✅` 已实现
 
@@ -168,6 +169,12 @@ frame.clear_cache()
 | 39 | `click_text(session, text, region, lang, confidence)` | 同上 | ✅ |
 | 40 | `double_click(session, point, interval)` | — | ✅ |
 | 41 | `right_click(session, point)` | — | ✅ |
+| 50 | `click_source_point(session, point, button, clicks, interval)` | **按源坐标点击**，见下方说明 | ✅ |
+
+> **50 号是补的**（写业务层 demo 时发现的缺口）：`find_all_images` 返回的是
+> **源坐标**点列表（关卡列表、背包格子），而 `click_point` 收的是**逻辑坐标**。
+> 拿前者去调后者，在配了 `logic_size` 缩放时会**二次换算点偏**。
+> 两个坐标系必须有各自的公开入口 —— 混用是这类脚本最常见的坐标 bug。
 
 ### 移动 / 拖拽 / 滚轮
 
@@ -238,6 +245,7 @@ result = wait_any_of(session, [
 |---|---|
 | 新增 `AllTextsQuery` | L2 有 `find_all_texts`，没有对应的 Query 描述符就没法配置化。 |
 | 新增 `VisibleQuery` | "不可见即有效答案"和"找不到即失败"是两种语义（见 architecture.md 决策 2），混用必出 bug。 |
+| 新增 `click_source_point` | `find_all_images` 返回**源坐标**点列表，`click_point` 收**逻辑坐标**。两个坐标系各自需要公开入口，否则配了缩放会二次换算点偏。 |
 | `QueryLike` 类型别名 | 流程守卫里允许塞 lambda 做临时条件，但主路径仍应是数据化的 Query。 |
 | `Session` 增加 `input` / `mapper` | 设计稿要求 L5 只接收 `session` 一个上下文对象，所以输入通道和坐标换算必须挂在 Session 上。 |
 | 新增 `AllTextsQuery` 之外的注册表机制 | YAML 里要能写 `type: ImageQuery`，必须有 类型名 -> 类 的映射。 |

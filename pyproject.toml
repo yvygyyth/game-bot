@@ -43,7 +43,8 @@ packages = ["src/gamebot"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+# games 是业务层（具体游戏的脚本），也要检查
+src = ["src", "tests", "games"]
 # 显式排除，别依赖 .gitignore（没 git init 时不可靠，且 .venv 里全是噪音）
 extend-exclude = [
     ".venv",
@@ -63,7 +64,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gamebot"]
+known-first-party = ["gamebot", "games"]
 
 [tool.mypy]
 python_version = "3.11"

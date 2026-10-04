@@ -74,6 +74,7 @@ L4_COMBINATORS = [
 # L5 动作层
 L5_ACTIONS = [
     "click_point",
+    "click_source_point",
     "click_image",
     "click_text",
     "double_click",
@@ -125,7 +126,7 @@ class TestAtomicInventory:
         assert not missing, f"actions 缺少: {missing}"
 
     def test_total_atomic_count(self) -> None:
-        """49 = 设计稿的 47 + AllTextsQuery + VisibleQuery。"""
+        """50 = 设计稿的 47 + AllTextsQuery + VisibleQuery + click_source_point。"""
         total = (
             len(L1_METHODS)
             + len(L2_METHODS)
@@ -133,7 +134,7 @@ class TestAtomicInventory:
             + len(L4_COMBINATORS)
             + len(L5_ACTIONS)
         )
-        assert total == 49
+        assert total == 50
 
 
 class TestKeySignatures:

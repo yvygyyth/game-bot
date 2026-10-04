@@ -71,6 +71,18 @@ class Step(ABC):
         """给日志和报告用的单行描述。子类覆写成更有信息量的形式。"""
         return self.name
 
+    def used_templates(self) -> tuple[str, ...]:
+        """这个步骤会用到的模板名。
+
+        用途只有一个：让 ``gamebot check`` 在**启动之前**告诉你"有张图还没截"。
+        模板名拼错、导出时忘了放进 assets，这些问题在运行期表现为
+        "跑到某个分支就卡住"，可能十分钟才撞上一次；在这里只是一次路径比较。
+
+        **用模板的步骤应该覆写它**，否则检查会漏报（漏报不会误伤，
+        只是少一层保护）。别写猜的 —— 误报会让这个检查失去信任。
+        """
+        return ()
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.describe()!r})"
 
@@ -87,15 +99,26 @@ class FunctionStep(Step):
         name: str = "",
         *,
         policy: StepPolicy | None = None,
+        templates: Sequence[str] = (),
     ) -> None:
+        """
+        :param templates: 这个函数会用到的模板名。**包的是个普通函数时没法自动
+            推断**，所以显式声明一下，``gamebot check`` 才能查到它用到的图::
+
+                FunctionStep(back_to_home, templates=(T_BACK, T_RETRY))
+        """
         super().__init__(name or getattr(func, "__name__", "function"), policy=policy)
         self.func = func
+        self.templates = tuple(templates)
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
         return self.func(ctx)
 
     def describe(self) -> str:
         return f"调用 {getattr(self.func, '__name__', repr(self.func))}"
+
+    def used_templates(self) -> tuple[str, ...]:
+        return self.templates
 
 
 class QueryStep(Step):
@@ -175,6 +198,9 @@ class ClickImageStep(Step):
 
     def run(self, ctx: RunContext) -> ActionResult[Point]:
         raise NotImplementedError("待实现：在 ctx 当前帧上 find_image，再 click")
+
+    def used_templates(self) -> tuple[str, ...]:
+        return (self.template,)
 
 
 class ClickTextStep(Step):
@@ -281,6 +307,9 @@ class CompositeStep(Step):
     def run(self, ctx: RunContext) -> ActionResult[list[Any]]:
         raise NotImplementedError("待实现：交给 ctx.executor 逐步执行并汇总")
 
+    def used_templates(self) -> tuple[str, ...]:
+        return tuple(t for step in self.steps for t in step.used_templates())
+
 
 class ConditionalStep(Step):
     """条件步骤：满足条件才执行内部步骤。
@@ -306,6 +335,10 @@ class ConditionalStep(Step):
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
         raise NotImplementedError("待实现：在当前帧上求 when，选择分支")
+
+    def used_templates(self) -> tuple[str, ...]:
+        nested = [*self.then_steps, *self.else_steps]
+        return tuple(t for step in nested for t in step.used_templates())
 
 
 # --------------------------------------------------------------------------- #

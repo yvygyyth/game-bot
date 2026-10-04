@@ -86,7 +86,17 @@ class VisionConfig:
     """视觉识别配置。"""
 
     templates_dir: str = "assets/templates"
-    """模板图根目录。所有相对模板名都从这里解析。"""
+    """主模板根。通常是**游戏级公共模板**（断线弹窗、通用按钮……）。"""
+
+    extra_template_dirs: tuple[str, ...] = ()
+    """附加模板根，**优先于主根搜索**。
+
+    用途：让每个脚本功能把自己的图片资源放在自己目录里
+    （``games/<游戏>/<功能>/templates/``），而不是把全游戏的图都堆到一个目录。
+    顺序即优先级，靠前的先搜 —— 于是功能级模板可以覆盖游戏级同名模板。
+
+    解析顺序见 :meth:`AppConfig.template_roots`。
+    """
 
     roi: dict[str, Region] = field(default_factory=dict)
     """命名区域表（从 ``config/regions.yaml`` 加载）。"""
@@ -185,12 +195,33 @@ class AppConfig:
         """最小可跑配置（Windows 后端 + 假流程）。"""
         return cls()
 
+    def template_roots(self) -> tuple[Path, ...]:
+        """模板根的搜索顺序：**附加根（更具体）在前，主根垫底**。
+
+        于是 ``games/<游戏>/<功能>/templates/`` 里的同名模板会覆盖
+        ``games/<游戏>/templates/`` 里的那份 —— 功能可以按自己的需要
+        替换公共模板，而不用把公共的挪走。
+        """
+        roots = [self.paths.resolve(d) for d in self.vision.extra_template_dirs]
+        roots.append(self.paths.resolve(self.vision.templates_dir))
+        return tuple(roots)
+
     def template_path(self, name: str) -> Path:
-        """把模板名解析成绝对路径。绝对路径原样返回。"""
+        """把模板名解析成绝对路径。
+
+        按 :meth:`template_roots` 的顺序找**第一个存在的**；都不存在时返回
+        主根下的路径（报错信息里给个合理的猜测，比返回 ``None`` 好排查）。
+        绝对路径原样返回。
+        """
         candidate = Path(name)
         if candidate.is_absolute():
             return candidate
-        return self.paths.resolve(self.vision.templates_dir) / candidate
+        roots = self.template_roots()
+        for root in roots:
+            path = root / candidate
+            if path.is_file():
+                return path
+        return roots[-1] / candidate
 
     def region(self, name: str) -> Region | None:
         """按名字取配置好的区域。"""
