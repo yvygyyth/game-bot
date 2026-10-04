@@ -1,0 +1,135 @@
+# 示例流程定义
+#
+# 这是"配置驱动流程"的样板。改流程不用改 Python —— 加状态、改转移、
+# 调动作用都在这一个文件里。
+#
+# 运行：gamebot check   （先校验，能挡住模板缺失、状态名写错这类问题）
+#      gamebot run --dry-run
+
+name: example_flow
+
+# 起始状态。引擎启动时假定在这里，也是"回主界面"兜底的目标。
+initial: unknown
+
+# 每轮之间的最小间隔（秒）。给 0 会打满 CPU 且日志没法看。
+tick_interval: 0.3
+
+# 总时长上限；null = 不限
+max_runtime: 3600
+
+# 认不出状态时怎么办：wait | reload_tick | recovery | stop
+on_unknown: wait
+recovery_state: main_menu
+
+# 宽容期：过场动画本来就会短暂认不出来，这段时间内只是等，不触发策略。
+unknown_grace: 1.5
+
+# 进入这些状态即结束流程
+stop_states: [closed]
+
+states:
+  # 每个状态 = 一组识别条件。queries 默认是 AND（全部命中才算）。
+  # 建议至少给两个条件，比单个按钮可靠得多。
+  main_menu:
+    description: 主界面
+    priority: 10
+    min_stable_frames: 2      # 连续 2 帧命中才确认，过滤动画闪现
+    queries:
+      - type: ImageQuery
+        template: main_menu/start_button.png
+        confidence: 0.9
+      - type: ImageQuery
+        template: main_menu/settings_button.png
+        confidence: 0.85
+    steps:
+      - type: ClickImageStep
+        template: main_menu/start_button.png
+        name: 点击开始游戏
+        policy:
+          retry: {max_attempts: 3, interval: 0.5}
+          on_error: continue
+
+  battle:
+    description: 战斗中
+    priority: 20
+    queries:
+      - type: ImageQuery
+        template: battle/attack_button.png
+    steps:
+      # 战斗中反复点技能；具体怎么点按自己的游戏改
+      - type: ClickImageStep
+        template: battle/attack_button.png
+        name: 点技能
+        policy:
+          retry: {max_attempts: 2, interval: 0.2}
+          on_error: continue
+      - type: WaitStep
+        seconds: 0.5
+        name: 技能冷却
+
+  result:
+    description: 结算画面
+    priority: 30
+    min_stable_frames: 2
+    queries:
+      - type: OrQuery
+        short_circuit: true
+        queries:
+          - {type: ImageQuery, template: result/victory.png}
+          - {type: ImageQuery, template: result/defeat.png}
+    steps:
+      - type: ClickImageStep
+        template: result/confirm_button.png
+        name: 点确认
+        policy:
+          retry: {max_attempts: 5, interval: 0.5}
+          on_error: raise      # 这一步点不掉，整个流程继续跑没意义
+
+  closed:
+    description: 游戏已关闭
+    terminal: true
+    queries:
+      - type: ImageQuery
+        template: common/window_lost.png
+        confidence: 0.95
+
+# 转移规则：来源状态 + 守卫 -> 目标状态。
+# sources 留空 = 任意状态都适用（用于异常恢复类的转移）。
+transitions:
+  - from: [battle]
+    to: result
+    priority: 30
+    label: 战斗结束，进入结算
+    # 守卫：结算画面出现。这里不写也行 —— 因为 result 状态本身
+    # 就会被识别到，引擎会自然切过去；写出来是为了让意图更明确。
+
+  - from: [result]
+    to: main_menu
+    priority: 20
+    label: 结算完成，回主界面
+    cooldown: 1.0            # 防抖：1 秒内不重复触发
+
+  - from: [main_menu]
+    to: battle
+    priority: 10
+    label: 进入战斗
+
+# ⚠️ 关于"兜底恢复"转移：
+# 通配的恢复转移（from: []）如果优先级给得高、又不带 guard，会把所有正常转移
+# 全部劫持掉 —— 引擎每轮都会先挑中它，流程原地打转。
+# 正确做法二选一：
+#   1) 在 guard 里表达"真的卡住了"（例如连续 N 次没进展，用黑板计数器）；
+#   2) 干脆不写这条转移，靠上面的 on_unknown: recovery + recovery_state 处理
+#      "认不出来"的情况 —— 那已经覆盖了绝大多数卡死场景。
+#
+# 下面这条是写法示例（guard 未配，所以默认注释掉，别直接打开）：
+#
+#  - from: []                 # 任意状态
+#    to: main_menu
+#    priority: 100
+#    kind: recovery
+#    guard:                   # 必须有 guard，否则会劫持正常转移
+#      type: NumberQuery      # 例：黑板里的卡住计数（真实实现见 docs）
+#      region: [0, 0, 1, 1]
+#    max_times: 5             # 一轮流程最多兜底 5 次，防止无限绕圈
+#    label: 卡住兜底，回主界面

@@ -1,0 +1,35 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv-cache/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+# pytest 在写缓存失败时会留下这些临时目录，别提交进来
+pytest-cache-files-*/
+pytest-of-*/
+.coverage
+htmlcov/
+
+# ---- 运行产物（不要入库）----
+logs/**
+!logs/.gitkeep
+screenshots/
+artifacts/
+*.log
+
+# ---- 调试截图 ----
+debug/**
+!debug/.gitkeep
+
+# ---- IDE ----
+.idea/
+.vscode/
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini

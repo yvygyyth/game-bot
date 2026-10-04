@@ -1,0 +1,64 @@
+# game-bot 主配置
+#
+# 加载顺序：AppConfig 默认值 -> 本文件 -> 命令行覆盖
+# 未知字段会直接报错（不是静默忽略），拼错名字会立刻发现。
+
+name: game-bot
+
+# 流程定义文件（相对项目根目录）
+flow_file: config/flows/example_flow.yaml
+
+# 空跑：只识别状态、不真的操作游戏。
+# 第一次跑新脚本、或者改了识别条件之后，都先开这个看流程走向对不对。
+dry_run: false
+
+screen:
+  backend: windows          # windows | android | fake
+  window_title: ""          # 窗口标题关键字；留空 = 抓整个显示器
+  monitor_index: 1          # 1 = 主屏（抓窗口时忽略）
+  client_area_only: true    # 只抓客户区，不含标题栏与边框
+
+  # 源分辨率：留空(null) = 运行时自动探测。探测值与预期不符时填死，
+  # 可以尽早发现"DPI 缩放没关"这类问题。
+  source_size: null
+  # 逻辑分辨率：写脚本时使用的坐标系。留空 = 与源分辨率一致，不做换算。
+  # 例：游戏按 1920x1080 设计，但窗口只有 1280x720，就填 [1920, 1080]。
+  logic_size: null
+
+  # --- android 后端专用 ---
+  serial: ""                # 设备序列号；多设备时必填
+  adb_path: adb
+  max_fps: 5.0              # screencap 很慢，别调高
+
+  # --- windows 后端专用 ---
+  input_engine: direct      # direct = pydirectinput（游戏兼容好）| pyautogui
+
+  default_confidence: 0.9   # 找图默认阈值，单次查询可覆盖
+  keep_awake: true          # 运行时阻止休眠/屏保
+
+vision:
+  templates_dir: assets/templates
+  grayscale: true           # 灰度匹配：快且鲁棒，通常都该开
+  use_pyramid: true         # 多尺度匹配：窗口可能被缩放时开
+  ocr_engine: none          # none | rapid | tesseract；none 时 find_text 返回 not_found
+  ocr_lang: ch
+  ocr_confidence: 0.8
+  max_templates: 512
+
+timing:
+  tick_interval: 0.2        # 流程每轮间隔；给 0 会打满 CPU
+  action_interval: 0.1      # 连续动作间隔；太小会丢事件
+  wait_timeout: 10.0
+  wait_interval: 0.3
+  stable_threshold: 0.98
+  stable_frames: 3
+
+paths:
+  logs: logs
+  screenshots: logs/screenshots
+  journals: logs/journals
+
+logging:
+  level: INFO
+  file: ""                  # 留空 = 只输出控制台
+  log_frames_on_error: true # 失败时存图，调识别问题时基本都要开
