@@ -7,8 +7,9 @@
     ③ tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
     ④ 终态判断（stop_pages / 页面 terminal）
     ⑤ 未知页面处理（宽容期内只等，超时后按 on_unknown）
-    ⑥ 位置对齐 —— 实测页面 != 当前节点期望的页面时：
-         找 graph.node_for_page(实测页面) 跳过去；没人认领就什么都不做
+    ⑥ 位置检查 —— 实测页面 != 当前节点期望的页面时：
+         记一条警告，本轮**一个动作都不做**。
+         注意是"只拦不跳"：跳转必须由图里的边显式表达（见 _position_ok）
     ⑦ 守卫通过（页面已确认 + 位置对 + 未超次数 + 冷却已过）才执行节点步骤
     ⑧ cursor.step()                              时间：条件满足就换目标
     ⑨ 检查预算（时长 / 轮数），sleep(tick_interval)
@@ -16,6 +17,10 @@
 第 ⑥ 步是整套设计**最重要的安全属性**：实际页面和节点期望的页面不一致时，
 一个动作都不做。识图脚本最危险的失败模式就是在错误页面上瞎点 ——
 点错一个"确认"可能就是消耗道具或者进错关卡。
+
+第 ⑥ 步之所以"只拦不跳"，是为了让控制流只有一个出处：图。
+自动跳转虽然省事，但那次移动在 RunReport.decisions 里是隐形的，
+排查"它怎么跑那儿去了"时只能靠猜。
 
 第 ⑨ 步的 sleep 和所有等待一样是可中止的（``ctx.sleep`` → ``Event.wait``），
 所以点了停止是毫秒级响应，不是等满这一轮。
@@ -27,7 +32,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from ..exceptions import Cancelled
+from ..exceptions import Cancelled, FlowError
 from ..state.page import PageId
 from ..state.tracker import PageChange, PageTracker
 from ..utils.logging import get_logger
@@ -156,18 +161,33 @@ class FlowEngine:
         *,
         executor: Executor | None = None,
         tracker: PageTracker | None = None,
+        start_node: NodeId = "",
     ) -> None:
+        """
+        :param start_node: 从哪个节点开始跑；留空 = ``graph.initial``。
+
+            **用途是调试**：想测"战斗结束"那条分支，不用真从头把游戏玩到那一步 ——
+            把游戏手动摆到对应状态、选那个节点、点开始就行。
+            没有它，调一条后期分支的成本是"每次重跑整个流程"。
+
+            注意起始节点**不影响位置守卫**：它声明的 ``page`` 和实测不符时，
+            动作照样一个都不执行（这是"只拦不跳"的另一面）。
+        """
         self.scenario = scenario
         self.ctx = ctx
         self.executor = executor or getattr(ctx, "executor", None)
         self.tracker: PageTracker = tracker or ctx.pages
-        self.cursor = GraphCursor(scenario.graph)
+        self.start_node = start_node or scenario.graph.initial
+        if start_node and scenario.graph.node(start_node) is None:
+            raise FlowError(f"起始节点不存在: {start_node!r}")
+        self.cursor = GraphCursor(scenario.graph, current=self.start_node)
         self.report = RunReport(scenario=scenario.name)
 
         self._stop_reason: StopReason | None = None
         self._stop_message = ""
         self._unknown_since: float | None = None
         self._visited_nodes: dict[NodeId, int] = {}
+        self._position_warned: set[tuple[NodeId, PageId]] = set()
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -199,7 +219,14 @@ class FlowEngine:
         watch = Stopwatch()
         self.report.started_at = self.ctx.now()
         self.report.initial_page = self.tracker.current_id
-        log.info("脚本 %r 启动: 初始页面 %s", self.scenario.name, self.tracker.current_id)
+        # 从配置的起始节点开始（不是 graph.initial）—— 起点是运行参数的一部分
+        self.cursor.reset(to=self.start_node)
+        log.info(
+            "脚本 %r 启动: 起始节点 %s, 初始页面 %s",
+            self.scenario.name,
+            self.start_node,
+            self.tracker.current_id,
+        )
 
         try:
             while self.running:
@@ -290,22 +317,49 @@ class FlowEngine:
             self._unknown_since = None
         # WAIT: 什么都不做，继续等
 
-    def _align_to_page(self, page_id: PageId, *, now: float) -> tuple[bool, str]:
-        """把游标对齐到"认领了该页面的节点"。
+    def _position_ok(self, page_id: PageId) -> tuple[bool, str]:
+        """实测页面和当前节点声明的 ``page`` 一致吗。
 
-        :return: ``(是否已对齐, 说明)``。已经对齐或没人认领时都返回 False + 说明。
+        ## 只拦不跳（这是刻意选的）
+
+        不一致时**只返回 False**（本轮一个动作都不执行），**不**自动跳到
+        "认领了该页面的节点"。跳转必须由图里的边显式表达。理由：
+
+        * 控制流只有一个出处 —— "为什么它动了"永远能在图里找到答案；
+        * 每次移动都会进 :attr:`RunReport.decisions`，可调试性最好；
+        * 反过来做（自动跳）虽然"忘写边也能跑"，但那次移动在报告里
+          是隐形的，排查时只能靠猜。
+
+        代价是忘写边就原地不动。所以这里返回的说明会被引擎记成一条
+        警告（:meth:`_warn_position`）—— "不动"必须是有解释的，不是静默的。
+
+        ``Node.page is None`` 的节点不绑定页面，永远通过。
         """
         node = self.scenario.graph.node(self.cursor.current)
-        if node is not None and node.page == page_id:
-            return True, "已在期望页面上"
+        if node is None:
+            return False, f"当前节点不存在: {self.cursor.current!r}"
+        if node.page is None:
+            return True, "节点不绑定页面"
+        if node.page == page_id:
+            return True, "位置正确"
+        return False, f"节点 {node.id!r} 期望页面 {node.page!r}，实测是 {page_id!r}"
 
-        target = self.scenario.graph.node_for_page(page_id)
-        if target is None:
-            return False, f"没有节点认领页面 {page_id!r}，不做任何动作"
-        if target.id == self.cursor.current:
-            return True, "已对齐"
-        self.cursor.advance(target.id, now=now)
-        return True, f"对齐到节点 {target.id!r}"
+    def _warn_position(self, node_id: NodeId, page_id: PageId, reason: str) -> None:
+        """位置不符时记一条警告 —— 但**同一组合只记一次**。
+
+        每轮都记的话，一个卡住的脚本会在一分钟内刷出几千行同样的日志，
+        真正有用的信息反而被埋掉。
+        """
+        key = (node_id, page_id)
+        if key in self._position_warned:
+            return
+        self._position_warned.add(key)
+        log.warning(
+            "本轮不执行动作：%s。如果这是意料之外的，检查图里有没有从 %r 到"
+            '"认领该页面的节点"的边',
+            reason,
+            node_id,
+        )
 
     def _run_node(self, state_id: NodeId) -> list[StepOutcome]:
         """执行某节点的步骤（含 on_enter 首次执行）。"""

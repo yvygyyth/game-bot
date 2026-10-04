@@ -8,6 +8,7 @@
     gamebot capture   [--config PATH] [--out F]    截一张图存盘（验证坐标和后端）
     gamebot grab      --region x,y,w,h [--out F]   只截一个区域
     gamebot run       [--config PATH] [--dry-run]  跑流程
+    gamebot ui        [--script K] [--snapshot F]  打开本地控制台界面
 
 设计意图：**调试识图脚本 80% 的时间花在"确认我截到的是不是我以为的画面"上**，
 所以 capture / grab / windows 三个命令要放在最显眼的位置，而不是让人写临时脚本。
@@ -58,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--max-ticks", type=int, default=None, help="最大轮数")
     p_run.add_argument("--window", default=None, help="覆盖窗口标题")
     p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
+
+    p_ui = sub.add_parser("ui", parents=[common], help="打开本地控制台界面")
+    p_ui.add_argument("--script", default=None, help="预选脚本 key，如 testgame")
+    p_ui.add_argument(
+        "--snapshot",
+        default=None,
+        help="不开窗口，渲染一张界面截图存到指定路径后退出（无头自检用）",
+    )
 
     return parser
 
@@ -189,6 +198,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    """打开本地控制台界面。"""
+    from .ui import run_ui
+
+    if args.snapshot:
+        # 无头渲染：Qt 必须走离屏平台插件，否则没有显示器时构造窗口就退出
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return run_ui(
+        args.config,
+        script_key=args.script or "",
+        snapshot=args.snapshot or "",
+    )
+
+
 _HANDLERS = {
     "info": cmd_info,
     "check": cmd_check,
@@ -196,6 +221,7 @@ _HANDLERS = {
     "capture": cmd_capture,
     "grab": cmd_grab,
     "run": cmd_run,
+    "ui": cmd_ui,
 }
 
 

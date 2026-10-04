@@ -409,6 +409,17 @@ class TestGraphCursor:
         assert cursor.visits == {}
         assert cursor.history == ["a"]
 
+    def test_reset_can_target_another_node(self) -> None:
+        """引擎配了起始节点时，reset 必须回到**那个**节点，不是 graph.initial。"""
+        cursor = GraphCursor(small_graph())
+        cursor.reset(to="b")
+        assert cursor.current == "b"
+        assert cursor.history == ["b"]
+
+    def test_reset_rejects_unknown_target(self) -> None:
+        with pytest.raises(FlowError):
+            GraphCursor(small_graph()).reset(to="ghost")
+
     def test_edge_stats_tracks_counts(self) -> None:
         cursor = GraphCursor(small_graph())
         cursor.advance("b", now=5.0)
@@ -617,16 +628,52 @@ class TestFlowEngine:
 
     def test_align_to_page_without_claimed_node(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)
-        aligned, why = engine._align_to_page("nobody", now=0.0)
-        assert aligned is False
-        assert "没有节点认领" in why
+        ok, why = engine._position_ok("nobody")
+        assert ok is False
+        assert "期望页面" in why
 
-    def test_align_to_page_moves_cursor(self, ctx) -> None:
+    def test_position_ok_when_page_matches(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)
-        aligned, why = engine._align_to_page("battle", now=0.0)
-        assert aligned is True
-        assert "对齐到节点" in why
+        assert engine._position_ok("home") == (True, "位置正确")
+
+    def test_position_ok_for_page_less_node(self, ctx) -> None:
+        scenario = build_scenario()
+        scenario.graph.add_node(Node("free", page=None))
+        engine = FlowEngine(scenario, ctx, start_node="free")
+        ok, why = engine._position_ok("随便哪一页")
+        assert ok is True
+        assert "不绑定页面" in why
+
+    def test_position_mismatch_does_not_move_cursor(self, ctx) -> None:
+        """**只拦不跳**：位置不符时游标不动，跳转只能由边表达。"""
+        engine = FlowEngine(build_scenario(), ctx)
+        before = engine.cursor.current
+        assert engine._position_ok("battle") == (
+            False,
+            "节点 'home' 期望页面 'home'，实测是 'battle'",
+        )
+        assert engine.cursor.current == before
+
+    def test_position_warning_is_logged_once(self, ctx) -> None:
+        """卡住时不能每轮刷一行日志 —— 真正有用的信息会被埋掉。"""
+        engine = FlowEngine(build_scenario(), ctx)
+        engine._warn_position("home", "battle", "不符")
+        engine._warn_position("home", "battle", "不符")
+        assert len(engine._position_warned) == 1
+
+    def test_start_node_is_honoured(self, ctx) -> None:
+        engine = FlowEngine(build_scenario(), ctx, start_node="battle")
         assert engine.cursor.current == "battle"
+        assert engine.start_node == "battle"
+
+    def test_start_node_defaults_to_initial(self, ctx) -> None:
+        engine = FlowEngine(build_scenario(), ctx)
+        assert engine.start_node == "home"
+        assert engine.cursor.current == "home"
+
+    def test_unknown_start_node_raises(self, ctx) -> None:
+        with pytest.raises(FlowError):
+            FlowEngine(build_scenario(), ctx, start_node="ghost")
 
     def test_check_terminal(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)

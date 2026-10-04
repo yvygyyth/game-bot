@@ -108,6 +108,21 @@ python -m games selftest testgame # 跑脚本自带的自检（八项）
 约定见 [games/README.md](games/README.md)，
 沙盒的说明见 [games/testgame/README.md](games/testgame/README.md)。
 
+### 图形界面
+
+```bash
+uv sync --extra ui         # 界面依赖（PySide6，约 150MB，可选）
+gamebot ui                 # 打开本地控制台
+gamebot ui --script none   # 不选脚本，只用 config/app.yaml 看画面
+```
+
+现在的界面（阶段 1）能：**选游戏 / 选脚本 / 选起始节点**、看页面树与流程图、
+跑检查与自检、**实时画面预览**（抓帧在工作线程，不卡界面）、日志大框。
+
+「开始 / 停止」是**置灰**的 —— 它们要等 `PageTree.locate()` 与
+`FlowEngine.tick()`。灰按钮带 tooltip 说明原因，不是点了没反应。
+设计、线程模型、以及做完之后回填的六条坑见 [docs/ui.md](docs/ui.md)。
+
 ### CLI 子命令
 
 | 命令 | 用途 |
@@ -201,9 +216,9 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 | 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；9 个 Step 的 `run()`、`Executor.run`、journal 落盘待实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
 | 业务层 | 🟡 部分 | ★ 按游戏/功能两级、注册表自动发现、`check`/`setup`/`selftest` 已实现；`games/testgame` 是完整样板（合成屏幕 + 八项自检） |
-| 日志 | 🟡 部分 | 控制台 + 文件 handler 已实现；内存环形缓冲、每次运行独立日志、结构化事件流待实现 |
-| UI | ⬜ 未开始 | 设计见 [docs/ui.md](docs/ui.md)（阶段 1 现在就能做） |
-| 测试 | ✅ 332 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
+| 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥已实现；每次运行独立日志、结构化事件流待实现 |
+| UI | 🟡 阶段 1 完成 | PySide6 本地控制台：选游戏/脚本/起始节点、实时画面预览、日志大框、检查/自检。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
+| 测试 | ✅ 355 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
@@ -213,14 +228,15 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 ### 下一步
 
 原子层已封板（L0~L5 + 视觉 + 平台后端全部实现并在真机验证过），
-业务层骨架和测试游戏也齐了。按依赖顺序还剩：
+业务层骨架、测试游戏、界面阶段 1 也齐了。按依赖顺序还剩：
 
-1. `PageTree.locate()` —— 状态层闭环（算法已写进它的 docstring）；
-   有了 `games/testgame` 的合成屏幕，它是**第一个能端到端验证**的方法
-2. `FlowEngine.tick()` —— 把定位、对齐、守卫、执行、转移串起来
+1. **`PageTree.locate()`** —— 状态层闭环（算法已写进它的 docstring）；
+   有了 `games/testgame` 的合成屏幕，它是**第一个能端到端验证**的方法：
+   渲染一页 → 定位 → 断言得到的就是那一页
+2. `FlowEngine.tick()` —— 把定位、守卫、执行、转移串起来
 3. `Executor.run` + 9 个 Step 的 `run()` —— 动作真正能下发
-4. `events.py` + 日志 handler —— UI 和 journal 的数据源（见 [docs/ui.md](docs/ui.md)）
-5. UI 阶段 1 —— 选脚本 / 看画面 / 日志框（**不依赖上面任何一条**）
+4. `events.py`（结构化事件流）+ 每次运行独立日志 —— UI 阶段 2 与 journal 的数据源
+5. UI 阶段 2 —— 开始/停止、状态面板（预览要改成复用引擎那一帧）
 6. `query_from_dict` + `step_from_dict` —— 让 YAML 真正驱动脚本
 7. OCR 实测（装 `--extra ocr-rapid` 后跑一遍 `find_text`）
 

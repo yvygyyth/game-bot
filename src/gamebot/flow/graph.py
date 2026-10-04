@@ -666,9 +666,17 @@ class GraphCursor:
             self.advance(decision.target, now=now)
         return decision.target
 
-    def reset(self) -> None:
-        """回到起点，清空所有计数（不产生历史记录）。"""
-        self.current = self.graph.initial
+    def reset(self, *, to: NodeId = "") -> None:
+        """回到起点，清空所有计数（不产生历史记录）。
+
+        :param to: 回到哪个节点；留空 = ``graph.initial``。
+            ``FlowEngine`` 传它配置的起始节点 —— 不这样的话，
+            "从节点 X 开始"的语义会在任何一次 reset 之后悄悄丢掉。
+        """
+        target = to or self.graph.initial
+        if target and self.graph.node(target) is None:
+            raise FlowError(f"reset 的目标节点不存在: {target!r}")
+        self.current = target
         self.stats.reset()
         self.visits.clear()
         self.history.clear()

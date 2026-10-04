@@ -19,6 +19,8 @@ android = ["adbutils>=2.0"]
 # OCR：find_text / read_text / read_number 需要其中之一
 ocr-rapid = ["rapidocr-onnxruntime>=1.3.0"]
 ocr-tesseract = ["pytesseract>=0.3.10"]
+# 本地控制台界面（见 docs/ui.md）。约 150MB，所以是可选的。
+ui = ["PySide6>=6.6"]
 
 [project.scripts]
 gamebot = "gamebot.__main__:main"
