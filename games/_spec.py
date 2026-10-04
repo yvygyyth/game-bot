@@ -65,6 +65,13 @@ class ScriptSpec:
     selftest: Callable[[], list[str]] | None = None
     """可选的 ``selftest()`` —— 返回失败说明列表（空 = 全过）。"""
 
+    probe: Callable[[], list[str]] | None = None
+    """可选的 ``probe()`` —— **真机**探针：现在屏幕上认不认得出来。
+
+    和 ``selftest()`` 是两件事：那个查"这份定义成不成立"（静态、不需要游戏），
+    这个查"此刻屏幕上认不认得出来"（要游戏开着、并在预期的页面上）。
+    """
+
     def __repr__(self) -> str:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
 
@@ -164,6 +171,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             prepare=getattr(module, "prepare", None),
             auto_prepare=bool(getattr(module, "AUTO_PREPARE", False)),
             selftest=getattr(module, "selftest", None),
+            probe=getattr(module, "probe", None),
         )
 
     _SCRIPTS = found

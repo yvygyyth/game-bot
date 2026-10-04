@@ -14,7 +14,7 @@ dry_run: false
 
 screen:
   backend: windows          # windows | android | fake
-  window_title: ""          # 窗口标题关键字；留空 = 抓整个显示器
+  window_title: "名将杀"    # 窗口标题关键字；留空 = 抓整个显示器
   monitor_index: 1          # 1 = 主屏（抓窗口时忽略）
   client_area_only: true    # 只抓客户区，不含标题栏与边框
 

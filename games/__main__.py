@@ -164,6 +164,31 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """**真机探针**：抓一张当前画面，看这个脚本现在认不认得出目标。
+
+    和 ``selftest`` 的区别：那个是静态自检（这份定义成不成立），
+    这个是"**现在**屏幕上认不认得出来" —— 要游戏开着、并在预期的页面上。
+    """
+    spec = get_script(args.script)
+    if spec.probe is None:
+        print(f"· {spec.key} 没有 probe()")
+        return 0
+
+    print(f"探针 {spec.key}（{spec.title}）")
+    try:
+        failures = spec.probe()
+    except Exception as exc:
+        print(f"✗ {type(exc).__name__}: {exc}")
+        return 1
+    print()
+    if failures:
+        print(f"✗ {len(failures)} 项失败")
+        return 1
+    print("✓ 认出来了")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m games",
@@ -179,7 +204,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("describe", "打印页面树 + 流程图"),
         ("check", "校验定义并检查模板文件"),
-        ("selftest", "跑脚本自带的自检"),
+        ("selftest", "跑脚本自带的自检（静态）"),
+        ("probe", "真机探针：现在屏幕上认不认得出来"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("script", help="脚本 key，如 testgame")
@@ -197,6 +223,7 @@ _HANDLERS = {
     "check": cmd_check,
     "setup": cmd_setup,
     "selftest": cmd_selftest,
+    "probe": cmd_probe,
 }
 
 

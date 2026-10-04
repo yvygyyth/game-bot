@@ -316,20 +316,64 @@ class WindowsInputBackend:
         ``"pyautogui"`` 用通用实现（组合键、中文输入更省事）。
     :param key_hold: 组合键/拖拽时每个键按下的保持时间（秒）。
         给 0 时部分游戏会漏收按键。
+    :param offset_provider: 返回**捕获区在屏幕上的原点**的可调用对象
+        （通常是 ``WindowsScreenBackend.source_region``）。见下面"坐标系"。
+
+    ## 坐标系（这里曾经有个真 bug）
+
+    本后端收到的点**是源坐标**（0 起点 = 捕获区左上角），而
+    ``SetCursorPos``/``SendInput`` 要的是**绝对屏幕坐标**。所以必须加上
+    捕获区原点。``WindowsScreenBackend.grab()`` 一直做着这件事
+    （``base.x + region.x``），但输入这条路当初漏了 —— 结果是每一次真实点击
+    都偏一个窗口位置（这台机器上是左偏 21、上偏 49）。
+
+    为什么漏了这么久没被发现：整张卡片这种大目标，偏几十像素**照样点在卡上**，
+    看起来完全正常。只有小目标、或者靠近边缘的目标才会明显点空。
+    而输入这条链路一直只用 ``FakeInputBackend`` 验证过 —— 假后端不关心屏幕坐标，
+    所以永远测不出来。教训：**假后端能验证逻辑，验证不了坐标系。**
+
+    偏移在**每次调用时**现取，不在构造时算死：窗口会被拖动、脚本跑着跑着
+    用户可能挪一下窗口，算死就会悄悄错位。
     """
 
     name = "windows-input"
 
-    def __init__(self, *, engine: str = "direct", key_hold: float = 0.02) -> None:
+    def __init__(
+        self,
+        *,
+        engine: str = "direct",
+        key_hold: float = 0.02,
+        offset_provider: Any = None,
+    ) -> None:
         if sys.platform != "win32":
             raise BackendUnavailable("windows 后端只能在 Windows 上使用")
         self.engine = engine
         self.key_hold = key_hold
         self._impl: Any = None
+        self._offset_provider = offset_provider
 
     # ------------------------------------------------------------------ #
     # 内部
     # ------------------------------------------------------------------ #
+    def _offset(self) -> tuple[int, int]:
+        """捕获区原点（绝对屏幕坐标）。取不到就当 (0,0) —— 抓整屏时就是它。
+
+        取不到时**不能抛异常**：宁可点偏也不能让"窗口刚被关掉"变成脚本崩溃。
+        """
+        provider = self._offset_provider
+        if provider is None:
+            return (0, 0)
+        try:
+            region = provider()
+            return (int(region.x), int(region.y))
+        except Exception:
+            return (0, 0)
+
+    def _absolute(self, point: Point) -> tuple[int, int]:
+        """源坐标 -> 绝对屏幕坐标。所有涉及坐标的调用都必须过这一道。"""
+        dx, dy = self._offset()
+        return point.x + dx, point.y + dy
+
     def _load(self) -> Any:
         if self._impl is not None:
             return self._impl
@@ -366,7 +410,8 @@ class WindowsInputBackend:
     # 协议
     # ------------------------------------------------------------------ #
     def move_to(self, point: Point, duration: float = 0.2) -> None:
-        self._load().moveTo(point.x, point.y, duration=duration)
+        x, y = self._absolute(point)
+        self._load().moveTo(x, y, duration=duration)
 
     def click(
         self,
@@ -377,7 +422,8 @@ class WindowsInputBackend:
         interval: float = 0.1,
     ) -> None:
         impl = self._load()
-        impl.moveTo(point.x, point.y, duration=0)
+        x, y = self._absolute(point)
+        impl.moveTo(x, y, duration=0)
         if clicks <= 1:
             impl.click(button=button)
             return
@@ -399,7 +445,9 @@ class WindowsInputBackend:
         button: str = "left",
     ) -> None:
         impl = self._load()
-        impl.moveTo(start.x, start.y, duration=0)
+        sx, sy = self._absolute(start)
+        ex, ey = self._absolute(end)
+        impl.moveTo(sx, sy, duration=0)
         impl.mouseDown(button=button)
         try:
             # 起点先停一下：部分游戏需要"按住"稳定后才认拖拽
@@ -408,8 +456,8 @@ class WindowsInputBackend:
             for step in range(1, steps + 1):
                 ratio = step / steps
                 impl.moveTo(
-                    round(start.x + (end.x - start.x) * ratio),
-                    round(start.y + (end.y - start.y) * ratio),
+                    round(sx + (ex - sx) * ratio),
+                    round(sy + (ey - sy) * ratio),
                     duration=0,
                 )
                 time.sleep(duration / steps)
@@ -420,7 +468,8 @@ class WindowsInputBackend:
     def scroll(self, clicks: int, point: Point | None = None) -> None:
         impl = self._load()
         if point is not None:
-            impl.moveTo(point.x, point.y, duration=0)
+            x, y = self._absolute(point)
+            impl.moveTo(x, y, duration=0)
         impl.scroll(clicks)
 
     def type_text(self, text: str, *, interval: float = 0.05) -> None:
@@ -478,13 +527,20 @@ def build_windows_backends(
     input_engine: str = "direct",
     **_ignored: Any,
 ) -> BackendBundle:
-    """装配 Windows 三件套。"""
+    """装配 Windows 三件套。
+
+    注意这里把 ``screen.source_region`` 交给了输入后端 —— **输入必须加和截图
+    同样的原点偏移**，否则每次点击都偏一个窗口位置（见
+    :class:`WindowsInputBackend` 的坐标系说明）。两者用同一个来源，
+    从构造上保证它们不可能不一致。
+    """
+    screen = WindowsScreenBackend(
+        window_title=window_title,
+        monitor_index=monitor_index,
+        client_area_only=client_area_only,
+    )
     return BackendBundle(
-        screen=WindowsScreenBackend(
-            window_title=window_title,
-            monitor_index=monitor_index,
-            client_area_only=client_area_only,
-        ),
-        input=WindowsInputBackend(engine=input_engine),
+        screen=screen,
+        input=WindowsInputBackend(engine=input_engine, offset_provider=screen.source_region),
         window=WindowsWindowBackend(client_area_only=client_area_only),
     )
