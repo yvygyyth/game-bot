@@ -20,7 +20,7 @@ from gamebot.flow import (
     StopReason,
     UnknownPolicy,
 )
-from gamebot.state import Page, PageMatch, PageTracker, PageTree
+from gamebot.state import Page, PageKind, PageMatch, PageTracker, PageTree
 from gamebot.types import ActionResult, Point
 
 
@@ -486,6 +486,15 @@ class TestScenario:
         scenario = build_scenario()
         scenario.tree.add(Page("nobody", queries=(ImageQuery("n.png"),)))
         assert scenario.unclaimed_pages() == ("nobody",)
+
+    def test_unclaimed_pages_skips_overlays_and_terminal(self) -> None:
+        """叠加层不是一个"能待着的位置"，终态页面进了就结束 —— 都不需要节点。"""
+        scenario = build_scenario()
+        scenario.tree.add(
+            Page("popup", kind=PageKind.OVERLAY, queries=(ImageQuery("p.png"),))
+        )
+        del scenario.graph.nodes["closed"]  # closed 是终态页面
+        assert scenario.unclaimed_pages() == ()
 
     def test_describe_and_to_dict(self) -> None:
         scenario = build_scenario()

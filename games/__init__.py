@@ -61,6 +61,7 @@ from ._spec import (  # noqa: E402  （必须先处理 sys.path 再导入 gamebo
     get_script,
     list_scripts,
     on_page,
+    within_page,
 )
 
 __all__ = [
@@ -69,4 +70,5 @@ __all__ = [
     "get_script",
     "list_scripts",
     "on_page",
+    "within_page",
 ]

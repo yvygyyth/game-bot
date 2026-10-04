@@ -494,7 +494,11 @@ class PageTree:
            **中间节点允许无条件**：那是合法的 pass-through 分组，
            只用来挂 ``roi`` 或组织结构；
         6. 叠加层不能有子页面 —— 弹窗里再套层级会让定位结果无法解释；
-        7. ``terminal`` 页面不该有子页面。
+        7. ``terminal`` 页面不该有子页面；
+        8. **子页面的 roi 必须落在父页面的有效 roi 内**。roi 是**整棵子树**的
+           搜索范围（不只是这一页自己的），子页面的 roi 伸到父页面框外，
+           就意味着它会在"父页面根本不存在"的地方去找自己的特征 ——
+           这正是那种"偶尔认错页面"的难查 bug。
 
         :raises StateError: 校验失败，message 里带上全部问题。
         """
@@ -530,6 +534,25 @@ class PageTree:
                 )
             if page.terminal and children:
                 problems.append(f"终态页面 {page.id!r} 不该有子页面")
+
+        for page in self._pages.values():
+            if page.roi is None:
+                continue
+            parent_id = self._parent.get(page.id)
+            if parent_id is None:
+                continue
+            parent_roi = self.effective_roi(parent_id)
+            own_roi = self.effective_roi(page.id)
+            if (
+                parent_roi is not None
+                and own_roi is not None
+                and not parent_roi.contains_region(own_roi)
+            ):
+                problems.append(
+                    f"页面 {page.id!r} 的有效 roi {own_roi.to_tuple()} 超出了父页面 "
+                    f"{parent_id!r} 的 {parent_roi.to_tuple()} —— "
+                    "roi 是整棵子树的搜索范围，伸到外面会让这一页永远定位不到"
+                )
 
         if problems:
             raise StateError("页面树校验失败:\n  - " + "\n  - ".join(problems))

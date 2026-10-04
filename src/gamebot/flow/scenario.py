@@ -181,11 +181,21 @@ class Scenario:
     def unclaimed_pages(self) -> tuple[PageId, ...]:
         """没有任何节点声明认领的页面。
 
-        **不是错误** —— 有些页面就是纯观察（等它自己过去），不需要动作。
+        两类页面**不算数**，因为它们本来就不该有节点：
+
+        * **叠加层**（``kind=OVERLAY``）不是一个"能待着的位置"，
+          而是"主页面之上多了一层"。它由定位逻辑单独识别，不靠节点认领；
+        * **终态页面**（``terminal=True``）进了就结束，也不需要动作。
+
+        剩下的未认领页面**不是错误** —— 有些页面就是纯观察（等它自己过去）。
         但数量多的时候值得看一眼是不是漏写了流程。``gamebot check`` 会提示。
         """
         claimed = {n.page for n in self.graph.nodes.values() if n.page}
-        return tuple(p.id for p in self.tree.walk() if p.id not in claimed)
+        return tuple(
+            p.id
+            for p in self.tree.walk()
+            if p.id not in claimed and not p.is_overlay and not p.terminal
+        )
 
     def describe(self) -> str:
         """可读的完整描述，给日志和 ``gamebot check`` 用。"""

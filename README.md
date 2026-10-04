@@ -15,15 +15,17 @@
 
 ```
 game-bot/
-├── config/                      # 配置（YAML）—— 改流程不用改 Python
+├── config/                      # 框架级配置样板（app.yaml / regions.yaml）
 │   ├── app.yaml                 #   主配置：后端 / 视觉 / 节奏 / 路径
 │   ├── regions.yaml             #   命名区域：把坐标从代码里挪出来
-│   └── flows/example_flow.yaml   #   流程样板：状态 + 节点 + 转移
-├── assets/templates/            # 模板图（按界面分子目录）
+│   └── flows/example_flow.yaml   #   脚本定义样板（页面树 + 流程图）
+├── assets/templates/            # 框架自带模板目录（业务层的图在自己的目录里）
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
 │   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
 │   └── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
+├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
+│   └── testgame/                #   沙盒测试游戏：合成屏幕 + 八项自检
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）
@@ -56,15 +58,17 @@ game-bot/
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
 │   ├── config/                  # 配置模型与加载
 │   └── utils/                   # 日志、计时
-├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
-│   └── <游戏>/<功能>/            #   页面 / 流程 / 专用步骤 / 图片资源
-├── tests/                       # 结构测试 + 已实现部分的测试
+├── tests/                       # 框架的结构测试 + 已实现部分的单元测试
 └── main.py                      # 不安装也能跑：python main.py run
 ```
 
 **框架和业务是分开的**：`src/gamebot/` 不认识任何具体游戏；
 `games/` 才是认识游戏的地方（一级按游戏、二级按脚本功能）。
 写业务代码只碰 `games/`，改框架才碰 `src/gamebot/`。
+
+`tests/` 放的是**框架自己**的单元测试（层级依赖、类型契约、决策逻辑）；
+`games/` 里的脚本各自带 `selftest()`，检查的是"这份定义本身对不对"
+（图齐不齐、ROI 框得对不对、页面之间有没有区分度）。两边职责不同。
 
 ## 快速开始
 
@@ -91,14 +95,17 @@ python main.py capture -o a.png
 ### 写脚本（业务层）
 
 ```bash
-python -m games list                            # 有哪些脚本
-python -m games describe mingjiangsha/qianli    # 页面树 + 流程图长什么样（不连游戏）
-python -m games check mingjiangsha/qianli       # 定义对不对、缺哪些图
+python -m games list              # 有哪些脚本
+python -m games describe testgame # 页面树 + 流程图长什么样（不连游戏）
+python -m games check    testgame # 定义对不对、缺哪些图
+python -m games selftest testgame # 跑脚本自带的自检（八项）
 ```
 
-`games/` 里已经放了两个可跑的样板：`daily`（最简单的直线流程）和
-`qianli`（多页面循环 + roi + 兜底边）。约定见
-[games/README.md](games/README.md)。
+`games/testgame/` 是一个完整可跑的样板，而且**不需要真实游戏窗口** ——
+它的屏幕是用代码合成的（确定性噪声画出来的假界面），
+所以模板匹配、ROI 累加、坐标换算都能在没有游戏的情况下验证。
+约定见 [games/README.md](games/README.md)，
+沙盒的说明见 [games/testgame/README.md](games/testgame/README.md)。
 
 ### CLI 子命令
 

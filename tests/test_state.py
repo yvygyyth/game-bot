@@ -314,6 +314,32 @@ class TestPageTreeValidate:
         with pytest.raises(NotImplementedError):
             PageTree.from_nested({})
 
+    def test_child_roi_outside_parent_raises(self) -> None:
+        """roi 是**整棵子树**的搜索范围，伸出父页面框外就等于在别处瞎找。"""
+        tree = PageTree()
+        tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(0, 0, 100, 100)))
+        tree.add(
+            Page("root/kid", queries=(ImageQuery("k.png"),), roi=Region(50, 50, 100, 100)),
+            parent="root",
+        )
+        with pytest.raises(StateError) as excinfo:
+            tree.validate()
+        assert "超出了父页面" in str(excinfo.value)
+
+    def test_child_roi_inside_parent_passes(self) -> None:
+        tree = PageTree()
+        tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(0, 0, 200, 200)))
+        tree.add(
+            Page("root/kid", queries=(ImageQuery("k.png"),), roi=Region(20, 20, 50, 50)),
+            parent="root",
+        )
+        assert tree.validate() is None
+
+    def test_root_with_roi_has_no_parent_constraint(self) -> None:
+        tree = PageTree()
+        tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(500, 500, 100, 100)))
+        assert tree.validate() is None
+
     def test_locate_is_a_stub(self) -> None:
         with pytest.raises(NotImplementedError):
             build_tree().locate(None)  # type: ignore[arg-type]

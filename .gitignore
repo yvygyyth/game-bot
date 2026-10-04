@@ -26,6 +26,11 @@ artifacts/
 debug/**
 !debug/.gitkeep
 
+# ---- 业务层的生成物 ----
+# 沙盒测试游戏的模板是用代码合成出来的（见 games/testgame/scene.py），
+# 属于产物不是素材 —— 跑 `python -m games setup testgame` 重新生成。
+games/testgame/templates/
+
 # ---- IDE ----
 .idea/
 .vscode/

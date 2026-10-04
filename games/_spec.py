@@ -24,9 +24,10 @@ __all__ = [
     "ScriptSpec",
     "discovery_errors",
     "get_script",
-    "iter_feature_dirs",
+    "iter_script_dirs",
     "list_scripts",
     "on_page",
+    "within_page",
 ]
 
 ROOT = Path(__file__).resolve().parent
@@ -54,6 +55,15 @@ class ScriptSpec:
     module: str
     build_config: Callable[[], AppConfig]
     build_scenario: Callable[[], Scenario]
+    prepare: Callable[..., Any] | None = None
+    """可选的 ``prepare()`` —— 生成 / 下载这个脚本需要的资源（图片等）。"""
+
+    auto_prepare: bool = False
+    """脚本声明了 ``AUTO_PREPARE = True`` 时，``check`` 发现资源缺失会自动跑
+    ``prepare()``。**真实游戏别开**：下载几百张图这种事不该藏在 check 里。"""
+
+    selftest: Callable[[], list[str]] | None = None
+    """可选的 ``selftest()`` —— 返回失败说明列表（空 = 全过）。"""
 
     def __repr__(self) -> str:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
@@ -63,17 +73,52 @@ _SCRIPTS: dict[str, ScriptSpec] | None = None
 _ERRORS: list[tuple[str, str]] = []
 
 
-def iter_feature_dirs() -> Iterator[tuple[str, str, Path]]:
-    """遍历所有 ``(游戏, 功能, 目录)`` 三元组。纯目录扫描，不导入。"""
-    for game_dir in sorted(p for p in ROOT.iterdir() if p.is_dir()):
-        if game_dir.name.startswith((".", "_")) or game_dir.name in _SKIP_GAME_DIRS:
-            continue
-        for feature_dir in sorted(p for p in game_dir.iterdir() if p.is_dir()):
-            if feature_dir.name.startswith((".", "_")) or feature_dir.name in _SKIP_FEATURE_DIRS:
-                continue
-            if not (feature_dir / "__init__.py").is_file():
-                continue
-            yield game_dir.name, feature_dir.name, feature_dir
+def _game_dirs() -> list[Path]:
+    return [
+        p
+        for p in sorted(ROOT.iterdir())
+        if p.is_dir() and not p.name.startswith((".", "_")) and p.name not in _SKIP_GAME_DIRS
+    ]
+
+
+def _feature_dirs(game_dir: Path) -> list[Path]:
+    return [
+        p
+        for p in sorted(game_dir.iterdir())
+        if p.is_dir()
+        and not p.name.startswith((".", "_"))
+        and p.name not in _SKIP_FEATURE_DIRS
+        and (p / "__init__.py").is_file()
+    ]
+
+
+def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
+    """遍历所有 ``(key, 游戏, 模块路径尾段, 目录)``。纯目录扫描，不导入。
+
+    两种布局都支持：
+
+    * **多脚本游戏**：``games/<游戏>/<功能>/`` —— 每个功能一个脚本，
+      key 是 ``"<游戏>/<功能>"``；
+    * **单脚本游戏**：``games/<游戏>/`` 自己就是一个脚本（没有功能子目录），
+      key 就是 ``"<游戏>"``。测试游戏、小工具属于这种，不该为了凑格式
+      硬套一层目录。
+
+    一个游戏目录**同时**有功能子目录和自己的 ``build_scenario`` 时，
+    以功能子目录为准（游戏目录只当容器）—— 避免"这个 __init__.py 到底是
+    容器还是脚本"的二义性。
+    """
+    for game_dir in _game_dirs():
+        features = _feature_dirs(game_dir)
+        if features:
+            for feature_dir in features:
+                yield (
+                    f"{game_dir.name}/{feature_dir.name}",
+                    game_dir.name,
+                    feature_dir.name,
+                    feature_dir,
+                )
+        elif (game_dir / "__init__.py").is_file():
+            yield game_dir.name, game_dir.name, game_dir.name, game_dir
 
 
 def discovery_errors() -> list[tuple[str, str]]:
@@ -91,9 +136,8 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
     found: dict[str, ScriptSpec] = {}
     errors: list[tuple[str, str]] = []
 
-    for game, slug, _path in iter_feature_dirs():
-        key = f"{game}/{slug}"
-        module_name = f"games.{game}.{slug}"
+    for key, game, slug, _path in iter_script_dirs():
+        module_name = f"games.{game}" if key == game else f"games.{game}.{slug}"
         try:
             module = importlib.import_module(module_name)
         except Exception as exc:
@@ -117,6 +161,9 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             module=module_name,
             build_config=build_config,
             build_scenario=build_scenario,
+            prepare=getattr(module, "prepare", None),
+            auto_prepare=bool(getattr(module, "AUTO_PREPARE", False)),
+            selftest=getattr(module, "selftest", None),
         )
 
     _SCRIPTS = found
@@ -125,7 +172,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
 
 
 def get_script(key: str) -> ScriptSpec:
-    """按 key 取脚本。``"mingjiangsha/qianli"`` 和 ``"mingjiangsha.qianli"`` 都认。
+    """按 key 取脚本。``"testgame"`` 和 ``"testgame.daily"`` 两种写法都认。
 
     :raises KeyError: 不存在，message 里会列出可用的 key。
     """
@@ -142,7 +189,7 @@ def get_script(key: str) -> ScriptSpec:
 
 
 def on_page(page_id: str) -> Callable[[Any], bool]:
-    """边条件：当前页面（或任一叠加层）就是它。
+    """边条件：当前页面（或任一叠加层）**就是**它。
 
     用来把"页面变了"写成显式的边::
 
@@ -150,10 +197,38 @@ def on_page(page_id: str) -> Callable[[Any], bool]:
 
     用 ``ctx.is_()`` 而不是比 ``ctx.page_id`` —— 后者不看叠加层，
     写成条件时会漏掉"结算页面 + 领奖弹窗"这种共存状态。
+
+    注意它问的是**精确**的"就是它"，不是"它的 UI 还在不在"。
+    要后者用 :func:`within_page`。
     """
 
     def _condition(ctx: Any) -> bool:
         return bool(ctx.is_(page_id))
 
     _condition.__name__ = f"on_page({page_id!r})"
+    return _condition
+
+
+def within_page(page_id: str) -> Callable[[Any], bool]:
+    """边条件：当前页面是它**或它的后代**（"这棵子树的 UI 还在屏幕上"）。
+
+    和 :func:`on_page` 的区别只在子树里看得出来：页面停在 ``root/menu/list`` 时，
+    ``within_page("root")`` 是 True（root 的顶栏底栏确实还画着），
+    而 ``on_page("root")`` 是 False。
+
+    什么时候用哪个：
+
+    * **精确转移**（"结算页出现了，去处理结算"）-> :func:`on_page`；
+    * **兜底回收**（"不管跑到哪一层了，回顶层重来"）-> :func:`within_page`。
+
+    两者框架级都还没有 —— 现在它们只是"读 ctx 的谓词"，
+    因为 :class:`~gamebot.flow.graph.Edge` 本来就允许塞 lambda。
+    等这类谓词攒够几个，再考虑收进框架变成可序列化的 Query。
+    """
+
+    def _condition(ctx: Any) -> bool:
+        match = getattr(ctx, "page", None)
+        return bool(match is not None and page_id in match.path)
+
+    _condition.__name__ = f"within_page({page_id!r})"
     return _condition

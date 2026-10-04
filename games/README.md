@@ -2,17 +2,23 @@
 
 `src/gamebot/` 是**框架**，它不认识任何具体游戏。这里才是认识游戏的地方。
 
-## 目录约定
+## 两种布局都支持
 
 ```
 games/
-└── <游戏>/                        一级：一个游戏一个目录
+├── <单脚本游戏>/                  这个游戏只有一个脚本 —— 目录本身就是脚本
+│   ├── __init__.py                ★ build_config() + build_scenario()
+│   ├── scene.py / pages.py        页面与屏幕
+│   ├── graph.py / steps.py        流程与步骤
+│   └── templates/                 图片资源
+│
+└── <多脚本游戏>/                   一级：一个游戏一个目录
     ├── game.py                    游戏级定义：窗口、锁定分辨率、公共配置
     ├── pages.py                   游戏级公共页面（首页、各类弹窗）
     ├── shortcuts.py               游戏级快捷方法（关弹窗、回主界面）
     ├── templates/                 游戏级公共模板
     └── <功能>/                    二级：一个脚本功能一个目录
-        ├── __init__.py            ★ 装配：build_config() + build_scenario()
+        ├── __init__.py            ★ build_config() + build_scenario()
         ├── pages.py               这个功能的页面（状态对象）
         ├── graph.py               这个功能的流程（节点 + 边）
         ├── steps.py               这个功能专用的步骤
@@ -21,32 +27,46 @@ games/
         └── README.md              这个脚本怎么调
 ```
 
-**一级按游戏、二级按功能**的理由：
+**不要为了凑格式硬套一层目录**：只有一个脚本的游戏（测试游戏、小工具）
+直接把 `__init__.py` 放在游戏目录下就行，key 就是游戏名（`testgame`）。
+一个游戏目录既有功能子目录、自己又有 `build_scenario` 时，以功能子目录为准。
 
-* 游戏级放"所有脚本都要用"的东西——窗口标题、分辨率、公共弹窗。
-  改一次全体受益，不用在每个脚本里重复。
-* 功能级放"只跟这个玩法有关"的东西——页面、流程、专用图、专用步骤。
+一级按游戏、二级按功能的理由：
+
+* **游戏级**放"所有脚本都要用"的东西 —— 窗口标题、分辨率、公共弹窗。
+  改一次全体受益，不用在每个脚本里重复；
+* **功能级**放"只跟这个玩法有关"的东西 —— 页面、流程、专用图、专用步骤。
   一个功能改坏了不影响别的。
 
 ## 唯一需要记住的规则
 
-功能包的 `__init__.py` 暴露两个函数，注册表就会**自动发现**它：
+脚本包的 `__init__.py` 暴露两个函数，注册表就会**自动发现**它：
 
 ```python
 def build_config() -> AppConfig: ...     # 这个脚本怎么跑（窗口、分辨率、模板根）
 def build_scenario() -> Scenario: ...    # 这个脚本做什么（页面树 + 流程图 + 参数）
 ```
 
-再给两个字符串 `TITLE` / `DESCRIPTION`（可选），`python -m games list` 会显示。
+可选再加三样：
 
-不需要维护一张手写的清单，也不会出现"新加了脚本但忘了登记"。
+```python
+TITLE = "千里单骑刷本"          # list 里显示的名字
+DESCRIPTION = "自动刷本……"      # 一句话说明
+def prepare() -> int: ...       # 生成/下载资源（图片），返回处理了几个文件
+AUTO_PREPARE = True             # 允许 check 在资源缺失时自动跑 prepare()
+def selftest() -> list[str]: ...  # 自检，返回失败说明（空 = 全过）
+```
 
-## 三个命令（都不用连游戏）
+不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。
+
+## 四个命令（都不用连游戏）
 
 ```bash
-python -m games list                            # 有哪些脚本
-python -m games describe mingjiangsha/qianli    # 页面树 + 流程图长什么样
-python -m games check mingjiangsha/qianli       # 定义对不对、缺哪些图
+python -m games list                # 有哪些脚本
+python -m games describe testgame   # 页面树 + 流程图长什么样
+python -m games check    testgame   # 定义对不对、缺哪些图
+python -m games setup    testgame   # 生成 / 下载资源（幂等）
+python -m games selftest testgame   # 跑脚本自带的自检
 ```
 
 `check` 是写脚本时最该反复跑的一条。它挡掉的是这几类问题：
@@ -57,18 +77,29 @@ python -m games check mingjiangsha/qianli       # 定义对不对、缺哪些图
 | 边的 source/target 拼错 | 同上 |
 | 从 initial 走不到的节点 | 死代码，白写 |
 | 模板文件忘了放 | 运行十分钟后才在某个分支报"找不到图" |
-| 页面树里叠加层带了子页面 | 定位结果无法解释 |
+| 子页面的 roi 伸出父页面 | 那一页**永远定位不到** |
+| 叠加层带了子页面 | 定位结果无法解释 |
+
+## 参考实现：`testgame`
+
+**先看 [`testgame/`](testgame/README.md)** —— 它是一份能跑、能自检的完整样板，
+而且把"合成屏幕"的做法也包含了：不依赖真实窗口就能验证模板匹配、
+ROI 累加、坐标换算。它还是框架的回归测试：
+
+```bash
+python -m games selftest testgame
+```
 
 ## 图片资源怎么放
 
-每个功能有自己的模板根，**优先级高于游戏级**：
+多脚本游戏里，每个功能有自己的模板根，**优先级高于游戏级**：
 
 ```python
-config.vision.templates_dir = "games/mingjiangsha/templates"          # 游戏级公共
-config.vision.extra_template_dirs = ("games/mingjiangsha/qianli/templates",)  # 本功能
+config.vision.templates_dir = "games/<游戏>/templates"                  # 游戏级公共
+config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # 本功能
 ```
 
-模板名的解析顺序是 **附加根 → 主根**，所以：
+解析顺序是 **附加根 → 主根**，所以：
 
 * 功能代码里写 `"battle/skill.png"` → 落到本功能目录；
 * 写 `"common/network_error.png"` → 本功能目录没有，落到游戏级；
@@ -80,8 +111,15 @@ config.vision.extra_template_dirs = ("games/mingjiangsha/qianli/templates",)  # 
 子节点的 id，那时 `nodes[].page` 也要跟着改 —— `check` 会抓到。
 
 **弹窗必须标 `kind=PageKind.OVERLAY`。** 默认的 `PAGE` 是替换式语义
-（进了子页面就不再是父页面）；弹窗是**叠加式**——"在首页"和"有网络错误弹窗"
+（进了子页面就不再是父页面）；弹窗是**叠加式** —— "在首页"和"有网络错误弹窗"
 同时成立。搞混会导致"弹窗挡住了但脚本以为在首页继续点"。
+
+**页面特征要选弹窗盖不到的地方。** 用整块面板当特征，弹窗一冒出来盖掉中间，
+那一页就永远认不出来了。顶栏、底栏、角落是安全的选择。
+
+**子页面的特征必须落在父页面的 roi 里。** roi 是**整棵子树**的搜索范围
+（不只是这一页自己的）。要么把子页面挪成兄弟，要么把父页面的 roi 放大到
+能覆盖它。`PageTree.validate()` 会拦下写错的。
 
 **快捷方法只做一件事。** 多步策略属于流程层，不属于快捷方法。
 判断标准：如果它内部需要"看情况决定下一步"，那它应该是个步骤或一条边。
@@ -90,14 +128,18 @@ config.vision.extra_template_dirs = ("games/mingjiangsha/qianli/templates",)  # 
 （`ctx.blackboard.set`），边的条件去读它。这样"为什么走了这条分支"
 永远能在流程图里找到答案，而不是藏在某个 `if` 里。
 
+**用模板的步骤要覆写 `used_templates()`。** 否则 `check` 查不到它用的图，
+缺图只能在跑的时候才发现。`FunctionStep` 包的是普通函数，没法自动推断，
+所以要显式传：`FunctionStep(fn, templates=(T_A, T_B))`。
+
 **只用界面上稳定的元素做模板。** 别用带数字的（血量、倒计时）、
 带特效的（高亮、动画中间帧）—— 它们每天都长得不一样。
 
-## 加一个游戏
+**给每个脚本写 `selftest()`。** 检查的应该是"这份定义本身对不对"
+（图齐不齐、ROI 框得对不对、页面之间有没有区分度），
+这些是 `check` 查不出来的，而它们恰好是最常见的失效原因。
 
-复制 `mingjiangsha/` 改名字，改三个东西：`SLUG` / `WINDOW_TITLE` / `SOURCE_SIZE`，
-然后是公共页面和模板。功能目录按需新增。
+## 加一个游戏 / 加一个功能
 
-## 加一个功能
-
-复制 `daily/`（最小样板：两个页面、两个节点、一条边），或 `qianli/`（完整样板）。
+复制 `testgame/`（单脚本）或按上面的多脚本布局建目录，改三样：
+`SLUG` / `WINDOW_TITLE` / `SOURCE_SIZE`，然后是页面、模板、流程。
