@@ -12,19 +12,20 @@
 ## 这里声明的东西，和它们各自防的是什么
 
 * ``entry`` 的 ``roi`` + ``hover`` —— 名将杀首页的卡片**鼠标一悬停就往右上弹
-  ``(+27, -41)``**。ROI 留小了，你一划过入口模板就滑出 ROI、匹配不到。
+  ``(+27, -41)``**。搜索范围留小了，你一划过入口模板就滑出去、匹配不到。
   这是**静态看代码完全看不出来**的错，只能跑到那一屏才发现；
-* ``entry`` 的 ``origin`` —— 模板必须在自己那张资产图上拿满分。
-  裁歪几像素在运行的画面上看不出来，但会让阈值变得很脆；
 * ``sequences`` —— 验的是"按顺序找，第一个过阈值的正好是该点的那个"。
   这条**不是**"按钮之间分数差多少"：``开始匹配``在三种状态下都是 0.999
   （见 :mod:`.steps`），它本来就该在别的图上拿高分；
 * ``groups`` —— 真机探针用：现在屏幕上认得出哪一页、走到队伍流程哪一步了。
+
+（曾经还有一项"资产图回归"：拿四张真机截图当样本验"模板裁歪没有"。
+那四张图不入库、也没人维护，所以连字段一起删了 —— 留着一个"没有样本就算过"
+的自检项比没有更糟，它会打绿勾。真要做回归，应该做成 ``tests/`` 里的测试，
+样本随测试入库。）
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from gamebot.types import Point
 from gamebot.vision.checks import (
@@ -57,21 +58,13 @@ from .steps import (
 
 __all__ = ["CHECKS", "probe_live", "run"]
 
-#: 资产图目录（四张真机截图）。**本地参考素材，不入库**，没有就自动跳过回归。
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-
-#: 竞技场那三张（同一页的三种状态）。
-JINGJI_STATES = ("jingji.png", "add-pet.png", "start.png")
-
 CHECKS = ChecksSpec(
     title="竞技场",
-    assets_dir=ASSETS_DIR,
     # 参考图是 ``prepare()`` 抓的，位置由**这个脚本**决定 ——
     # 框架不猜业务层的目录约定（猜就是第二份事实来源）。
     fixture_path=_GAME_ROOT / FIXTURES_DIR / "home.png",
     # 参考图抓的是**首页**，所以只要求认出「首页」那一组
     fixture_group="首页",
-    states=JINGJI_STATES,
     entries=(
         EntrySpec(
             template=T_JINGJI,
@@ -81,9 +74,6 @@ CHECKS = ChecksSpec(
             roi=JINGJI_ROI,
             # 悬停时卡片往右上弹 —— ROI 必须留得下这个位移
             hover=Point(27, -41),
-            # 这张不是从资产图裁的：资产图里的 home.png 是**悬浮态**，
-            # 卡片被放大 1.1 倍并位移，空闲模板在它上面只有 0.774，
-            # 那是正常的，不是问题。所以不声明 origin。
             label="竞技入口",
         ),
         EntrySpec(
@@ -95,7 +85,6 @@ CHECKS = ChecksSpec(
             point=JINGJI_PAGE_ROI.center,
             confidence=CONF_TITLE,
             roi=JINGJI_PAGE_ROI,
-            origin="jingji.png",
             label="竞技场标题",
         ),
     ),
@@ -122,7 +111,6 @@ CHECKS = ChecksSpec(
                     point=JINGJI_PAGE_ROI.center,
                     confidence=CONF_TITLE,
                     roi=JINGJI_PAGE_ROI,
-                    origin="jingji.png",
                     label="竞技场标题",
                 ),
             ),
@@ -137,7 +125,6 @@ CHECKS = ChecksSpec(
                     point=TEAM_ROI.center,
                     confidence=CONF_BUTTON,
                     roi=TEAM_ROI,
-                    origin="jingji.png",
                     label="创建队伍",
                 ),
                 EntrySpec(
@@ -145,7 +132,6 @@ CHECKS = ChecksSpec(
                     point=TEAM_ROI.center,
                     confidence=CONF_BUTTON,
                     roi=TEAM_ROI,
-                    origin="add-pet.png",
                     label="添加伙伴",
                 ),
                 EntrySpec(
@@ -153,7 +139,6 @@ CHECKS = ChecksSpec(
                     point=TEAM_ROI.center,
                     confidence=CONF_BUTTON,
                     roi=TEAM_ROI,
-                    origin="start.png",
                     label="开始匹配",
                 ),
             ),

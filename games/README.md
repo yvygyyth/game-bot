@@ -107,8 +107,7 @@ CHECKS = ChecksSpec(
             confidence=0.85,
             tolerance=15,                # 允许偏多少像素
             roi=ENTRY_ROI,
-            hover=Point(27, -41),        # 悬停会位移多少 → 自动查 ROI 余量够不够
-            origin="home.png",           # 从哪张资产图裁的 → 自动查"裁歪没有"
+            hover=Point(27, -41),        # 悬停会位移多少 → 自动查范围余量够不够
             label="竞技入口",
         ),
     ),
@@ -124,11 +123,8 @@ CHECKS = ChecksSpec(
             names=("创建队伍", "添加伙伴", "开始匹配"),
             roi=TEAM_ROI,
             confidence=0.85,
-            expected={"jingji.png": T_CREATE_TEAM, "add-pet.png": T_ADD_PET},
         ),
     ),
-    states=("jingji.png", "add-pet.png", "start.png"),   # 资产图（真机截图）
-    assets_dir=Path(__file__).parent / "assets",
     fixture_path=PROJECT_ROOT / FIXTURES_DIR / "home.png",
     fixture_group="首页",        # 参考图抓的是首页，只要求认出这一组
 )
@@ -150,13 +146,14 @@ def probe_live(config) -> list[str]:  # ← __init__.py 的 probe() 接这个
 
 | 字段 | 它防的是什么 |
 |---|---|
-| `hover` | 元素**悬停时会位移**（名将杀首页卡片弹 `(+27,-41)`）。ROI 留小了，鼠标一划过就滑出 ROI、匹配不到 —— **静态看代码完全看不出来** |
-| `origin` | 模板**裁歪了几像素**。在自己那张资产图上拿不到满分就会被报出来 |
-| `expected` | **按钮顺序**。有些按钮天生会在别的状态上拿高分（名将杀的「开始匹配」三种状态下都是 0.999），所以验的不是分数差，而是"第一个过阈值的正好是该点的那个" |
+| `hover` | 元素**悬停时会位移**（名将杀首页卡片弹 `(+27,-41)`）。搜索范围留小了，鼠标一划过就滑出去、匹配不到 —— **静态看代码完全看不出来** |
 | `required=False` | 那一组**只报告不判成败**（队伍那三个按钮是用来诊断走到哪一步的） |
+| `fixture_group` | 参考图是**一张特定界面**的截图，只要求那一组必须认出来；位置偏差照样全查 |
 
-`states` / `assets_dir` 指向**真机截图**，它们不入库 —— 没有就自动跳过回归，
-不会让自检失败。
+**自检不做"图像回归"。** 早先有过一项：拿几张真机截图当样本，验"模板裁歪没有"。
+去掉了 —— 样本不入库也没人维护，而它"没有样本就算过"，**打绿勾**：
+加新脚本时你会看到一个勾，以为验过了，其实一张样本都没有。
+真要做图像回归，写成 `tests/` 里的测试、样本随测试入库。
 
 **别在 `checks.py` 里重复通用的检查。** "模板文件在不在""定义自不自洽"归
 `games check`（框架的一份实现，所有脚本共用）。在脚本里再写一遍等于同一件事

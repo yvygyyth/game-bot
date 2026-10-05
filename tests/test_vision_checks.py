@@ -148,7 +148,7 @@ class TestGeometry:
         )
 
         problems = run_checks(spec, config)
-        assert any("不在它的 ROI" in p for p in problems)
+        assert any("不在它的搜索范围" in p for p in problems)
 
     @pytest.mark.parametrize("bad", [0.0, -0.1, 1.4])
     def test_illegal_threshold_is_reported(self, config, bad) -> None:
@@ -227,51 +227,39 @@ class TestEntryGroup:
         assert sequence.label_of("c.png") == "c.png"
 
 
-class TestSequencePicking:
-    """顺序探测：按顺序找，第一个过阈值的必须正好是该点的那个。"""
+class TestSequenceGeometry:
+    """顺序探测在静态自检里只验**几何和阈值** —— 样本图那套已经去掉了。
 
-    def _spec(self, expected) -> ChecksSpec:
-        return _spec(
-            sequences=(
-                SequenceSpec(
-                    templates=("a.png", "b.png"),
-                    names=("甲", "乙"),
-                    roi=Region(0, 0, 100, 100),
-                    confidence=0.9,
-                    expected=expected,
-                ),
-            )
-        )
+    （原因见 ``gamebot.vision.checks`` 的模块 docstring：样本不入库、
+    没人维护，留着就变成"没有样本也算过"的假绿勾。）
+    """
 
-    def test_asset_check_skipped_without_directory(self, config) -> None:
-        """没有资产目录就跳过回归（那是本地素材，不入库）。"""
+    def _spec(self, **kwargs) -> ChecksSpec:
+        params = {
+            "templates": ("a.png", "b.png"),
+            "names": ("甲", "乙"),
+            "roi": Region(0, 0, 100, 100),
+            "confidence": 0.9,
+        }
+        params.update(kwargs)
+        return _spec(sequences=(SequenceSpec(**params),))
+
+    def test_healthy_sequence_passes(self, config) -> None:
         _png(config.paths.resolve(config.vision.templates_dir) / "a.png", (10, 10))
         _png(config.paths.resolve(config.vision.templates_dir) / "b.png", (10, 10))
-        problems = run_checks(self._spec({"x.png": "a.png"}), config)
-        assert problems == []
+        assert run_checks(self._spec(), config) == []
 
-    def test_asset_check_reports_missing_state_image(self, config, tmp_path) -> None:
+    def test_missing_sequence_template_is_reported(self, config) -> None:
+        """少了一张按钮图 —— 必须报，否则运行到那一步才发现点不动。"""
+        _png(config.paths.resolve(config.vision.templates_dir) / "a.png", (10, 10))
+        problems = run_checks(self._spec(), config)
+        assert any("b.png" in p and "找不到" in p for p in problems)
+
+    def test_illegal_sequence_threshold_is_reported(self, config) -> None:
         _png(config.paths.resolve(config.vision.templates_dir) / "a.png", (10, 10))
         _png(config.paths.resolve(config.vision.templates_dir) / "b.png", (10, 10))
-        assets = tmp_path / "assets"
-        # 目录里得有一张**能读出来**的图，否则会走"目录里没有可读 PNG"那条早退，
-        # 就验不到"状态图缺失"这条了
-        _png(assets / "present.png", (640, 360))
-        spec = ChecksSpec(
-            title="测试",
-            assets_dir=assets,
-            sequences=(
-                SequenceSpec(
-                    templates=("a.png", "b.png"),
-                    roi=Region(0, 0, 100, 100),
-                    confidence=0.9,
-                    expected={"missing.png": "a.png"},
-                ),
-            ),
-        )
-
-        problems = run_checks(spec, config)
-        assert any("缺少资产图" in p for p in problems)
+        problems = run_checks(self._spec(confidence=1.5), config)
+        assert any("不合法" in p for p in problems)
 
 
 class TestProbeRequirement:
