@@ -40,6 +40,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -246,6 +247,7 @@ class FlowEngine:
         executor: Executor | None = None,
         tracker: PageTracker | None = None,
         start_node: NodeId = "",
+        params: Mapping[str, Any] | None = None,
     ) -> None:
         """
         :param start_node: 从哪个节点开始跑；留空 = ``graph.initial``。
@@ -256,6 +258,13 @@ class FlowEngine:
 
             注意起始节点**不影响状态校验**：它声明的 ``page`` 和实测不符时，
             引擎会走重定位（跳到真正该在的节点），而不是硬着头皮执行。
+        :param params: **运行参数（入参）**。开跑前写进上下文，步骤用
+            ``ctx.param("farm.rounds", 3)`` 读。
+
+            为什么需要它：``Scenario`` 是在 ``build_scenario()`` 里构造的**静态对象**
+            （那次调用拿不到任何运行期信息），而"这次刷几局""用哪套阈值"要等到
+            点开始才知道。参数是这次运行的**输入**，和黑板那种"跑出来的状态"
+            不是一回事 —— 见 :meth:`RunContext.param`。
         """
         self.scenario = scenario
         self.ctx = ctx
@@ -277,10 +286,16 @@ class FlowEngine:
         self._stop_reason: StopReason | None = None
         self._stop_message = ""
         self._unknown_since: float | None = None
-        #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _dead_end_stalled）
+        #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _note_stall）
         self._stall_rounds = 0
         self._entered_nodes: set[NodeId] = set()
         self._recovery_warned: set[tuple[NodeId, PageId]] = set()
+        self.params: dict[str, Any] = dict(params or {})
+        """运行参数（入参）的**引擎侧**那一份，开跑时合进上下文。
+
+        和上下文里那份的关系：装配期可能已经往 ``ctx`` 放过参数（比如 CLI 传的），
+        这份是"装配之后再补"的。两边**合并**，引擎这边优先。
+        """
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -331,6 +346,33 @@ class FlowEngine:
         """
         options = self.scenario.options
         self.scenario.validate()
+
+        # 1) 清引擎**自己**的运行期状态。
+        #
+        # `_stop_reason` 不清的后果很严重：`running` 就是"它是不是 None"，
+        # 而 `run()` 的循环是 `while self.running` —— 跑完第一遍之后它不再是
+        # None，于是**第二遍一进循环就退出、一个步骤都不做**，报告还写着
+        # COMPLETED。看起来"什么都没发生"，因为确实什么都没发生。
+        # （这条是 test_run_params 里"跑三遍"那个用例逼出来的。）
+        self._stop_reason = None
+        self._stop_message = ""
+        self._unknown_since = None
+        self._stall_rounds = 0
+        self._entered_nodes.clear()
+        self._recovery_warned.clear()
+
+        # 2) 清运行期上下文：跟踪器（当前状态 + 变更历史）、黑板、中止标志、
+        # 缓存的帧。同一个引擎跑第二遍时黑板会带着上一遍的数据 —— 那会让
+        # "第一次"和"第二次"行为不同，而且极难查。
+        self.ctx.reset()
+
+        # 3) 合入运行参数（入参）。**合并**而不是覆盖：装配期可能已经往 ctx 放过
+        # （CLI 传的），引擎这份优先。顺序在 reset **之后** —— 参数不是运行期状态，
+        # reset 不会碰它，但放后面更保险（不依赖"reset 不动参数"这个约定）。
+        if self.params:
+            merged = dict(self.ctx.params)
+            merged.update(self.params)
+            self.ctx.set_params(merged)
 
         watch = Stopwatch()
         self.report.started_at = self.ctx.now()

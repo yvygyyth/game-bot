@@ -39,10 +39,12 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.state import Page
 from gamebot.types import Region
 
-from .steps import T_TITLE
-
 #: 页面标识的搜索区域（客户区坐标）：左上角那一块。
 #: 刻意避开中间的「巅峰竞技场」横幅 —— 它也含"竞技场"三个字。
+#: 页面标识：左上角「竞技场」标题。
+#: **它是页面身份，不是某个步骤的图** —— 所以放这儿，不放 steps/。
+T_TITLE = "jingji/title.png"
+
 JINGJI_PAGE_ROI = Region(40, 0, 240, 90)
 
 #: 页面标识的阈值。实测三种状态都是 1.000，给 0.90 很宽裕。

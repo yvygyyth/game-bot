@@ -20,7 +20,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from .config.schema import AppConfig
@@ -64,6 +66,7 @@ class RunContext:
         pages: PageTracker | None = None,
         blackboard: Blackboard | None = None,
         clock: Any = None,
+        params: Mapping[str, Any] | None = None,
     ) -> None:
         self.session = session
         self.config = config
@@ -77,10 +80,45 @@ class RunContext:
         界面从它拿"识图日志"和带框的图；引擎结束前调 ``recorder.flush()``
         把最后一帧落盘。**没开记录时是 ``None``**，用它的地方都要判空。
         """
+        self._params: dict[str, Any] = dict(params or {})
         self._clock = clock or time.perf_counter
         self._frame: Frame | None = None
         self._frame_at: float = 0.0
         self.capture_count = 0
+
+    # ------------------------------------------------------------------ #
+    # 运行参数（入参）
+    # ------------------------------------------------------------------ #
+    def param(self, name: str, default: Any = None) -> Any:
+        """读一个**运行参数**（入参）。
+
+        和 :attr:`blackboard` 的区别就是这个类里最要紧的一条：
+
+        * **参数是"进去之前就定好、跑的过程中不变"的** —— 刷几局、目标副本、
+          这次用哪套阈值。它来自外面（CLI / 界面 / 测试），步骤只读；
+        * **黑板是"跑的过程中写"的** —— 连续失败计数、上次读到的体力。
+
+        所以 :meth:`reset` 会清黑板、**但不动参数**：参数是这次运行的输入，
+        不是这次运行产生的状态。
+
+        为什么参数要落在上下文里，而不是让步骤自己想办法拿：``Step`` 实例是在
+        ``build_scenario()` 里构造的**静态对象**（那次调用拿不到任何运行期信息），
+        而"这次刷几局"要等到点「开始」才知道。步骤通过 ``ctx.param(...)`` 读，
+        就不需要在构造时把值焊死。
+
+        :param name: 参数名。建议用点分层级（``"farm.rounds"``）避免撞名。
+        :param default: 没传这个参数时返回什么。**给了默认值就等于"可选参数"**。
+        """
+        return self._params.get(name, default)
+
+    @property
+    def params(self) -> Mapping[str, Any]:
+        """全部运行参数（只读视图；改它不会生效）。"""
+        return MappingProxyType(self._params)
+
+    def set_params(self, values: Mapping[str, Any] | None) -> None:
+        """覆盖运行参数。**装配期/开跑前**调；跑的过程中改它没有意义。"""
+        self._params = dict(values or {})
 
     # ------------------------------------------------------------------ #
     # 时间
@@ -238,12 +276,28 @@ class RunContext:
     # 生命周期
     # ------------------------------------------------------------------ #
     def reset(self) -> None:
-        """清空运行期状态，准备下一次运行（含清掉中止标志）。"""
+        """清空**运行期状态**，准备下一次运行（含清掉中止标志）。
+
+        **清的是"这次跑出来的东西"，不动运行参数**（:meth:`param`）——
+        参数是这次运行的输入，不是它的产物。清掉它等于把用户传进来的东西吞了。
+
+        具体清什么：跟踪器的当前状态与变更历史、黑板（步骤之间传的数据）、
+        中止标志、缓存的帧、抓帧计数、**执行器攒下的步骤结果**。
+
+        由 ``FlowEngine.run()`` 在开跑时调一次 —— 同一个引擎跑第二遍时，
+        黑板不该带着上一遍的数据（那会让"第一次跑"和"第二次跑"行为不同，
+        而且极难查）。
+        """
         self.pages.reset()
         self.blackboard.clear()
         self.session.clear_stop()
         self.invalidate_frame()
         self.capture_count = 0
+        if self.executor is not None:
+            # 执行器把每步结果攒在 `outcomes` 里给报告用（`report.outcomes`
+            # 就是从它拷的）。不清的话第二遍报告的步数会算上第一遍 ——
+            # 表现是"跑了 3 轮却报了 7 步"，而且越跑越多。
+            self.executor.outcomes.clear()
 
     def close(self) -> None:
         if self.executor is not None:

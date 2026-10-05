@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -276,6 +277,7 @@ def build_context(
     hooks: ExecutorHooks | None = None,
     recorder: RecognitionRecorder | None = None,
     scenario_options: object | None = None,
+    params: Mapping[str, Any] | None = None,
 ) -> RunContext:
     """装配 RunContext（含 Session 与 Executor）。
 
@@ -297,6 +299,7 @@ def build_context(
         config,
         tree=scenario.tree if scenario is not None else None,
         frame_ttl=max(0.2, config.timing.tick_interval * 2),
+        params=params,
     )
     ctx.executor = Executor(
         ctx,

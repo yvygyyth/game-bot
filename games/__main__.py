@@ -119,6 +119,44 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_params(items: list[str]) -> tuple[dict[str, Any], list[str]]:
+    """把 ``["rounds=5", "target=battle"]`` 解析成字典。
+
+    值**尽量转成数字/布尔**：``--param rounds=5`` 传下去的应该是 ``int``，
+    否则步骤里拿到的是字符串 ``"5"``，``range(rounds)`` 会直接炸 ——
+    而那种错报在步骤里，跟命令行看不出关系。
+
+    转换失败就当字符串（不报错）：值本来就可能长得像数字但不是，比如
+    ``--param label=1号队``。
+    """
+    values: dict[str, Any] = {}
+    bad: list[str] = []
+    for item in items:
+        name, sep, raw = item.partition("=")
+        if not sep or not name.strip():
+            bad.append(item)
+            continue
+        values[name.strip()] = _coerce_param(raw.strip())
+    return values, bad
+
+
+def _coerce_param(raw: str) -> Any:
+    """``"5"`` -> 5，``"1.5"`` -> 1.5，``"true"`` -> True，其余原样。"""
+    lowered = raw.lower()
+    if lowered in ("true", "yes", "on"):
+        return True
+    if lowered in ("false", "no", "off"):
+        return False
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """**真的跑起来**：装配 -> 跑流程 -> 打报告。
 
@@ -140,6 +178,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     from gamebot.utils.logging import setup_logging
 
     spec = get_script(args.script)
+    params, bad = _parse_params(args.param)
+    if bad:
+        print(f"✗ --param 格式应该是 名字=值，这几条没看懂: {', '.join(bad)}", file=sys.stderr)
+        return 2
     config = spec.build_config()
     if args.window:
         config.screen.window_title = args.window
@@ -182,6 +224,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     runtime = scenario.options.max_runtime or "不限"
     ticks = scenario.options.max_ticks or "不限"
     print(f"  预算   {runtime}s / {ticks} 轮")
+    if params:
+        shown = "  ".join(f"{k}={v}" for k, v in params.items())
+        print(f"  参数   {shown}")
     if config.dry_run:
         print("  （空跑时动作步骤不真的下发，但仍然走完整的决策与记账）")
     print()
@@ -189,7 +234,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     ctx = None
     try:
         ctx = build_context(
-            config, scenario=scenario, journal=journal, scenario_options=scenario.options
+            config,
+            scenario=scenario,
+            journal=journal,
+            scenario_options=scenario.options,
+            params=params,
         )
         engine = build_engine(config, ctx, scenario)
         report = engine.run()
@@ -268,6 +317,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--node", default="", help="从哪个节点开始（调试用，不解除状态校验）")
     p_run.add_argument("--window", default="", help="覆盖窗口标题")
     p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
+    p_run.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="名字=值",
+        help=(
+            "传给脚本的运行参数（入参）。可重复：--param rounds=5 --param dry=1。"
+            "步骤用 ctx.param('rounds', 默认值) 读；值会尽量转成 int/float/true/false"
+        ),
+    )
 
     return parser
 

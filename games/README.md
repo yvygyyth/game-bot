@@ -14,9 +14,9 @@ games/
     ├── templates/                游戏级公共模板
     └── <功能>/                    二级：一个脚本功能一个目录
         ├── __init__.py            ★ build_config() + build_scenario()
-        ├── pages.py               这个功能的页面（状态对象）
-        ├── graph.py               这个功能的流程（节点 + 边）
-        ├── steps.py               这个功能专用的步骤
+        ├── pages.py               状态（**一个文件就够**，再复杂也别拆）
+        ├── graph.py               流程（同上）
+        ├── steps/                 ★ 一个步骤一个文件
         ├── shortcuts.py           这个功能专用的快捷方法
         ├── templates/             这个功能的图片资源
         └── README.md              这个脚本怎么调
@@ -24,6 +24,36 @@ games/
 
 （**没有 `checks.py` 了** —— 早先每个脚本要抄一份自检代码，已经删掉，
 见下面"查错"那一节。）
+
+### 为什么 `pages` / `graph` 各一个文件，`steps` 却拆成包
+
+不是随手定的，是"改的时候要跳几个文件"决定的：
+
+| 文件 | 改它的时候 | 为什么这样放 |
+|---|---|---|
+| `pages.py` | 加一页、改一页的标识 | 状态之间**互相咬得很紧**（父子、ROI 继承、谁与谁能同时成立）—— 拆开就得来回跳 |
+| `graph.py` | 加一个节点、连一条边 | 同上：边是两两关系，"这个节点有几个出口"必须一眼看全 |
+| `steps/` | **改一个动作** | 一个步骤是自洽的：逻辑 + 它的模板 + 阈值 + 搜索范围。按步骤分文件，改一步只动一个文件 |
+
+`steps/` 里每个文件包含**它那个步骤用到的一切**：
+
+```python
+# games/<游戏>/<功能>/steps/advance_team.py
+T_CREATE_TEAM = "jingji/create_team.png"     # 这个步骤用的模板
+TEAM_ROI = Region(1400, 630, 470, 360)       # 它的搜索范围
+CONF_BUTTON = 0.85                           # 它的阈值
+
+class AdvanceTeamStep(Step):                 # 它的逻辑
+    ...
+```
+
+`steps/__init__.py` **只做转发**（`from .advance_team import AdvanceTeamStep`），
+不要在那里写逻辑 —— 这样 `from .steps import AdvanceTeamStep` 照常能用，
+而"这个步骤到底长什么样"永远在一个文件里看得完。
+
+**页面标识放 `pages.py`，不要放 `steps/`。** `T_TITLE` 那种是页面身份，
+不是某个动作的图；混进 steps 之后改页面标识就得在步骤里翻。
+
 
 **脚本永远在功能目录里。** 游戏目录是容器，不直接放脚本 ——
 放进去的话注册表扫不到，表现是"脚本没出现在列表里"，很难查。
@@ -87,6 +117,44 @@ python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 后来发现那套逻辑每个脚本都一样、只有数值不同，而且**语义会漂** ——
 所以连"让业务层声明数值"的中间方案也去掉了。真机识别准不准，
 现在是靠界面上的「抓一张」（带红框的图）当场看。
+
+## 运行参数（入参）
+
+脚本经常会遇到"这次跑法不一样"：刷几局、打哪个副本、用哪套阈值。
+这些值**不能写死在脚本里**，也不该让步骤在构造时焊死 —— 因为
+`build_scenario()` 是静态的，它拿不到任何运行期信息。
+
+所以框架给了运行参数，步骤用 `ctx.param(...)` 读：
+
+```python
+class FarmStep(Step):
+    def run(self, ctx: RunContext) -> ActionResult[Any]:
+        rounds = ctx.param("farm.rounds", 3)      # 给了默认值 = 可选参数
+        limit = ctx.param("farm.timeout", 30.0)
+        ...
+```
+
+命令行传：
+
+```bash
+python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=60
+```
+
+**参数和黑板是两件东西，别混**（这是这个框架里最容易搞错的一对）：
+
+| | `ctx.param(name, default)` | `ctx.blackboard` |
+|---|---|---|
+| 是什么 | **入参**：这次运行的输入 | **跑出来的状态** |
+| 谁写 | 外面（命令行 / 界面 / 测试） | 步骤自己 |
+| 跑的过程中变吗 | **不变** | 一直在变 |
+| 每次运行开始时清吗 | **不清** | 清 |
+
+判断方法很简单：**"用户还没点开始时它就有值了吗？"** 有 → 参数；
+要靠跑起来才产生的 → 黑板。
+
+参数名建议点分层级（`"farm.rounds"`），避免和别的脚本/别的用途撞名。
+命令行传的值会尽量转成 int / float / 布尔 —— 否则步骤里拿到字符串，
+`range("5")` 直接炸，而报错点在步骤、跟命令行看不出关系。
 
 ## 参考实现
 
