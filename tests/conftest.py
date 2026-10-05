@@ -164,6 +164,22 @@ def input_recorder(fake_bundle) -> FakeInputBackend:
     return fake_bundle.input
 
 
+@pytest.fixture(scope="session")
+def qt_app():
+    """一个共享的 ``QApplication``（``QWidget`` / ``QShortcut`` 都要它）。
+
+    放 conftest 而不是某个测试文件里：界面相关的测试不止一个文件要用，
+    放文件里另一个文件就找不到（``fixture 'qt_app' not found``）。
+
+    scope 是 session：一个进程里只能有一个 ``QApplication``，反复建会崩。
+    PySide6 是可选依赖，没装时**跳过**这些用例而不是让整个测试收集失败。
+    """
+    pytest.importorskip("PySide6", reason="界面测试需要 PySide6（uv sync --extra ui）")
+    from PySide6.QtWidgets import QApplication
+
+    yield QApplication.instance() or QApplication([])
+
+
 @pytest.fixture
 def blank_image() -> np.ndarray:
     """一张 640x360 的纯黑图，用来拼自定义画面。"""

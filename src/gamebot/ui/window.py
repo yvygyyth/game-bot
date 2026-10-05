@@ -74,6 +74,9 @@ class MainWindow(QMainWindow):
         self._run_ctx: Any = None
         self._run_journal: Any = None
         self._recorder: Any = None
+        self._last_report: Any = None
+        """最近一次运行的 ``RunReport``。报告本身也写进日志和「检查输出」页，
+        这里留一份是给外部（测试、以后的状态栏）读的。"""
 
         self.setWindowTitle(_WINDOW_TITLE)
 
@@ -538,7 +541,11 @@ class MainWindow(QMainWindow):
         self.info.set_run_state(None)
 
         self._engine_worker.configure(ctx, engine, node_id)
-        self._engine_tick_relay.triggered.emit()
+        # 名字必须和 ``_start_engine_thread`` 里创建的那个一致。
+        # 曾经写成 ``_engine_tick_relay``（加下划线那种拼法），点「开始」就
+        # AttributeError —— 同一个文件里两种命名风格并存时特别容易犯。
+        # 所以 test_ui_run 里有一条用例真的走一遍这条路，而不是只测 _set_running。
+        self._engineTickRelay.triggered.emit()
         log.info("开始运行 %s（起始节点 %s）", entry.key, node_id or scenario.graph.initial)
 
     def _on_stop(self) -> None:
@@ -549,12 +556,13 @@ class MainWindow(QMainWindow):
         self.controls.stop_btn.setEnabled(False)
         self.controls.stop_btn.setToolTip("正在等引擎退出这一轮……")
         self._status.setText("正在停止……")
-        self._engine_stop_relay.triggered.emit()
+        self._engineStopRelay.triggered.emit()
 
     @Slot(object, str)
     def _on_engine_finished(self, report: object, summary: str) -> None:
         """跑完了：解锁界面、关会话、把结论写出来。"""
         self._engine_running = False
+        self._last_report = report
         self.controls.set_running(False)
         self.controls.note_runnable(True)
         self.controls.stop_btn.setToolTip("还没在跑")
@@ -707,7 +715,7 @@ class MainWindow(QMainWindow):
         """
         log.info("界面关闭，正在收摊……")
         if self._engine_running:
-            self._engine_stop_relay.triggered.emit()
+            self._engineStopRelay.triggered.emit()
 
         # 引擎线程：让它把当前这一轮跑完（ctx.sleep 会被停止请求立刻唤醒）
         self._engine_thread.quit()

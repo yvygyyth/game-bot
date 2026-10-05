@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from gamebot.ui.shortcuts import SHORTCUTS, Keymap, Shortcut
 
 
@@ -102,12 +100,3 @@ class TestMainWindowBinding:
             assert "Esc" in window.controls.stop_btn.toolTip()
         finally:
             window.close()
-
-
-@pytest.fixture(scope="module")
-def qt_app():
-    """一个共享的 ``QApplication``（QShortcut / QWidget 都需要它）。"""
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication([])
-    yield app
