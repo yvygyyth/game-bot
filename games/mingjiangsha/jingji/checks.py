@@ -84,10 +84,30 @@ EXPECTED_ACTION = {
 
 
 def run(config: AppConfig) -> list[str]:
-    """静态自检。打印每项结论，返回失败说明（空 = 全过）。"""
+    """静态自检。打印每项结论，返回失败说明（空 = 全过）。
+
+    ## 只查"通用检查查不出来的东西"
+
+    ``python -m games check`` 已经查过（而且所有脚本共用同一份实现）：
+
+    * 定义自洽 —— 状态树 + 流程图 + 关联表；
+    * **模板文件在不在**（拼错名字、忘了放进 assets 都在那里被抓住）。
+
+    所以这里**不再重复那两项**。重复的代价不是几毫秒，是"看的人会以为自检
+    就是这些" —— 而它真正的价值在后面三项，那些是业务层独有、框架查不出来的：
+
+    * :func:`_check_geometry` —— ROI 留没留出余量（名将杀首页的卡片悬停时
+      会往右上弹 27/41 像素，ROI 留小了根本看不出来）；
+    * :func:`_check_assets` —— 拿**真机截图**当回归样本，查模板裁歪、
+      页面标识不稳、按钮分不开；
+    * :func:`_check_detection_on_fixture` —— 在参考画面上真跑一遍，
+      并断言**命中的位置**（认得出但认错地方比认不出更危险）。
+
+    不重复那两项还有个实际原因：它们**属于框架的通用检查**，
+    业务层再实现一遍等于同一件事有两个出处 —— 改了框架的检查、脚本这边
+    不会跟着变，两边还会给出不一样的说法。
+    """
     failures: list[str] = []
-    failures += _check_templates(config)
-    failures += _check_definitions()
     failures += _check_geometry(config)
     failures += _check_assets(config)
     failures += _check_detection_on_fixture(config)
@@ -119,8 +139,15 @@ def probe_live(config: AppConfig) -> list[str]:
 def _recognize(frame: Frame, *, source: str) -> list[str]:
     """把这两页认出来：先看是不是首页，再看是不是竞技场。
 
-    这不是通用的 ``PageTree.locate()``（那个还没实现），
-    而是**只针对这两页**的窄实现 —— 够探针用，也让"到底认成了什么"说得清。
+    这里是**只针对这两页**的窄实现，而不是 ``PageTree.locate()``。理由是目的不同：
+
+    * ``locate()`` 要回答"现在在哪一页"，它按状态树的优先级**短路**在第一个命中上 ——
+      这对跑流程是对的（快、且和流程的判断完全一致）；
+    * 探针要回答"屏幕上**都有什么**"。它故意不短路：首页和竞技场标题两条都查、
+      队伍三步都查一遍，因为"两张都认出来了"本身就是有用的信息
+      （说明窗口位置或分辨率可能不对，画面被叠了）。
+
+    所以别把它"统一"到 ``locate()`` 上去 —— 那会丢掉同时报告多页的能力。
     """
     matcher_hits: list[str] = []
 
@@ -181,27 +208,6 @@ def _report_team_state(frame: Frame) -> None:
 # --------------------------------------------------------------------------- #
 # 各项检查
 # --------------------------------------------------------------------------- #
-def _check_templates(config: AppConfig) -> list[str]:
-    from gamebot.bootstrap import check_templates
-
-    from . import build_scenario
-
-    missing = check_templates(config, build_scenario())
-    problems = [f"缺 {len(missing)} 个: {', '.join(missing)}"] if missing else []
-    roots = " / ".join(str(p) for p in config.template_roots())
-    return _report("模板文件齐全", problems, detail=roots)
-
-
-def _check_definitions() -> list[str]:
-    from . import build_scenario
-
-    try:
-        build_scenario().validate()
-    except Exception as exc:
-        return _report("定义校验", [f"{type(exc).__name__}: {exc}"])
-    return _report("定义校验", [], detail="页面树 + 流程图")
-
-
 def _check_geometry(config: AppConfig) -> list[str]:
     """纯算术检查：ROI 装得下模板吗？期望点在框里吗？阈值合法吗？
 
