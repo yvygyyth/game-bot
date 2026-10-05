@@ -700,6 +700,108 @@ class TestStepFromDict:
 
 
 # --------------------------------------------------------------------------- #
+# 失败帧：上限 + 写进 journal
+# --------------------------------------------------------------------------- #
+class TestFailureFrames:
+    """``save_frames_on_error`` 的两个坑。
+
+    这条路径原来是"存了一堆图但 journal 里没有文件名"（帧在写 journal
+    **之后**才存），而且**没有留存上限**（跑一晚上就是几千张全尺寸 PNG）。
+    两者都不报错，只是慢慢变难受 —— 所以用测试钉住。
+    """
+
+    def _failing(self, ctx):
+        return FunctionStep(lambda c: ActionResult.error("故意失败"), name="会失败的步骤")
+
+    def _arm(self, ctx, tmp_path, journal=None):
+        """准备好"有当帧 + 开了存帧 + 有 journal"的状态。
+
+        **必须先 ``ctx.capture()`` 造一帧**：``ctx`` 这个 fixture 不抓帧，
+        而存失败帧的前提就是"有当前帧"。忘了这一步的话整条路径会静默跳过 ——
+        测试会"通过"但什么都没验到，那比失败更糟。
+        """
+        ctx.config.paths.screenshots = tmp_path
+        ctx.capture()
+        ctx.executor.journal = journal or MemoryJournal()
+        ctx.executor.save_frames_on_error = True
+
+    def test_frame_path_lands_in_the_journal_entry(self, ctx, tmp_path) -> None:
+        journal = MemoryJournal()
+        self._arm(ctx, tmp_path, journal)
+
+        ctx.executor.run(self._failing(ctx))
+
+        (entry,) = journal.entries
+        assert entry.status != "success"
+        assert entry.frame_path, "journal 里必须能拿到当帧图的路径"
+        assert entry.frame_path.endswith(".png")
+
+    def test_no_frame_when_option_is_off(self, ctx, tmp_path) -> None:
+        """默认关：不存图，也不报错。"""
+        ctx.config.paths.screenshots = tmp_path
+        ctx.capture()
+        journal = MemoryJournal()
+        ctx.executor.journal = journal
+        ctx.executor.save_frames_on_error = False
+
+        ctx.executor.run(self._failing(ctx))
+
+        (entry,) = journal.entries
+        assert entry.frame_path == ""
+        assert list(tmp_path.glob("*.png")) == []
+
+    def test_successful_steps_do_not_save_frames(self, ctx, tmp_path) -> None:
+        """成功的步骤存图没有诊断价值，只会堆盘。"""
+        ctx.config.paths.screenshots = tmp_path
+        ctx.capture()
+        ctx.executor.journal = MemoryJournal()
+        ctx.executor.save_frames_on_error = True
+
+        ctx.executor.run(ClickStep(Point(1, 1), name="点一下"))
+
+        assert list(tmp_path.glob("*.png")) == []
+
+    def test_old_failure_frames_are_pruned(self, ctx, tmp_path) -> None:
+        """留存上限：留最近的，不无限涨。"""
+        self._arm(ctx, tmp_path)
+
+        for _ in range(30):
+            ctx.executor.run(self._failing(ctx))
+
+        kept = sorted(tmp_path.glob("fail_*.png"))
+        assert 0 < len(kept) <= ctx.executor._frame_keep
+
+    def test_pruning_never_touches_other_files(self, ctx, tmp_path) -> None:
+        """**只删自己写的 ``fail_*.png``** —— 同一个目录里还躺着识图记录
+        （``match_*.png``）和用户手工截的图。"""
+        manual = tmp_path / "manual.png"
+        manual.write_bytes(b"x")
+        match = tmp_path / "match_00001.png"
+        match.write_bytes(b"x")
+
+        self._arm(ctx, tmp_path)
+        for _ in range(30):
+            ctx.executor.run(self._failing(ctx))
+
+        assert manual.is_file(), "手工截的图不能被删"
+        assert match.is_file(), "识图记录不能被删"
+        assert len(list(tmp_path.glob("fail_*.png"))) <= ctx.executor._frame_keep
+
+    def test_keep_limit_follows_the_recorder(self, ctx, tmp_path) -> None:
+        """失败帧的上限跟着识图记录走，不另加一个要用户理解的旋钮。"""
+        ctx.config.paths.screenshots = tmp_path
+
+        class _Recorder:
+            keep = 20
+
+        ctx.recorder = _Recorder()
+        assert ctx.executor._frame_keep == 100
+
+        ctx.recorder = None
+        assert ctx.executor._frame_keep == 20
+
+
+# --------------------------------------------------------------------------- #
 # journal 落盘
 # --------------------------------------------------------------------------- #
 class TestJournalSerialization:

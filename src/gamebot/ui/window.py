@@ -370,7 +370,12 @@ class MainWindow(QMainWindow):
             scenario = entry.spec.build_scenario()
             from ..bootstrap import build_context
 
-            ctx = build_context(config, scenario=scenario, recorder=self._recorder)
+            ctx = build_context(
+                config,
+                scenario=scenario,
+                recorder=self._recorder,
+                scenario_options=scenario.options,
+            )
         except Exception as exc:
             self._info_box("抓不了", f"{type(exc).__name__}: {exc}")
             log.exception("抓帧失败")
@@ -508,7 +513,11 @@ class MainWindow(QMainWindow):
         )
         try:
             ctx = build_context(
-                config, scenario=scenario, journal=journal, recorder=self._recorder
+                config,
+                scenario=scenario,
+                journal=journal,
+                recorder=self._recorder,
+                scenario_options=scenario.options,
             )
             engine = build_engine(config, ctx, scenario)
         except Exception as exc:

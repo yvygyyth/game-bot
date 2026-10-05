@@ -115,6 +115,8 @@ class Journal(ABC):
         frame: Frame,
         *,
         directory: Any = None,
+        prefix: str = "",
+        tick: int = 0,
     ) -> str:
         """把帧存成图片并返回路径（供 ``entry.frame_path`` 使用）。
 
@@ -122,6 +124,12 @@ class Journal(ABC):
             **没给就直接返回空串，不存** —— 帧不内联进 journal 是硬约定
             （一行一条记录里塞一张图，log 会瞬间爆炸），而"存不存帧"
             是调用方的策略（``save_frames_on_error``），不是记录器的策略。
+        :param prefix: 文件名前缀，**调用方用它来圈定自己的留存范围**。
+            传了 ``"fail_"`` 的文件才能被"清理旧失败帧"那条规则匹配到 ——
+            名字不带前缀的话，清理规则要么扫不到（图无限涨），
+            要么只能不带 pattern 地删（会误删手工截图）。两种情况都很糟。
+        :param tick: 第几轮，放进文件名。只靠 ``attempts`` 命名的话，
+            同一轮里同名步骤会被后来的覆盖，反而丢掉证据。
 
         存失败（磁盘满、权限）**不抛异常**：可观测性不该把脚本弄挂，
         返回空串、``frame_path`` 留空就行。
@@ -132,7 +140,7 @@ class Journal(ABC):
             target = Path(directory)
             target.mkdir(parents=True, exist_ok=True)
             safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in outcome.step)
-            path = target / f"t{outcome.attempts}_{safe}.png"
+            path = target / f"{prefix}t{tick}_{outcome.attempts}_{safe}.png"
             saved = frame.save(path)
             path_text = str(path) if saved.ok else ""
         except OSError:

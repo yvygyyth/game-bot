@@ -264,7 +264,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     ctx = None
     try:
-        ctx = build_context(config, scenario=scenario, journal=journal)
+        ctx = build_context(
+            config, scenario=scenario, journal=journal, scenario_options=scenario.options
+        )
         engine = build_engine(config, ctx, scenario)
         report = engine.run()
     except KeyboardInterrupt:

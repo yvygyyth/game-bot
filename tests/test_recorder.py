@@ -269,6 +269,58 @@ class TestAnnotation:
         assert out is not image
 
 
+class TestSharedDirectory:
+    """识图记录与失败帧**躺在同一个目录里**，各自只删自己的。
+
+    这是最容易出事的地方：两套留存机制共用一个目录，只要有一套的清理
+    不带 pattern，另一套的文件就会被连带删掉。而且它们都不报错 ——
+    等你发现"失败帧怎么没了"的时候已经查不出来了。
+    """
+
+    def _recorder(self, tmp_path, keep=3):
+        recorder = RecognitionRecorder(directory=tmp_path, keep=keep)
+        session = _session(recorder, {"a.png": (Point(1, 1), 0.99)})
+        for _ in range(10):
+            session.capture().find_image("a.png")
+        recorder.flush()
+        return recorder
+
+    def test_prune_old_only_touches_the_pattern(self, tmp_path):
+        from gamebot.vision.recorder import prune_old
+
+        for name in ("match_1.png", "match_2.png", "fail_1.png", "fail_2.png", "manual.png"):
+            (tmp_path / name).write_bytes(b"x")
+
+        assert prune_old(tmp_path, "match_*.png", 1) == 1
+        left = sorted(p.name for p in tmp_path.glob("*.png"))
+        assert left == ["fail_1.png", "fail_2.png", "manual.png", "match_2.png"]
+
+    def test_failure_frames_survive_match_pruning(self, tmp_path):
+        """识图记录清理时，失败帧和手工截图都得活着。"""
+        (tmp_path / "fail_9.png").write_bytes(b"x")
+        (tmp_path / "mine.png").write_bytes(b"x")
+
+        self._recorder(tmp_path, keep=2)
+
+        assert (tmp_path / "fail_9.png").is_file()
+        assert (tmp_path / "mine.png").is_file()
+        assert len(list(tmp_path.glob("match_*.png"))) == 2
+
+    def test_match_frames_survive_failure_pruning(self, tmp_path):
+        """反过来也一样。"""
+        from gamebot.vision.recorder import prune_old
+
+        self._recorder(tmp_path, keep=2)
+        before = sorted(p.name for p in tmp_path.glob("match_*.png"))
+        for index in range(10):
+            (tmp_path / f"fail_{index}.png").write_bytes(b"x")
+
+        prune_old(tmp_path, "fail_*.png", 2)
+
+        assert sorted(p.name for p in tmp_path.glob("match_*.png")) == before
+        assert len(list(tmp_path.glob("fail_*.png"))) == 2
+
+
 class TestFrameContext:
     def test_frame_marks_its_own_origin_and_id(self):
         """帧在查询前把"原点 + 帧号"写给记录层。

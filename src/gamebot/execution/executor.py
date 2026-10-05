@@ -14,12 +14,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import StepFailed
 from ..types import ActionResult, ActionStatus
 from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch
+from ..vision.recorder import prune_old
 from .journal import Journal, NullJournal
 from .policy import ErrorMode
 from .step import Step, _evaluate
@@ -28,6 +30,13 @@ if TYPE_CHECKING:
     from ..context import RunContext
 
 log = get_logger("execution.executor")
+
+#: 失败帧的文件名前缀。
+#:
+#: **这个前缀不是装饰**：留存清理靠它圈定范围（``fail_*.png``）。名字不带
+#: 前缀的话，"清理旧失败帧"要么扫不到（图无限涨），要么只能不带 pattern 地
+#: 删 —— 而截图目录里还躺着识图记录和用户手工截的图，误删比涨满更烦。
+FAILED_FRAME_PREFIX = "fail_"
 
 __all__ = ["Executor", "ExecutorHooks", "StepOutcome"]
 
@@ -150,11 +159,15 @@ class Executor:
         hooks: ExecutorHooks | None = None,
         journal: Journal | None = None,
         dry_run: bool = False,
+        save_frames_on_error: bool = False,
     ) -> None:
         self.ctx = ctx
         self.hooks = hooks or ExecutorHooks()
         self.journal = journal or NullJournal()
         self.dry_run = dry_run
+        # 装配期传进来（不是从 ctx 猜）：执行层不去读流程层的 Options 类型，
+        # 由 bootstrap 把这个开关翻译成一个布尔值给它，依赖方向才不乱。
+        self.save_frames_on_error = save_frames_on_error
         self.outcomes: list[StepOutcome] = []
 
     # ------------------------------------------------------------------ #
@@ -292,11 +305,17 @@ class Executor:
         return ""
 
     def _record(self, step: Step, outcome: StepOutcome) -> None:
-        """落 journal + 触发 hooks。
+        """存失败帧 -> 落 journal + 触发 hooks。
 
         **一个步骤只记一条**（含跳过的）：排查时"它跑没跑"和"它成没成"同样重要，
         报告里看不到某一步时，第一个要回答的问题就是它到底有没有被执行。
+
+        **帧必须在写 journal 之前存**：``record_outcome`` 会把
+        ``outcome.frame_path`` 写进那一条记录里，而 ``attach_frame`` 是往
+        ``outcome`` 上回填路径的。顺序反了就变成"日志里说第 3 步失败了，
+        但记录里没有图" —— 图其实躺在磁盘上，只是没人告诉你文件名。
         """
+        self._save_failure_frame(outcome)
         self.journal.record_outcome(outcome, tick=getattr(self.ctx.pages, "tick", 0))
         if self.hooks.before_step:
             self.hooks.before_step(self.ctx, step)
@@ -304,6 +323,45 @@ class Executor:
             self.hooks.after_step(self.ctx, outcome)
         if not outcome.ok and self.hooks.on_failure:
             self.hooks.on_failure(self.ctx, step, outcome)
+
+    def _save_failure_frame(self, outcome: StepOutcome) -> None:
+        """失败的步骤存一张当帧，并把路径写回 ``outcome``（journal 会带上它）。
+
+        三个约束：
+
+        * 只在**失败**时存 —— 成功的步骤存图没有诊断价值，只会堆盘；
+        * **有上限**（``_frame_keep``）：失败帧和识图记录躺在同一个目录里，
+          各删各的 pattern，否则跑一晚上就是几千张全尺寸 PNG；
+        * 存不下来（磁盘满、没权限）**不抛异常** —— 可观测性不该把脚本弄挂。
+        """
+        if outcome.ok or not self.save_frames_on_error:
+            return
+        frame = self.ctx.current_frame
+        if frame is None:
+            return
+        directory = self.ctx.config.paths.resolve(self.ctx.config.paths.screenshots)
+        path = self.journal.attach_frame(
+            outcome,
+            frame,
+            directory=directory,
+            prefix=FAILED_FRAME_PREFIX,
+            tick=int(getattr(self.ctx.pages, "tick", 0)),
+        )
+        if not path:
+            return
+        prune_old(Path(directory), f"{FAILED_FRAME_PREFIX}*.png", self._frame_keep)
+        log.debug("失败帧已存: %s", path)
+
+    @property
+    def _frame_keep(self) -> int:
+        """失败帧最多留几张。
+
+        跟着识图记录的上限走（它的 5 倍，至少 20）：两者都在教同一件事
+        "留最近那几次就够看了"，没必要再往配置里加一个要用户理解的旋钮。
+        """
+        recorder = getattr(self.ctx, "recorder", None)
+        keep = getattr(recorder, "keep", 0) or 0
+        return max(20, keep * 5)
 
     def _handle_failure(self, step: Step, outcome: StepOutcome) -> None:
         """按 ``policy.on_error`` 决定抛异常还是继续。"""

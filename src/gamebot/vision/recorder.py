@@ -112,6 +112,39 @@ def _with_path(record: MatchRecord, path: str) -> MatchRecord:
     )
 
 
+def prune_old(directory: Path | None, pattern: str, keep: int) -> int:
+    """把 ``directory`` 里匹配 ``pattern`` 的文件留下最新的 ``keep`` 个，其余删掉。
+
+    **只删匹配 ``pattern`` 的** —— 这是这个函数的全部要点。截图目录里混着好几类
+    文件：识图记录（``match_*.png``）、失败帧（``fail_*.png``）、手工截的图、
+    界面快照。要是不带 pattern 地"清空旧文件"，就会把用户手工截的图删掉，
+    而那种损失比磁盘涨满更让人恼火。
+
+    它被两处共用（识图记录、失败帧），各自传各自的 pattern 和上限 ——
+    所以它们在同一目录里共存，谁也删不到谁。
+
+    :return: 实际删掉几个。
+    """
+    if directory is None or keep <= 0:
+        return 0
+    try:
+        files = sorted(
+            Path(directory).glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+        )
+    except OSError:
+        return 0
+
+    removed = 0
+    for stale in files[: max(0, len(files) - keep)]:
+        try:
+            stale.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 @dataclass(frozen=True, slots=True)
 class MatchRecord:
     """一次识图 / OCR 尝试的记录。"""
@@ -538,23 +571,8 @@ class RecognitionRecorder:
             return ""
 
     def _prune(self) -> None:
-        """删掉超出上限的旧帧。
-
-        **只删带 ``FRAME_PREFIX`` 的文件**：手工截的图（``gamebot capture``、
-        调试脚本、界面快照）混在同一个目录里，误删了才是最烦的。
-        """
-        if self.directory is None or self.keep <= 0:
-            return
-        ours = sorted(
-            self.directory.glob(f"{FRAME_PREFIX}*.png"),
-            key=lambda p: p.stat().st_mtime,
-        )
-        for stale in ours[: max(0, len(ours) - self.keep)]:
-            try:
-                stale.unlink()
-                self.pruned += 1
-            except OSError:
-                pass
+        """删掉超出上限的旧帧（只删自己写的 ``match_*.png``，见 :func:`prune_old`）。"""
+        self.pruned += prune_old(self.directory, f"{FRAME_PREFIX}*.png", self.keep)
 
     # ------------------------------------------------------------------ #
     # 读

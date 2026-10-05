@@ -709,16 +709,15 @@ class FlowEngine:
             self.report.errors.append(f"边条件异常: {message}")
 
     def _note_outcome(self, outcome: StepOutcome) -> None:
-        """记录一个步骤结果；失败且开了截图存档就把当帧存下来。"""
+        """记一个步骤结果。
+
+        **存失败帧不在这里做** —— 它挪到执行器的 ``_record`` 里了，因为必须在
+        写 journal **之前**存：帧的路径要跟着那一条记录一起落盘，否则就成了
+        "日志里说第 3 步失败了，但记录里没有图，得自己去目录里按 tick 号翻"。
+        这里只把结果收进报告。
+        """
         if self.executor is not None:
             self.executor.outcomes.append(outcome)
-        if not outcome.ok and self.scenario.options.save_frames_on_error:
-            frame = self.ctx.current_frame
-            if frame is not None:
-                path = self.ctx.screenshot_path(f"fail_t{self.report.ticks}_{outcome.step}")
-                saved = frame.save(path)
-                if saved.ok:
-                    log.info("失败帧已存: %s", path)
 
     def to_dict(self) -> dict[str, Any]:
         return {

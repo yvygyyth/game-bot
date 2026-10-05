@@ -213,7 +213,15 @@ class RunContext:
     # 路径
     # ------------------------------------------------------------------ #
     def screenshot_path(self, name: str, *, suffix: str = ".png") -> Path:
-        """生成截图存档路径（目录自动创建）。"""
+        """生成截图存档路径（目录自动创建）。
+
+        ⚠️ **这条路不在留存清理范围内**：它按你给的名字存，文件名不带
+        ``fail_`` / ``match_`` 前缀，所以"清理旧失败帧/旧识图记录"那两条规则
+        都扫不到它 —— 手工用可以，**别在循环里调它**，否则就是无限的图。
+
+        框架自己存失败帧走的是执行器的 ``_save_failure_frame``
+        （带 ``fail_`` 前缀 + 有上限），不要改用这个。
+        """
         directory = self.config.paths.resolve(self.config.paths.screenshots)
         directory.mkdir(parents=True, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)

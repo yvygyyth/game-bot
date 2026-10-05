@@ -275,6 +275,7 @@ def build_context(
     journal: Journal | None = None,
     hooks: ExecutorHooks | None = None,
     recorder: RecognitionRecorder | None = None,
+    scenario_options: object | None = None,
 ) -> RunContext:
     """装配 RunContext（含 Session 与 Executor）。
 
@@ -284,6 +285,9 @@ def build_context(
     :param recorder: 识别记录器。不传时**按配置自动造一个**
         （``vision.record`` 为假则是 ``None``）；界面会从 ``ctx.recorder`` 拿它
         来显示"识图日志"和带框的图。
+    :param scenario_options: 流程层的运行选项（``Scenario.options``）。**故意用
+        ``object`` 而不是导入那个类型**：配置层不该依赖流程层。目前只从中取
+        ``save_frames_on_error`` 转交给执行器；没给就按关处理。
     """
     if recorder is None and config.vision.record:
         recorder = build_recorder(config)
@@ -299,6 +303,11 @@ def build_context(
         hooks=hooks,
         journal=journal or NullJournal(),
         dry_run=config.dry_run,
+        # 把流程层的开关在这里翻译成布尔值交给执行器：执行层不该 import
+        # 流程层的 Options 类型（依赖方向），但"失败要不要存帧"这件事
+        # 只有执行器知道时机 —— 它必须在写 journal **之前**存，
+        # 这样帧路径才能跟着那一条记录一起落盘。
+        save_frames_on_error=bool(getattr(scenario_options, "save_frames_on_error", False)),
     )
     ctx.recorder = recorder
     return ctx
@@ -309,7 +318,15 @@ def build_engine(
     ctx: RunContext,
     scenario: Scenario,
 ) -> FlowEngine:
-    """装配流程引擎。"""
+    """装配流程引擎。
+
+    顺手补一次 ``save_frames_on_error``：调用方可能只把 ``scenario`` 交给
+    ``build_context``（跟踪器需要它）而没传 ``scenario_options``。这一句保证
+    "存失败帧"那个开关不会因为调用约定不同而悄悄失效 —— 那正是它之前的样子。
+    """
+    ctx.executor.save_frames_on_error = bool(
+        getattr(scenario.options, "save_frames_on_error", False)
+    )
     return FlowEngine(scenario, ctx, executor=ctx.executor)
 
 
@@ -343,7 +360,14 @@ def bootstrap(
             + "\n  - ".join(missing)
         )
 
-    ctx = build_context(config, scenario=scenario, journal=journal)
+    ctx = build_context(
+        config,
+        scenario=scenario,
+        journal=journal,
+        # 显式传一次（build_engine 里还有一道兜底）：这个开关决定
+        # "失败时存不存帧、存了能不能在 journal 里找到"，不能靠调用约定。
+        scenario_options=scenario.options,
+    )
     engine = build_engine(config, ctx, scenario)
     log.info(
         "装配完成: %r, %d 状态 / %d 节点 / %d 边",
