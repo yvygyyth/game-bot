@@ -564,6 +564,12 @@ class PageTree:
         if target is None:
             return ActionResult.error(f"页面不存在: {page!r}")
 
+        # 分类节点（GROUP）**按定义不参与匹配**。少了这一句它会因为"没有 queries"
+        # 而永远命中 —— 那会让一个纯分类节点变成"当前状态"，
+        # 而它既不该出现在定位结果里，也没有流程节点认领它。
+        if target.is_group:
+            return ActionResult.not_found(f"{target.id!r} 是分类节点（kind: group），不参与匹配")
+
         if roi is None:
             roi = self.effective_roi(target.id)
         if isinstance(confidence, _Unset):
@@ -719,35 +725,40 @@ class PageTree:
                     )
 
         # ---- ② 自顶向下（hint 只用来少试几支） ----
-        start_id: PageId | None = None
+        # pref_root：hint 的顶层祖先，用来把顶层候选压到一支。
+        # 注意**不能**在这里就去 probe 顶层那个节点：它可能是 GROUP 分类节点
+        # （探测必然不中），也可能只是 hint 的容器 —— 两种情况都会让
+        # "hint 命中了"这个结论错误地建立在一个不成立的匹配上。
+        pref_root: PageId | None = None
         if hint and hint in self._pages and not self._pages[hint].is_overlay:
             root = hint
             while self._parent.get(root) is not None:
                 root = self._parent[root]  # type: ignore[assignment]
             if not self._is_guessable(f"{hint}/"):
-                start_id = root
+                pref_root = root
 
         roots = self._searchable_children(None)
-        if start_id is not None:
-            roots.sort(key=lambda p: p.id != start_id)
+        if pref_root is not None:
+            roots.sort(key=lambda p: p.id != pref_root)
 
         current_id = UNKNOWN_PAGE
         current_values: dict[str, Any] = {}
         hint_verified = False
-        if start_id is not None:
-            page = self._pages.get(start_id)
-            if page is not None:
-                if page.is_group:
-                    # 分类节点：自己不匹配，直接进它的子节点
-                    hint_verified = True
-                    current_id = page.id
-                else:
-                    ok, _why, values = self._probe(frame, page, attempts)
-                    if ok:
-                        current_id, current_values = page.id, values
-                        hint_verified = page.id == hint
 
-        candidates = (
+        # 先精确验 hint 自己：它在"应该在这儿"这件事上比"顶层那一支"
+        # 精确得多 —— 上一步的预期没命中时基本就是它变了。
+        if hint and hint in self._pages and not self._pages[hint].is_overlay:
+            hint_page = self._pages[hint]
+            ok, _why, values = self._probe(frame, hint_page, attempts)
+            if ok:
+                current_id, current_values, hint_verified = hint_page.id, values, True
+
+        # ---- 逐层下探：找到**最深的一个记录信息的状态** ----
+        #
+        # 分类节点（GROUP）**不参与匹配，但必须能穿过它**：它既不可能是结果，
+        # 也不能挡住它的子节点。所以候选列表在进入循环前就把分类节点展开掉 ——
+        # 让"穿过分类节点"和"命中了谁"彻底分开，循环里只剩一种情况（叶子状态）。
+        candidates: list[Page] = self._expand_groups(
             self._searchable_children(current_id) if hint_verified else roots
         )
         while candidates:
@@ -759,17 +770,31 @@ class PageTree:
                     hit_page, hit_values = page, values
                     break
             if hit_page is None:
-                break
+                break  # 这一层全没中 -> 当前结果就是最深命中者
             current_id, current_values = hit_page.id, hit_values
-            if hit_page.is_group:
-                # 分类节点只是组织结构和 ROI 的载体，不进定位结果
-                current_id = UNKNOWN_PAGE
-            candidates = self._searchable_children(hit_page.id)
+            candidates = self._expand_groups(self._searchable_children(hit_page.id))
 
         overlays = self._scan_overlays(frame, current_id, attempts, seen=set())
         return ActionResult.success(
             self._build_match(frame, current_id, current_values, overlays, attempts, now=now)
         )
+
+    def _expand_groups(self, pages: list[Page]) -> list[Page]:
+        """把候选里的分类节点（GROUP）就地展开成它们的子节点。
+
+        分类节点没有识别条件，**探测它永远是未命中** —— 所以它绝不能留在候选
+        列表里（那会让整层搜索在第一项就"看起来失败"）。它唯一的作用是提供
+        ROI 继承和组织结构，展开之后按原来的顺序返回真正的状态。
+        """
+        expanded: list[Page] = []
+        queue = list(pages)
+        while queue:
+            page = queue.pop(0)
+            if page.is_group:
+                queue = self._searchable_children(page.id) + queue
+                continue
+            expanded.append(page)
+        return expanded
 
     def recover(
         self,
@@ -863,6 +888,12 @@ class PageTree:
 
         排序目的是让扩散搜索**先试成本低的**（ROI 小 = 匹配像素少）：既快，
         也更不容易误判。"看得少"是这套设计一贯的偏好。
+
+        两个必须排除的东西：
+
+        * **group 分类节点** —— 它自己不记录信息，把它当状态报出去，
+          定位结果里就会出现一个"永远认不出"的假状态（而且它还没节点认领）；
+        * **叠加层** —— 它由 :meth:`_scan_overlays` 单独处理，不是主状态。
         """
         collected: list[Page] = []
         queue = list(self._searchable_children(page_id))

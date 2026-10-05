@@ -467,7 +467,31 @@ class TestScenario:
         scenario.graph.nodes["battle"].page = "写错了"
         with pytest.raises(ConfigError) as excinfo:
             scenario.validate()
-        assert "不存在的页面" in str(excinfo.value)
+        assert "不在状态树里" in str(excinfo.value)
+
+    def test_state_without_node_is_rejected(self) -> None:
+        """**用户定的不变式**：记录信息的状态必须有个流程节点认领。
+
+        否则重定位到它就无处可去 —— 那条路必须在启动期就堵死，
+        而不是等到运行期发现"跳不过去"。
+        """
+        scenario = build_scenario()
+        scenario.tree.add(Page("orphan", queries=(ImageQuery("orphan.png"),)))
+        with pytest.raises(ConfigError) as excinfo:
+            scenario.validate()
+        assert "没有任何流程节点认领" in str(excinfo.value)
+
+    def test_group_state_needs_no_node(self) -> None:
+        """分类节点（group）自己不参与匹配，所以不需要节点认领。"""
+        scenario = build_scenario()
+        scenario.tree.add(Page("folder", kind=PageKind.GROUP))
+        scenario.tree.add(
+            Page("folder/kid", queries=(ImageQuery("kid.png"),)), parent="folder"
+        )
+        scenario.graph.add_node(Node("kid", page="folder/kid"))
+        # 加条边让它可达 —— 否则 ``Graph.validate`` 会先报"死代码"，测不到本条
+        scenario.graph.connect("home", "kid", priority=1)
+        assert scenario.validate() is None
 
     def test_recovery_node_must_exist(self) -> None:
         scenario = build_scenario()
@@ -606,10 +630,11 @@ class TestFlowEngine:
         assert engine.running is False
         assert engine._stop_message == "第一次"
 
-    def test_tick_is_a_stub(self, ctx) -> None:
+    def test_tick_runs_a_round(self, ctx) -> None:
+        """``tick()`` 现在真的跑一轮：认不出来时什么都不做，返回 None。"""
         engine = FlowEngine(build_scenario(), ctx)
-        with pytest.raises(NotImplementedError):
-            engine.tick()
+        assert engine.tick() is None
+        assert engine.report.ticks == 0  # 轮数是 run() 数的，tick 自己不加
 
     def test_run_validates_before_looping(self, ctx) -> None:
         scenario = build_scenario()
@@ -626,40 +651,30 @@ class TestFlowEngine:
     def test_repr(self, ctx) -> None:
         assert "home" in repr(FlowEngine(build_scenario(), ctx))
 
-    def test_align_to_page_without_claimed_node(self, ctx) -> None:
+    def test_state_check_detects_mismatch(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)
-        ok, why = engine._position_ok("nobody")
+        ok, why = engine.check_state("nobody")
         assert ok is False
-        assert "期望页面" in why
+        assert "期望状态" in why
 
-    def test_position_ok_when_page_matches(self, ctx) -> None:
+    def test_state_check_passes_when_matching(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)
-        assert engine._position_ok("home") == (True, "位置正确")
+        assert engine.check_state("home") == (True, "状态正确")
 
-    def test_position_ok_for_page_less_node(self, ctx) -> None:
+    def test_state_check_skipped_for_unbound_node(self, ctx) -> None:
+        """**做法三**：不写 ``page`` 的节点完全不校验，流程直着走。"""
         scenario = build_scenario()
         scenario.graph.add_node(Node("free", page=None))
         engine = FlowEngine(scenario, ctx, start_node="free")
-        ok, why = engine._position_ok("随便哪一页")
+        ok, why = engine.check_state("随便哪个状态")
         assert ok is True
-        assert "不绑定页面" in why
+        assert "不绑定状态" in why
 
-    def test_position_mismatch_does_not_move_cursor(self, ctx) -> None:
-        """**只拦不跳**：位置不符时游标不动，跳转只能由边表达。"""
+    def test_state_check_uses_binding(self, ctx) -> None:
+        """校验走的是关联表，所以"期望什么"只有一个出处。"""
         engine = FlowEngine(build_scenario(), ctx)
-        before = engine.cursor.current
-        assert engine._position_ok("battle") == (
-            False,
-            "节点 'home' 期望页面 'home'，实测是 'battle'",
-        )
-        assert engine.cursor.current == before
-
-    def test_position_warning_is_logged_once(self, ctx) -> None:
-        """卡住时不能每轮刷一行日志 —— 真正有用的信息会被埋掉。"""
-        engine = FlowEngine(build_scenario(), ctx)
-        engine._warn_position("home", "battle", "不符")
-        engine._warn_position("home", "battle", "不符")
-        assert len(engine._position_warned) == 1
+        assert engine.binding.state_of("home") == "home"
+        assert engine.binding.node_for("home").id == "home"
 
     def test_start_node_is_honoured(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx, start_node="battle")
@@ -680,6 +695,13 @@ class TestFlowEngine:
         assert engine._check_terminal("closed", now=0.0) is True
         assert engine.running is False
 
+    def test_binding_uses_ctx_pages_single_source(self, ctx) -> None:
+        """注入 tracker 时同步给 ctx —— 否则守卫和引擎会看两个不同的跟踪器。"""
+        tracker = PageTracker(build_scenario().tree)
+        engine = FlowEngine(build_scenario(), ctx, tracker=tracker)
+        assert engine.tracker is tracker
+        assert ctx.pages is tracker
+
 
 class TestDecision:
     def test_stayed_decision(self) -> None:
@@ -690,3 +712,252 @@ class TestDecision:
 
     def test_to_dict(self) -> None:
         assert Decision(current="a", target="b").to_dict()["target"] == "b"
+
+
+# --------------------------------------------------------------------------- #
+# 状态 ↔ 节点的关联
+# --------------------------------------------------------------------------- #
+class TestStateBinding:
+    def test_state_to_node_and_back(self) -> None:
+        binding = build_scenario().binding()
+        assert binding.node_for("home").id == "home"
+        assert binding.state_of("home") == "home"
+        assert binding.is_bound("home") is True
+        assert binding.is_bound("nobody") is False
+
+    def test_unbound_node_is_the_low_burden_style(self) -> None:
+        """不写 ``page`` 的节点 = 不校验状态。这是"流程图只写正常流程"的实现。"""
+        scenario = build_scenario()
+        scenario.graph.add_node(Node("free"))
+        binding = scenario.binding()
+        assert binding.state_of("free") is None
+        assert "free" in binding.unbound_nodes()
+        assert binding.check("free", "随便哪个状态") == (True, "节点不绑定状态")
+
+    def test_main_node_is_the_highest_priority(self) -> None:
+        """同状态多节点时必须有确定的主节点，否则"跳到哪"不确定。"""
+        scenario = build_scenario()
+        scenario.graph.add_node(Node("home/secondary", page="home", priority=5))
+        scenario.graph.add_node(Node("home/primary", page="home", priority=50))
+        binding = scenario.binding()
+        assert binding.node_for("home").id == "home/primary"
+        assert next(n.id for n in binding.nodes_for("home")) == "home/primary"
+
+    def test_check_reports_mismatch(self) -> None:
+        binding = build_scenario().binding()
+        ok, why = binding.check("home", "battle")
+        assert ok is False
+        assert "期望状态 'home'" in why and "实测是 'battle'" in why
+
+    def test_check_handles_unknown(self) -> None:
+        binding = build_scenario().binding()
+        ok, why = binding.check("home", None)
+        assert ok is False
+        assert "认不出来" in why
+
+    def test_table_is_readable(self) -> None:
+        table = build_scenario().binding().table()
+        assert table["home"] == "home"
+        assert table["battle"] == "battle"
+
+    def test_to_dict(self) -> None:
+        payload = build_scenario().binding().to_dict()
+        assert payload["state_to_node"]["home"] == "home"
+
+    def test_missing_state_is_rejected(self) -> None:
+        scenario = build_scenario()
+        scenario.graph.nodes["battle"].page = "ghost"
+        with pytest.raises(ConfigError):
+            scenario.binding().validate()
+
+    def test_len_and_contains(self) -> None:
+        binding = build_scenario().binding()
+        assert "home" in binding
+        assert len(binding) == 3
+
+
+# --------------------------------------------------------------------------- #
+# 直着走 vs 重定位
+# --------------------------------------------------------------------------- #
+def build_live() -> tuple[Scenario, object]:
+    """一个能真的走动的场景：三个状态，每个都有节点和边。
+
+    ``ctx`` 用的是假后端 + ``FakeMatcher``，所以"屏幕上有什么"由测试直接改
+    ``matcher.matches`` 决定。
+    """
+    tree = PageTree()
+    tree.add(Page("home", kind=PageKind.GROUP))
+    tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
+    tree.add(Page("home/battle", queries=(ImageQuery("battle.png"),)), parent="home")
+    tree.add(
+        Page("net", kind=PageKind.OVERLAY, priority=100, queries=(ImageQuery("net.png"),))
+    )
+
+    graph = Graph(initial="lobby")
+    graph.add_node(Node("lobby", page="home/lobby"))
+    graph.add_node(Node("battle", page="home/battle"))
+    graph.connect("lobby", "battle", priority=10, condition=ImageQuery("battle.png"))
+    graph.connect("battle", "lobby", priority=10, condition=ImageQuery("lobby.png"))
+
+    scenario = Scenario(
+        name="live",
+        tree=tree,
+        graph=graph,
+        options=EngineOptions(tick_interval=0.01, require_confirmed=False),
+    )
+    return scenario, tree
+
+
+class TestEngineRealign:
+    """意外时的重定位：从"我以为在哪"到"实际在哪"。"""
+
+    def test_matching_state_runs_the_node(self, ctx, matcher) -> None:
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+        engine.tracker.advance_tick()
+        engine.tick()
+        assert engine.cursor.current == "lobby"
+        assert engine.report.recoveries == []
+
+    def test_unexpected_state_re_anchors_the_cursor(self, ctx, matcher) -> None:
+        """**核心语义**：状态层说"其实在 battle"，引擎把游标挪到 battle 节点。"""
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "battle"
+        assert engine.tracker.current_id == "home/battle"
+
+    def test_recovery_is_never_silent(self, ctx, matcher) -> None:
+        """自动跳可以被接受，唯一理由是**它不隐形**：每次跳都有记录。"""
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert len(engine.report.recoveries) == 1
+        record = engine.report.recoveries[0]
+        assert record.expected == "home/lobby"
+        assert record.actual == "home/battle"
+        assert record.to_node == "battle"
+        assert record.from_node == "lobby"
+        assert record.attempts, "慢路径试过谁必须记下来"
+
+    def test_recovery_does_not_execute_this_tick(self, ctx, matcher) -> None:
+        """重定位只是"把位置摆正"，干活留给下一轮 —— 避免位置刚变就动手。"""
+        from gamebot.execution.executor import Executor
+        from gamebot.execution.step import FunctionStep
+
+        # 这个用例要真的执行步骤，所以给它一个执行器（conftest 的 ctx 故意不挂：
+        # 装配期才由 bootstrap 挂）。
+        ctx.executor = Executor(ctx)
+        scenario, _tree = build_live()
+
+        calls: list[str] = []
+        scenario.graph.nodes["battle"].steps = [
+            FunctionStep(lambda c: calls.append("battle") or ActionResult.success(1))
+        ]
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+        assert calls == [], "本轮不该执行 battle 的步骤"
+
+        engine.tracker.advance_tick()
+        engine.tick()
+        assert calls == ["battle"], "下一轮才执行"
+
+    def test_unclaimed_state_keeps_position(self, ctx, matcher) -> None:
+        """认出来了但没人认领时不乱跳 —— 而且照样留痕。"""
+        scenario, tree = build_live()
+        tree.add(Page("home/orphan", queries=(ImageQuery("orphan.png"),)), parent="home")
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"orphan.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "lobby"
+        assert engine.report.recoveries[-1].to_node is None
+
+    def test_unknown_state_waits_instead_of_guessing(self, ctx, matcher) -> None:
+        """认不出来时只等，绝不猜、绝不动作。"""
+        scenario, _tree = build_live()
+        scenario.options.unknown_grace = 99.0
+        engine = FlowEngine(scenario, ctx)
+        matcher.matches = {}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "lobby"
+        assert engine.report.recoveries == []
+        assert engine.running is True
+
+    def test_unbound_node_still_realigns(self, ctx, matcher) -> None:
+        """不校验状态的节点也不该"闭着眼乱走"：锚点变了照样重定位。"""
+        scenario, _tree = build_live()
+        scenario.graph.add_node(Node("free"))
+        engine = FlowEngine(scenario, ctx, start_node="free")
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "battle"
+
+    def test_overlay_does_not_trigger_realign(self, ctx, matcher) -> None:
+        """叠加层盖在主状态上：主状态没变就不算意外（弹窗由边条件表达）。"""
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99), "net.png": (Point(2, 2), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "lobby"
+        assert engine.tracker.is_("net") is True
+        assert engine.report.recoveries == []
+
+
+class TestEngineRunStory:
+    """端到端：一轮一轮跑完一个"正常 + 被意外打断"的故事。"""
+
+    def test_run_cycle_and_realign(self, ctx, matcher) -> None:
+        scenario, _tree = build_live()
+        scenario.options.max_ticks = 12
+        engine = FlowEngine(scenario, ctx)
+
+        def scripted(_engine, _outcome) -> None:
+            """让画面按剧本变化：先在 lobby，第 3 轮被弹窗打断后到 battle。"""
+            tick = engine.report.ticks
+            if tick <= 2:
+                matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+            elif tick == 3:
+                matcher.matches = {"net.png": (Point(2, 2), 0.99)}  # 主状态认不出
+            else:
+                matcher.matches = {
+                    "battle.png": (Point(1, 1), 0.99),
+                    "net.png": (Point(2, 2), 0.99),
+                }
+            ctx.invalidate_frame()
+
+        report = engine.run(on_tick=scripted)
+
+        assert report.stop_reason is StopReason.MAX_TICKS
+        assert engine.cursor.current == "battle"
+        assert [r.actual for r in report.recoveries] == ["home/battle"]
+        # 重定位那次之后没再乱跳
+        assert report.recoveries[0].to_node == "battle"
+        assert report.to_dict()["recoveries"], "报告里要能看到重定位"

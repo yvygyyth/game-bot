@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
+from gamebot.atomic.session import BaseSession
 from gamebot.exceptions import StateError
 from gamebot.state import (
     UNKNOWN_PAGE,
@@ -17,7 +19,26 @@ from gamebot.state import (
     PageTracker,
     PageTree,
 )
-from gamebot.types import Region
+from gamebot.types import Point, Region
+
+
+# --------------------------------------------------------------------------- #
+# 定位用的小装置
+# --------------------------------------------------------------------------- #
+def _frame(matcher):
+    """造一帧假画面（内存后端，不碰真实截图）。
+
+    ``locate`` / ``recover`` 只依赖帧上的查询方法，所以这里不需要真图。
+    """
+    session = BaseSession(build_fake_backends(size=(640, 360)), matcher=matcher)
+    return session.capture()
+
+
+class _Boom:
+    """一个永远抛异常的"查询"：用来验"出错"和"未命中"没有被混为一谈。"""
+
+    def run(self, frame):
+        raise RuntimeError("故意炸的查询")
 
 
 # --------------------------------------------------------------------------- #
@@ -340,9 +361,14 @@ class TestPageTreeValidate:
         tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(500, 500, 100, 100)))
         assert tree.validate() is None
 
-    def test_locate_is_a_stub(self) -> None:
-        with pytest.raises(NotImplementedError):
-            build_tree().locate(None)  # type: ignore[arg-type]
+    def test_locate_is_implemented(self, matcher) -> None:
+        """定位不再抛"未实现"——它现在会如实回答"认不出来"。
+
+        认不出来是**有效结果**，所以这里断言的是返回值而不是异常。
+        """
+        match = build_tree().locate(_frame(matcher)).value
+        assert match is not None
+        assert match.is_unknown is True
 
 
 # --------------------------------------------------------------------------- #
@@ -490,3 +516,358 @@ class TestPageState:
         assert state.is_("popup") is True
         assert state.is_("battle") is True
         assert state.is_("nope") is False
+
+
+# --------------------------------------------------------------------------- #
+# 单帧定位（快路径）
+# --------------------------------------------------------------------------- #
+class TestPageTreeLocate:
+    """``PageTree.locate``：自顶向下找最深命中者 + 叠加层。
+
+    一律用 ``FakeMatcher``（conftest 提供的视觉替身），不碰真实截图。
+    """
+
+    def test_deepest_match_wins(self, matcher) -> None:
+        matcher.matches = {"r.png": (Point(1, 1), 0.99), "k.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("root", queries=(ImageQuery("r.png"),)))
+        tree.add(Page("root/kid", queries=(ImageQuery("k.png"),)), parent="root")
+
+        match = tree.locate(_frame(matcher)).value
+        assert match.id == "root/kid"
+        assert match.path == ("root", "root/kid")
+
+    def test_unknown_is_a_successful_result(self, matcher) -> None:
+        """认不出来必须是 ``success(UNKNOWN_PAGE)``，不能是 error。"""
+        matcher.matches = {}
+        result = build_tree().locate(_frame(matcher))
+        assert result.ok is True
+        assert result.value.is_unknown is True
+        assert result.value.attempts, "认不出来也要留下尝试痕迹"
+
+    def test_exclude_vetoes(self, matcher) -> None:
+        """exclude 命中就不进这一页 —— 处理"子页面和父页面长得太像"。"""
+        matcher.matches = {"b.png": (Point(1, 1), 0.99), "win.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
+        tree.add(
+            Page(
+                "battle/result",
+                queries=(ImageQuery("b.png"),),
+                exclude=(ImageQuery("win.png"),),
+            ),
+            parent="battle",
+        )
+        assert tree.locate(_frame(matcher)).value.id == "battle"
+
+    def test_priority_decides_between_siblings(self, matcher) -> None:
+        matcher.matches = {"a.png": (Point(1, 1), 0.99), "b.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("root", queries=(ImageQuery("a.png"),)))
+        tree.add(Page("root/low", priority=1, queries=(ImageQuery("b.png"),)), parent="root")
+        tree.add(Page("root/high", priority=50, queries=(ImageQuery("b.png"),)), parent="root")
+        assert tree.locate(_frame(matcher)).value.id == "root/high"
+
+    def test_global_overlay_does_not_replace_the_state(self, matcher) -> None:
+        """全局弹窗是**叠加**在主状态上的一层，不是"当前状态"。"""
+        matcher.matches = {"home.png": (Point(1, 1), 0.99), "err.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("home", queries=(ImageQuery("home.png"),)))
+        tree.add(
+            Page(
+                "network_error",
+                kind=PageKind.OVERLAY,
+                priority=100,
+                queries=(ImageQuery("err.png"),),
+            )
+        )
+        match = tree.locate(_frame(matcher)).value
+        assert match.id == "home"
+        assert match.overlays == ("network_error",)
+        assert match.is_("network_error") is True
+
+    def test_state_level_overlay_is_collected(self, matcher) -> None:
+        matcher.matches = {"b.png": (Point(1, 1), 0.99), "pop.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
+        tree.add(
+            Page("battle/popup", kind=PageKind.OVERLAY, queries=(ImageQuery("pop.png"),)),
+            parent="battle",
+        )
+        match = tree.locate(_frame(matcher)).value
+        assert match.id == "battle"
+        assert match.overlays == ("battle/popup",)
+
+    def test_expected_fast_path(self, matcher) -> None:
+        """``expected`` 命中时只探它 —— 这就是"正常一轮不查树"的实现。"""
+        matcher.matches = {"home.png": (Point(1, 1), 0.99), "other.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("home", queries=(ImageQuery("home.png"),)))
+        tree.add(Page("other", priority=50, queries=(ImageQuery("other.png"),)))
+        matcher.calls.clear()
+        match = tree.locate(_frame(matcher), expected="home").value
+        assert match.id == "home"
+        assert [t for t, _ in matcher.calls] == ["home.png"]
+
+    def test_expected_failure_falls_back_to_full_search(self, matcher) -> None:
+        matcher.matches = {"other.png": (Point(2, 2), 0.99)}
+        tree = PageTree()
+        tree.add(Page("home", queries=(ImageQuery("home.png"),)))
+        tree.add(Page("other", queries=(ImageQuery("other.png"),)))
+        assert tree.locate(_frame(matcher), expected="home").value.id == "other"
+
+    def test_hint_only_saves_work_never_decides(self, matcher) -> None:
+        """hint 只影响尝试顺序：给一个**完全错**的 hint 也要能走对。"""
+        matcher.matches = {"b.png": (Point(1, 1), 0.99)}
+        tree = PageTree()
+        tree.add(Page("home", queries=(ImageQuery("home.png"),)))
+        tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
+        assert tree.locate(_frame(matcher)).value.id == "battle"
+        assert tree.locate(_frame(matcher), hint="home").value.id == "battle"
+
+    def test_hint_prunes_other_branches(self, matcher) -> None:
+        """hint 命中时，排在前面的无关分支一次都不试。"""
+        matcher.matches = {"home.png": (Point(1, 1), 0.99)}
+        tree = PageTree()
+        tree.add(Page("ui", priority=100, queries=(ImageQuery("ui.png"),)))
+        tree.add(Page("home", priority=1, queries=(ImageQuery("home.png"),)))
+
+        def probes(hint: str | None) -> list[str]:
+            # 每次都用**新帧**：Frame 会缓存查询结果（同一帧上同一个模板只匹配
+            # 一次），复用同一帧会让两次 locate 的匹配次数不可比。
+            matcher.calls.clear()
+            tree.locate(_frame(matcher), hint)
+            return [template for template, _ in matcher.calls]
+
+        assert probes("home") == ["home.png"]
+        assert probes(None) == ["ui.png", "home.png"]
+
+    def test_roi_and_query_region_are_intersected(self, matcher) -> None:
+        """页面 roi 与查询 region 求交：两边都是作者显式写的，谁也不该覆盖谁。"""
+        matcher.matches = {"hit.png": (Point(1, 1), 0.99)}
+        tree = PageTree()
+        tree.add(
+            Page(
+                "page",
+                roi=Region(0, 0, 100, 100),
+                queries=(ImageQuery("hit.png", region=Region(50, 50, 100, 100)),),
+            )
+        )
+        assert tree.locate(_frame(matcher)).value.id == "page"
+        assert matcher.calls[-1][1] == Region(50, 50, 50, 50)
+
+    def test_empty_intersection_is_an_error(self, matcher) -> None:
+        """两者完全不重叠 = 这一页永远认不出来，必须报错而不是静默未命中。"""
+        matcher.matches = {"hit.png": (Point(1, 1), 0.99)}
+        tree = PageTree()
+        tree.add(
+            Page(
+                "page",
+                roi=Region(0, 0, 10, 10),
+                queries=(ImageQuery("hit.png", region=Region(500, 500, 10, 10)),),
+            )
+        )
+        result = tree.locate(_frame(matcher))
+        assert result.ok is True, "单帧定位不该因为一页配置坏掉就整体失败"
+        assert result.value.is_unknown is True
+        assert any("自相矛盾" in a.reason for a in result.value.attempts)
+
+    def test_page_confidence_overrides_query_threshold(self, matcher) -> None:
+        """页面显式写了 confidence 才覆盖查询自己的阈值。"""
+        matcher.matches = {"hit.png": (Point(1, 1), 0.7)}
+        tree = PageTree()
+        tree.add(Page("strict", confidence=0.95, queries=(ImageQuery("hit.png", confidence=0.5),)))
+        assert tree.locate(_frame(matcher)).value.is_unknown is True
+
+        tree2 = PageTree()
+        tree2.add(Page("loose", confidence=0.6, queries=(ImageQuery("hit.png", confidence=0.5),)))
+        assert tree2.locate(_frame(matcher)).value.id == "loose"
+
+    def test_query_threshold_survives_default_page_confidence(self, matcher) -> None:
+        """页面没写 confidence 时，查询自己的阈值必须原样生效。
+
+        名将杀首页给的是 0.55 —— 被页面默认的 0.9 覆盖掉的话，
+        它在悬浮态（实测 0.647）会直接失配。
+        """
+        matcher.matches = {"hit.png": (Point(1, 1), 0.7)}
+        tree = PageTree()
+        tree.add(Page("page", queries=(ImageQuery("hit.png", confidence=0.55),)))
+        assert tree.locate(_frame(matcher)).value.id == "page"
+
+    def test_matcher_error_is_not_treated_as_miss(self, matcher) -> None:
+        """查询求值出错按未命中处理，但痕迹里要说明是"出错"而不是"没看到"。"""
+        tree = PageTree()
+        tree.add(Page("page", queries=(_Boom(),)))
+        match = tree.locate(_frame(matcher)).value
+        assert match.is_unknown is True
+        assert "求值出错" in match.attempts[0].reason
+        assert "故意炸的查询" in match.attempts[0].reason
+
+    def test_values_carry_hit_points(self, matcher) -> None:
+        matcher.matches = {"home.png": (Point(11, 22), 0.99)}
+        match = build_tree().locate(_frame(matcher)).value
+        assert match.values["home.png"] == Point(11, 22)
+
+    def test_frame_id_and_time_are_recorded(self, matcher) -> None:
+        matcher.matches = {"home.png": (Point(1, 1), 0.99)}
+        frame = _frame(matcher)
+        match = build_tree().locate(frame, now=12.5).value
+        assert match.frame_id == frame.frame_id
+        assert match.observed_at == 12.5
+
+
+# --------------------------------------------------------------------------- #
+# 分类节点（kind: group）
+# --------------------------------------------------------------------------- #
+class TestGroupStates:
+    """父节点只是分类：**自己不记录信息，也就不参与匹配**。
+
+    这一条是"进下一层之后上一层特征消失"那个坑的根治办法：
+    要求父节点成立会让「首页 → 竞技场 → 战斗」这种链条一进下一层就全部失效。
+    """
+
+    def build(self) -> PageTree:
+        tree = PageTree()
+        tree.add(Page("home", kind=PageKind.GROUP))
+        tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
+        tree.add(Page("home/jingji", queries=(ImageQuery("t.png"),)), parent="home")
+        return tree
+
+    def test_group_never_matches(self, matcher) -> None:
+        matcher.matches = {}
+        result = self.build().match(_frame(matcher), "home")
+        assert result.ok is False
+        assert "分类节点" in result.message
+
+    def test_group_is_transparent(self, matcher) -> None:
+        """穿过分类节点找到真正的状态 —— 不需要父节点的特征也成立。"""
+        matcher.matches = {"t.png": (Point(1, 1), 0.99)}
+        match = self.build().locate(_frame(matcher)).value
+        assert match.id == "home/jingji"
+        assert match.path == ("home", "home/jingji")
+
+    def test_group_never_appears_in_the_result(self, matcher) -> None:
+        matcher.matches = {}
+        assert self.build().locate(_frame(matcher)).value.id == UNKNOWN_PAGE
+
+    def test_group_is_skipped_when_probing_hint(self, matcher) -> None:
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+        tree = self.build()
+        assert tree.locate(_frame(matcher), hint="home").value.id == "home/lobby"
+
+    def test_group_with_queries_is_rejected(self) -> None:
+        tree = PageTree()
+        tree.add(Page("folder", kind=PageKind.GROUP, queries=(ImageQuery("x.png"),)))
+        tree.add(Page("folder/kid", queries=(ImageQuery("k.png"),)), parent="folder")
+        with pytest.raises(StateError) as excinfo:
+            tree.validate()
+        assert "不该写 queries" in str(excinfo.value)
+
+    def test_group_without_children_is_rejected(self) -> None:
+        tree = PageTree()
+        tree.add(Page("folder", kind=PageKind.GROUP))
+        with pytest.raises(StateError) as excinfo:
+            tree.validate()
+        assert "没有任何子页面" in str(excinfo.value)
+
+    def test_state_leaf_without_queries_is_rejected(self) -> None:
+        """状态节点没写 queries = 永远不会被认出来，必须报错。"""
+        tree = PageTree()
+        tree.add(Page("page"))
+        with pytest.raises(StateError) as excinfo:
+            tree.validate()
+        assert "没有识别条件" in str(excinfo.value)
+
+    def test_confidence_explicit_flag(self) -> None:
+        assert Page("a", queries=(ImageQuery("x"),)).confidence_explicit is False
+        assert Page("b", confidence=0.8, queries=(ImageQuery("x"),)).confidence_explicit is True
+
+
+# --------------------------------------------------------------------------- #
+# 慢路径：末梢优先 + 逐步扩散
+# --------------------------------------------------------------------------- #
+class TestPageTreeRecover:
+    """``recover``：从最近的末梢开始逐步扩大范围。
+
+    用途只有一个 —— 意外时的重定位。正常一轮用不上它。
+    """
+
+    def build(self) -> PageTree:
+        tree = PageTree()
+        tree.add(Page("home", kind=PageKind.GROUP))
+        tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
+        tree.add(Page("home/shop", queries=(ImageQuery("shop.png"),)), parent="home")
+        tree.add(Page("battle", kind=PageKind.GROUP))
+        tree.add(Page("battle/fight", queries=(ImageQuery("fight.png"),)), parent="battle")
+        return tree
+
+    def test_near_itself_is_tried_first(self, matcher) -> None:
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+        match = self.build().recover(_frame(matcher), near="home/lobby").value
+        assert match.id == "home/lobby"
+        assert [a.id for a in match.attempts] == ["home/lobby"]
+
+    def test_siblings_of_near_come_next(self, matcher) -> None:
+        """最近的兄弟优先于远处分支。"""
+        matcher.matches = {"shop.png": (Point(1, 1), 0.99)}
+        match = self.build().recover(_frame(matcher), near="home/lobby").value
+        assert match.id == "home/shop"
+
+    def test_expands_to_the_whole_tree(self, matcher) -> None:
+        """近处都不成立时扩到别处 —— 这正是"意外"的救回能力。"""
+        matcher.matches = {"fight.png": (Point(1, 1), 0.99)}
+        match = self.build().recover(_frame(matcher), near="home/lobby").value
+        assert match.id == "battle/fight"
+
+    def test_attempts_record_each_ring(self, matcher) -> None:
+        """每一圈试过谁都要留痕 —— "为什么最后认成了这个"只能靠它。"""
+        matcher.matches = {"fight.png": (Point(1, 1), 0.99)}
+        match = self.build().recover(_frame(matcher), near="home/lobby").value
+        tried = [a.id for a in match.attempts]
+        assert tried[0] == "home/lobby"
+        assert "battle/fight" in tried
+        assert "home/shop" in tried
+
+    def test_cheaper_candidates_are_tried_first(self, matcher) -> None:
+        """同一圈里 ROI 小的先试（"看得少"更快也更不容易误判）。"""
+        tree = PageTree()
+        tree.add(Page("root", kind=PageKind.GROUP))
+        tree.add(
+            Page("root/big", roi=Region(0, 0, 600, 600), queries=(ImageQuery("big.png"),)),
+            parent="root",
+        )
+        tree.add(
+            Page("root/small", roi=Region(0, 0, 20, 20), queries=(ImageQuery("small.png"),)),
+            parent="root",
+        )
+        matcher.matches = {"big.png": (Point(1, 1), 0.99), "small.png": (Point(2, 2), 0.99)}
+        match = tree.recover(_frame(matcher)).value
+        assert next(a.id for a in match.attempts) == "root/small"
+
+    def test_unknown_when_nothing_matches(self, matcher) -> None:
+        matcher.matches = {}
+        match = self.build().recover(_frame(matcher), near="home/lobby").value
+        assert match.is_unknown is True
+
+    def test_unknown_near_falls_back_to_full_search(self, matcher) -> None:
+        matcher.matches = {"fight.png": (Point(1, 1), 0.99)}
+        match = self.build().recover(_frame(matcher), near="不存在的状态").value
+        assert match.id == "battle/fight"
+
+    def test_group_is_never_returned(self, matcher) -> None:
+        """分类节点永远不会成为"真实状态" —— 把它报出去会得到一个
+        既认不出、又没节点认领的假状态。"""
+        matcher.matches = {}
+        match = self.build().recover(_frame(matcher)).value
+        assert match.is_unknown is True
+
+    def test_overlay_fallback(self, matcher) -> None:
+        """主状态全认不出来，但弹窗还在 —— 至少要把弹窗报出来。"""
+        tree = self.build()
+        tree.add(
+            Page("net", kind=PageKind.OVERLAY, queries=(ImageQuery("net.png"),))
+        )
+        matcher.matches = {"net.png": (Point(1, 1), 0.99)}
+        match = tree.recover(_frame(matcher), near="home/lobby").value
+        assert match.is_unknown is True
+        assert match.overlays == ("net",)

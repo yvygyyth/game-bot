@@ -85,12 +85,14 @@ class Journal(ABC):
           journal 是 JSONL，不是二进制转储。
         """
         meta: dict[str, Any] = dict(outcome.result.meta or {})
+        # 把已经拾取好的动作信息从 meta 里**挪到独立字段**：格式约定里
+        # ``action`` 是自己的 key（回放和训练数据要拿它当锚点），
+        # 留在 meta 里会变成 meta.action.action 这种两层嵌套。
+        meta.pop("action", None)
         if outcome.skipped:
             meta["skipped"] = True
         if outcome.children:
             meta["children"] = [c.to_dict() for c in outcome.children]
-        if outcome.action:
-            meta["action"] = dict(outcome.action)
 
         self.record(
             JournalEntry(
@@ -100,6 +102,7 @@ class Journal(ABC):
                 tick=tick,
                 attempts=outcome.attempts,
                 elapsed=outcome.elapsed,
+                action=dict(outcome.action),
                 frame_path=outcome.frame_path,
                 message=outcome.message,
                 meta=meta,

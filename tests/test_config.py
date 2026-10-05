@@ -231,66 +231,38 @@ class TestShippedSamples:
         assert all(isinstance(r, Region) for r in regions.values())
 
     def test_example_script_yaml_is_wellformed(self) -> None:
-        """示例脚本定义（页面树 + 流程图）必须是自洽的。
+        """示例脚本定义（状态树 + 流程图）必须是自洽的。
 
-        没法用 ``load_scenario`` 检查 —— 它还依赖 ``query_from_dict`` /
-        ``step_from_dict`` 两个还没实现的函数。所以这里直接按 schema 逐条校验，
-        至少保证"页面 id / 节点 id 对得上"这类问题不会漏到运行期。
+        **这里走真正的解析器**（``load_scenario``）：以前只能按 schema 逐条
+        手写校验，因为 ``query_from_dict`` / ``step_from_dict`` 还没实现。
+        现在那条路通了，就该让示例走它自己声明的入口 ——
+        手写校验和真实解析器迟早会漂移，而那正是示例最容易烂掉的地方。
         """
-        yaml = pytest.importorskip("yaml")
+        from gamebot.flow.loader import load_scenario
 
         path = PROJECT_ROOT / "config" / "flows" / "example_flow.yaml"
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert data["name"] == "example"
+        scenario = load_scenario(path)  # 解析 + 全套校验
 
-        # ① 页面 id 由嵌套位置推导成路径形式
-        page_ids: list[str] = []
+        assert scenario.name == "example"
+        assert scenario.graph.initial == "lobby"
 
-        def collect(pages: dict, prefix: str = "") -> None:
-            for key, page in pages.items():
-                page_id = f"{prefix}/{key}" if prefix else key
-                page_ids.append(page_id)
-                collect(page.get("children", {}) or {}, page_id)
+        # ① 状态 id 由嵌套位置推导成路径形式
+        ids = {p.id for p in scenario.tree.walk()}
+        assert {"home", "home/lobby", "home/qianli", "home/qianli/battle", "network_error"} <= ids
 
-        collect(data["pages"])
-        assert "home" in page_ids
-        assert "home/qianli/battle/result" in page_ids
-        assert "network_error" in page_ids
+        # ② 分类节点（group）自己不记录信息
+        assert scenario.tree.require("home").is_group is True
+        assert scenario.tree.require("home").queries == ()
 
-        # ② 节点的 page 必须在页面树里；没有 page 的节点是允许的（纯观察）
-        node_ids = set(data["nodes"])
-        for node_id, node in data["nodes"].items():
-            if node.get("page"):
-                assert node["page"] in page_ids, f"节点 {node_id} 声明了不存在的页面 {node['page']}"
+        # ③ 状态 ↔ 节点：每个记录信息的状态都能被重定位到
+        binding = scenario.binding()
+        for page in scenario.tree.walk():
+            if page.is_group or page.is_overlay:
+                continue
+            assert binding.node_for(page.id) is not None, f"{page.id} 没有节点认领"
 
-        # ③ initial 和每条边的端点必须在节点表里
-        assert data["initial"] in node_ids
-        for edge in data["edges"]:
-            assert edge["source"] in node_ids, f"边来源未定义: {edge['source']}"
-            assert edge["target"] in node_ids, f"边目标未定义: {edge['target']}"
+        # ④ 叠加层是顶层的，且不参与主状态匹配
+        assert "network_error" in {p.id for p in scenario.tree.global_overlays()}
 
-        # ④ stop_pages / recovery_node 也必须存在
-        for page_id in data.get("stop_pages", []):
-            assert page_id in page_ids
-        if data.get("recovery_node"):
-            assert data["recovery_node"] in node_ids
-
-        # ⑤ 非组合查询必须给 template；叠加层必须显式声明 kind
-        composites = {"AndQuery", "OrQuery", "NotQuery"}
-
-        def check_queries(queries: list, where: str) -> None:
-            for query in queries:
-                assert "template" in query or query["type"] in composites, (
-                    f"{where} 的查询缺少 template"
-                )
-
-        def walk_pages(pages: dict, prefix: str = "") -> None:
-            for key, page in pages.items():
-                page_id = f"{prefix}/{key}" if prefix else key
-                check_queries(page.get("queries", []), f"页面 {page_id}")
-                walk_pages(page.get("children", {}) or {}, page_id)
-
-        walk_pages(data["pages"])
-
-        # ⑥ 顶层叠加层：有 kind: overlay 的不属于任何父页面
-        assert data["pages"]["network_error"]["kind"] == "overlay"
+        # ⑤ roi 继承：battle 只看右下角那一块
+        assert scenario.tree.effective_roi("home/qianli/battle") is not None

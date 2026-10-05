@@ -399,10 +399,36 @@ class FlowEngine:
         if self._check_terminal(anchor, now=now):
             return None
 
-        # (5) 状态自检：锚点对得上就干活，对不上就重定位
-        if expected is None or anchor == expected:
+        # (5) 状态自检：锚点和"我以为我在的地方"一致就干活，不一致就重定位。
+        #
+        # 不写 ``page`` 的节点也有"我以为我在的地方" —— 就是它自己。
+        # 这样"流程图只写正常流程"和"意外时总能被拉回正轨"可以同时成立：
+        # 不校验不等于闭着眼乱走。认不出来（unknown）**不算不一致** ——
+        # 那是"看不清"，不是"走错了"，由 _handle_unknown 的宽容期处理。
+        if self._matches_current(node, anchor):
             return self._run_current(node, now=now)
+
+        if anchor == UNKNOWN_PAGE:
+            self._handle_unknown(now)
+            self._note_advance(now=now)
+            return None
+
+        expected = self.binding.expects(node) or node.id
         return self._realign(frame, node, expected, anchor, now=now)
+
+    def _matches_current(self, node: Node, anchor: PageId) -> bool:
+        """实测锚点是不是"当前节点应该在的地方"。
+
+        * 节点声明了 ``page``：锚点就是它；
+        * 节点没声明（纯逻辑/纯等待节点）：看锚点有没有**别的**节点认领 ——
+          有就说明已经走到别人负责的状态上了，该让位；没有就继续待着。
+        """
+        if self.binding.is_bound(node.page):
+            return anchor == node.page
+        if anchor == UNKNOWN_PAGE:
+            return True
+        owner = self.binding.node_for(anchor)
+        return owner is None or owner.id == node.id
 
     # ------------------------------------------------------------------ #
     # 两条分支
