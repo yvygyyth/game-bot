@@ -1,11 +1,10 @@
-"""右侧信息面板：脚本规模、所选节点详情、最近一次检查的输出。
+"""右侧信息面板：运行状态 + 脚本规模 + 所选节点详情 + 最近一次检查的输出。
 
-这里显示的全部是**装配期数据** —— 构造 ``Scenario``、校验、数节点数边，
-一次都不碰游戏窗口。所以它在阶段 1 就能给出真实有用的信息，
-不是占位的假面板。
+上半部分是**运行状态**（阶段 2 加的），数据来自 ``EngineWorker`` 每轮发来的
+``TickEvent`` —— 那是个 frozen dataclass，跨线程传的是值不是引擎对象。
 
-阶段 2 会在这里加"运行状态"那块（当前页面 / 轮次 / 步数 / 最近决策），
-数据来自事件流（见 ``docs/ui.md`` 第五节）。
+其余全部是**装配期数据** —— 构造 ``Scenario``、校验、数节点数边，
+一次都不碰游戏窗口。所以不跑脚本时也有真实信息，不是占位假面板。
 """
 
 from __future__ import annotations
@@ -27,10 +26,30 @@ __all__ = ["InfoPanel"]
 
 
 class InfoPanel(QWidget):
-    """脚本静态信息 + 节点详情 + 检查输出。"""
+    """运行状态 + 脚本静态信息 + 节点详情 + 检查输出。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+
+        # ---- 运行状态（每轮刷新） ----
+        self._run_state = QLabel("—", self)
+        self._run_state.setStyleSheet("font-weight:600; font-size:14px;")
+        self._run_expect = QLabel("—", self)
+        self._run_node = QLabel("—", self)
+        self._run_tick = QLabel("—", self)
+        self._run_recovery = QLabel("—", self)
+        self._run_recovery.setWordWrap(True)
+
+        run_form = QFormLayout()
+        run_form.addRow("当前状态", self._run_state)
+        run_form.addRow("期望状态", self._run_expect)
+        run_form.addRow("当前节点", self._run_node)
+        run_form.addRow("轮次", self._run_tick)
+        run_form.addRow("最近重定位", self._run_recovery)
+
+        run_box = QGroupBox("运行状态", self)
+        run_layout = QVBoxLayout(run_box)
+        run_layout.addLayout(run_form)
 
         self._title = QLabel("未选择脚本", self)
         self._title.setStyleSheet("font-weight:600;")
@@ -46,7 +65,7 @@ class InfoPanel(QWidget):
 
         form = QFormLayout()
         form.addRow("规模", self._scale)
-        form.addRow("未认领页面", self._unclaimed)
+        form.addRow("未认领状态", self._unclaimed)
         form.addRow("模板根", self._roots)
 
         summary = QGroupBox("脚本", self)
@@ -60,7 +79,7 @@ class InfoPanel(QWidget):
         self._node_steps = QLabel("—", self)
         self._node_edges = QLabel("—", self)
         node_form = QFormLayout()
-        node_form.addRow("期望页面", self._node_page)
+        node_form.addRow("期望状态", self._node_page)
         node_form.addRow("步骤数", self._node_steps)
         node_form.addRow("出边数", self._node_edges)
         node_box = QGroupBox("所选节点", self)
@@ -78,6 +97,7 @@ class InfoPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
+        layout.addWidget(run_box)
         layout.addWidget(summary)
         layout.addWidget(node_box)
         layout.addWidget(tabs, 1)
@@ -92,6 +112,40 @@ class InfoPanel(QWidget):
         return widget
 
     # ------------------------------------------------------------------ #
+    # 运行状态
+    # ------------------------------------------------------------------ #
+    def set_run_state(self, event: object | None) -> None:
+        """刷新运行状态那一块（每轮一次）。``None`` = 清空（未运行）。
+
+        刻意把"期望状态"和"当前状态"分两行摆：它们不一致的那一刻正是重定位
+        发生的时候，而那是排查"它为什么跳了"时唯一要看的东西。
+        """
+        if event is None:
+            self._run_state.setText("—")
+            self._run_expect.setText("—")
+            self._run_node.setText("—")
+            self._run_tick.setText("—")
+            self._run_recovery.setText("—")
+            return
+
+        page = getattr(event, "page", "unknown")
+        overlays = getattr(event, "overlays", ())
+        expected = getattr(event, "expected", "")
+        confirmed = getattr(event, "confirmed", False)
+
+        suffix = f"  +{'/'.join(overlays)}" if overlays else ""
+        self._run_state.setText(f"{page}{suffix}" + ("" if confirmed else "  (确认中)"))
+        self._run_expect.setText(expected or "（不校验）")
+        self._run_node.setText(getattr(event, "node", "—") or "—")
+
+        aligned = getattr(event, "aligned", True)
+        mark = "" if aligned else "   ⚠ 不一致"
+        self._run_tick.setText(f"{getattr(event, 'tick', 0)} 轮{mark}")
+
+        count = getattr(event, "recoveries", 0)
+        last = getattr(event, "last_recovery", "")
+        self._run_recovery.setText(f"{count} 次{('　' + last) if last else ''}")
+
     def set_details(self, entry: ScriptEntry | None, details: ScriptDetails | None) -> None:
         """换脚本。"""
         if entry is None or details is None:
@@ -107,12 +161,12 @@ class InfoPanel(QWidget):
         self._title.setText(f"{entry.title}   ({entry.key})")
         self._subtitle.setText(entry.description or "")
         self._scale.setText(
-            f"{details.pages} 页面 / {details.nodes} 节点 / {details.edges} 边"
+            f"{details.pages} 状态 / {details.nodes} 节点 / {details.edges} 边"
         )
         self._unclaimed.setText(
             "、".join(details.unclaimed)
             if details.unclaimed
-            else "无（叠加层和终态页面不需要节点）"
+            else "无（分类节点和叠加层不需要节点）"
         )
         self._roots.setText("\n".join(details.template_roots) or "—")
         self._tree.setPlainText(details.tree_text)
@@ -127,7 +181,7 @@ class InfoPanel(QWidget):
             self._node_steps.setText("—")
             self._node_edges.setText("—")
             return
-        self._node_page.setText(node.page or "（任意页面 —— 不绑定页面）")
+        self._node_page.setText(node.page or "（不绑定状态 —— 不做校验）")
         self._node_steps.setText(str(node.steps))
         self._node_edges.setText(str(node.out_edges))
 

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from PySide6.QtCore import QMetaObject, QObject, Qt, QThread, Signal, Slot
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 from ..config.loader import load_config
 from ..exceptions import GameBotError
 from ..utils.logging import get_logger
+from .engine import EngineWorker
 from .logbridge import LogBridge
 from .panels.controls import ControlsBar
 from .panels.info import InfoPanel
@@ -63,6 +65,9 @@ class MainWindow(QMainWindow):
         self._config_path = config_path
         self._entry: ScriptEntry | None = None
         self._details: ScriptDetails | None = None
+        self._engine_running = False
+        self._run_ctx: Any = None
+        self._run_journal: Any = None
 
         self.setWindowTitle(_WINDOW_TITLE)
 
@@ -83,10 +88,11 @@ class MainWindow(QMainWindow):
         self._make_capture_thread()
         self._wire()
         self._start_capture_thread()
+        self._start_engine_thread()
 
         # ---- 首次填充 ----
-        # 先枚举窗口、再选脚本：脚本选中时就要按"当前窗口标题"建抓屏会话，
-        # 顺序反了会先按空标题建一次（抓整屏），再重建一次，白折腾。
+        # 先枚举窗口、再选脚本：用户的操作顺序是"先选软件、再选游戏、再选脚本"，
+        # 界面初始化也照这个顺序，否则第一眼看到的是个空下拉框。
         self.controls.refresh_windows()
         self._load_scripts(initial_script)
         log.info("界面已启动（配置文件: %s）", config_path)
@@ -143,6 +149,34 @@ class MainWindow(QMainWindow):
         )
         return label
 
+    def _start_engine_thread(self) -> None:
+        """引擎线程：只跑 ``FlowEngine.run()`` 那一个阻塞循环。
+
+        三条连接各有理由：
+
+        * ``configure`` **直连**（不是队列连接）—— 它只是赋值，必须在界面线程
+          执行完再去触发 ``run``。走队列的话"配置好了没"和"开始跑"会变成两个
+          互不知情的异步事件，偶发地先跑后配；
+        * ``run`` 走**队列连接**，由 ``_engineTickRelay`` 触发 ——
+          这就是"把阻塞循环甩到工作线程"的那一步；
+        * ``request_stop`` 也走队列，但即使它被直接调用也是安全的：
+          它只设一个标志位。
+        """
+        self._engine_thread = QThread(self)
+        self._engine_worker = EngineWorker()
+        self._engine_worker.moveToThread(self._engine_thread)
+        self._engineTickRelay = _SignalRelay(self)
+        self._engineStopRelay = _SignalRelay(self)
+
+        self._engineTickRelay.triggered.connect(self._engine_worker.run)
+        self._engineStopRelay.triggered.connect(self._engine_worker.request_stop)
+        self._engine_worker.frameReady.connect(self._on_engine_frame)
+        self._engine_worker.ticked.connect(self.info.set_run_state)
+        self._engine_worker.finished.connect(self._on_engine_finished)
+        self._engine_worker.failed.connect(self._on_engine_failed)
+
+        self._engine_thread.start()
+
     # ------------------------------------------------------------------ #
     # 接线
     # ------------------------------------------------------------------ #
@@ -162,7 +196,7 @@ class MainWindow(QMainWindow):
         # 注意：日志信号由 LogView 在它自己的构造里接上（那块归它管）。
         # 这里**不要**再连一次 —— 连两次的话每条日志会被追加两遍。
 
-        # 跨线程：窗口 -> 工作线程
+        # 跨线程：窗口 -> 抓帧线程 / 引擎线程
         self.configureSource.connect(self._worker.configure)
 
     def _make_capture_thread(self) -> None:
@@ -270,6 +304,18 @@ class MainWindow(QMainWindow):
     def _on_frame(self, image: QImage, elapsed: float, size: tuple, seq: int) -> None:
         self.preview.show_frame(image, elapsed, size, seq)
 
+    @Slot(object, tuple)
+    def _on_engine_frame(self, image: QImage, size: tuple) -> None:
+        """引擎那一帧也送去预览。
+
+        引擎跑起来时抓帧线程已经被静音（``_liveRelay.flag.emit(False)``），
+        所以不会两边同时往预览里塞画面 —— 那会让人看到画面在"闪两套图"。
+
+        耗时填 0：这一帧是引擎**已经截好并用过**的，量它的抓帧耗时没有意义，
+        预览那行文字留着显示尺寸和计数。
+        """
+        self.preview.show_frame(image, 0.0, size, 0)
+
     @Slot(str)
     def _on_capture_failed(self, message: str) -> None:
         self.preview.show_error(message)
@@ -346,22 +392,150 @@ class MainWindow(QMainWindow):
             log.info("[selftest] %s", line)
 
     # ------------------------------------------------------------------ #
-    # 开始 / 停止（阶段 2）
+    # 开始 / 停止
     # ------------------------------------------------------------------ #
     def _on_start(self) -> None:
-        reason = "界面还没接到 FlowEngine.run()（阶段 2）"
-        QMessageBox.information(self, "还没实现", reason)
-        log.info("「开始」被点了，但%s", reason)
+        """装配 -> 交给工作线程跑。
+
+        **装配在界面线程做完**（读配置、建 Session、校验定义、检查模板），
+        原因是这些步骤失败时要能立刻弹给人看；而 ``run()`` 那个阻塞循环
+        才交给工作线程。分成两半的界线就是"会不会长时间阻塞"。
+        """
+        entry = self._entry
+        if entry is None or entry.spec is None:
+            self._info_box("先选脚本", "「开始」要知道跑哪份定义。先在上面选一个脚本。")
+            return
+        if self._engine_running:
+            return
+
+        from ..bootstrap import build_context, build_engine, check_templates
+
+        try:
+            config = entry.spec.build_config()
+            config.screen.window_title = self.controls.window_title or config.screen.window_title
+            scenario = entry.spec.build_scenario()
+            scenario.validate()
+        except Exception as exc:
+            self._info_box("装不起来", f"{type(exc).__name__}: {exc}")
+            log.exception("装配失败")
+            return
+
+        missing = check_templates(config, scenario)
+        if missing:
+            self._info_box(
+                "缺模板文件",
+                f"缺 {len(missing)} 个：\n  " + "\n  ".join(missing[:8])
+                + "\n\n先跑「检查」看看，把图补齐再开始。",
+            )
+            return
+
+        config.paths.ensure()
+        node_id = getattr(self.controls.current_node, "node_id", "") or ""
+        from ..execution.journal import JsonlJournal
+
+        journal = JsonlJournal(
+            config.paths.resolve(config.paths.journals) / f"{entry.slug}.jsonl"
+        )
+        try:
+            ctx = build_context(config, scenario=scenario, journal=journal)
+            engine = build_engine(config, ctx, scenario)
+        except Exception as exc:
+            journal.close()
+            self._info_box("装不起来", f"{type(exc).__name__}: {exc}")
+            log.exception("装配失败")
+            return
+
+        self._run_ctx = ctx
+        self._run_journal = journal
+        self._engine_running = True
+        self.controls.set_running(True)
+        self.controls.note_runnable(False)
+        self._status.setText(f"运行中：{entry.key}")
+        self.info.set_run_state(None)
+
+        # 预览交给引擎（它自己抓帧），别再让 CaptureWorker 抢同一个后端
+        self._liveRelay.flag.emit(False)
+        self._engine_worker.configure(ctx, engine, node_id)
+        self._engine_tick_relay.triggered.emit()
+        log.info("开始运行 %s（起始节点 %s）", entry.key, node_id or scenario.graph.initial)
 
     def _on_stop(self) -> None:
-        # 阶段 2 这里会调 ctx.request_stop()。现在不需要做什么，
-        # 因为根本没有在跑的东西。
-        log.info("「停止」被点了，当前没有在跑的脚本")
+        """请求停止。引擎在下一次 sleep 时被唤醒（毫秒级），不杀线程。"""
+        if not self._engine_running:
+            log.info("「停止」被点了，当前没有在跑的脚本")
+            return
+        self.controls.stop_btn.setEnabled(False)
+        self.controls.stop_btn.setToolTip("正在等引擎退出这一轮……")
+        self._status.setText("正在停止……")
+        self._engine_stop_relay.triggered.emit()
+
+    @Slot(object, str)
+    def _on_engine_finished(self, report: object, summary: str) -> None:
+        """跑完了：解锁界面、关会话、把结论写出来。"""
+        self._engine_running = False
+        self.controls.set_running(False)
+        self.controls.note_runnable(True)
+        self.controls.stop_btn.setToolTip("还没在跑")
+        self.preview.set_live_enabled(True)
+        self._liveRelay.flag.emit(self.preview.live)
+
+        self._status.setText(summary)
+
+        lines = [report.summary()]  # type: ignore[attr-defined]
+        recoveries = getattr(report, "recoveries", [])
+        if recoveries:
+            lines.append("")
+            lines.append(f"重定位 {len(recoveries)} 次（画面变了、游标下一轮才跟上，属正常）:")
+            lines.extend(f"  {record}" for record in recoveries[:10])
+        failed = getattr(report, "failed_steps", [])
+        if failed:
+            lines.append("")
+            lines.append(f"{len(failed)} 个步骤失败:")
+            lines.extend(f"  {o.step}: {o.message}" for o in failed[:10])
+        errors = getattr(report, "errors", [])
+        if errors:
+            lines.append("")
+            lines.append("错误:")
+            lines.extend(f"  {message}" for message in errors[:10])
+        self.info.show_report("本次运行", lines)
+
+        self._release_run()
+        log.info("运行结束: %s", summary)
+
+    @Slot(str)
+    def _on_engine_failed(self, message: str) -> None:
+        self._engine_running = False
+        self.controls.set_running(False)
+        self.controls.note_runnable(True)
+        self.preview.set_live_enabled(True)
+        self._liveRelay.flag.emit(self.preview.live)
+        self._status.setText("运行出错")
+        self.info.show_report("运行出错", [message])
+        self._release_run()
+        log.error("引擎出错: %s", message)
+
+    def _release_run(self) -> None:
+        """关掉本次运行的 Session 与 journal。
+
+        **必须在这里关，而不是在 closeEvent 里**：每次运行都新建一个 Session
+        （它持有 mss 的截屏句柄），不关就会一次次泄漏。而 ``RunContext.close()``
+        会连带关掉 executor 与 journal。
+        """
+        ctx = self._run_ctx
+        self._run_ctx = None
+        if ctx is not None:
+            with contextlib.suppress(Exception):
+                ctx.close()
+        self._run_journal = None
+
+    def _info_box(self, title: str, body: str) -> None:
+        QMessageBox.information(self, title, body)
+        log.info("[%s] %s", title, body)
 
     def _warn_about_unimplemented(self) -> None:
         log.info("=" * 60)
-        log.info("阶段 1：选脚本、看画面、看日志、检查、自检 都能用")
-        log.info("「开始」/「停止」还没接到引擎（阶段 2：引擎侧已就绪）")
+        log.info("控制台：选软件 -> 选游戏 -> 选脚本 -> 开始 / 停止")
+        log.info("「开始」会在工作线程里跑 FlowEngine.run()，界面不会卡")
         log.info("=" * 60)
 
     # ------------------------------------------------------------------ #
@@ -370,16 +544,25 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         """关窗前把工作线程和日志 handler 收干净。
 
-        顺序很重要：先让工作线程收摊并**等它真的退出**，再摘日志 handler。
+        顺序很重要：先请求停止、等引擎真的退出，再收抓帧线程和日志 handler。
         反过来的话，工作线程可能还会往一个已经断开的桥上发日志。
         """
         log.info("界面关闭，正在收摊……")
+        if self._engine_running:
+            self._engine_stop_relay.triggered.emit()
+
         QMetaObject.invokeMethod(
             self._worker, "shutdown", Qt.ConnectionType.BlockingQueuedConnection
         )
         self._thread.quit()
         self._thread.wait(3000)
 
+        # 引擎线程：让它把当前这一轮跑完（ctx.sleep 会被停止请求立刻唤醒）
+        self._engine_thread.quit()
+        if not self._engine_thread.wait(5000):
+            log.warning("引擎线程没能在 5 秒内退出，仍继续关窗")
+
+        self._release_run()
         self.bridge.detach()
         super().closeEvent(event)
 

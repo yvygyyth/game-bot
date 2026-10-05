@@ -270,11 +270,22 @@ class FlowEngine:
         return self._stop_reason is None
 
     def stop(self, reason: StopReason = StopReason.USER, message: str = "") -> None:
-        """请求停止。可以在任意时刻调用（包括 hooks 里、信号处理里）。"""
+        """请求停止。可以在任意时刻调用（包括 hooks 里、信号处理里、别的线程）。
+
+        **同时把中止传给 ``ctx``**，这一点很关键：``ctx.stop_requested`` 是
+        ``ctx.sleep()`` / 跨帧等待 / 重试退避能不能"被立刻唤醒"的唯一依据。
+        只设本对象的标志位的话，循环要等当前这一觉睡完才看得到 ——
+        而这一觉可能是节点声明的 ``cooldown``（若干秒）。
+        表现就是"点了停止但脚本还在转"，正是这个项目一直在防的那个 bug。
+
+        （两处的关系：``_stop_reason`` 决定**报告怎么写**，
+        ``ctx`` 那边的标志决定**能不能马上醒**。两个都要设。）
+        """
         if self._stop_reason is None:
             self._stop_reason = reason
             self._stop_message = message
             log.info("流程停止请求: %s %s", reason.value, message)
+        self.ctx.request_stop(message or reason.value)
 
     def run(
         self,
