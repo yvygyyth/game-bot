@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 from ..utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from ..atomic.frame import Frame
     from ..types import Region
     from .vision import Matcher, TextReader
 
@@ -110,6 +111,35 @@ def _with_path(record: MatchRecord, path: str) -> MatchRecord:
         frame_path=path,
         extra=record.extra,
     )
+
+
+def _resume_counter(directory: Path | None) -> int:
+    """接着磁盘上已有的最大编号往后数。
+
+    ## 为什么不能让计数器从 0 开始
+
+    记录器是**每次「开始」/「抓一张」新建一个**的（界面那两条路都会
+    ``build_recorder``）。如果编号从 0 起，第二次会话就会从
+    ``match_00001.png`` 开始写 —— 而那个文件还在，于是**静默覆盖**。
+    留存机制（"最多留 20 张"）的前提是文件名唯一，覆盖了就等于没留。
+
+    实测踩过：磁盘上同时有 ``match_00001/00002``（新写的）和
+    ``match_00026``–``00043``（旧的），编号回退了一大截。
+
+    读不出来（目录不存在 / 没权限）就从 0 开始 —— 这只是个编号，
+    不值得为它抛异常。
+    """
+    if directory is None:
+        return 0
+    try:
+        highest = 0
+        for path in Path(directory).glob(f"{FRAME_PREFIX}*.png"):
+            digits = path.stem[len(FRAME_PREFIX) :]
+            if digits.isdigit():
+                highest = max(highest, int(digits))
+        return highest
+    except OSError:
+        return 0
 
 
 def prune_old(directory: Path | None, pattern: str, keep: int) -> int:
@@ -308,7 +338,7 @@ class RecognitionRecorder:
         self._entries: deque[MatchRecord] = deque(maxlen=max(1, history))
         self._lock = Lock()
         self._seq = itertools.count(1)
-        self._counter = 0
+        self._counter = _resume_counter(directory)
         self._on_record = on_record
         self.saved_frames = 0
         self.pruned = 0
@@ -499,7 +529,7 @@ class RecognitionRecorder:
         if pending is not None:
             self._flush_pending(pending)
 
-    def annotate_now(self, frame: Any, *, reason: str = "手动抓帧") -> str:
+    def annotate_now(self, frame: Frame, *, reason: str = "手动抓帧") -> str:
         """立刻把**当前帧**连同它已经记下的框存一张图。
 
         用途是界面上的「抓一张」：不跑脚本，也想看一眼"现在这个画面，
@@ -508,16 +538,22 @@ class RecognitionRecorder:
         先 :meth:`flush` 再存 —— 否则这一帧的框还攒在待落盘队列里，
         抓出来的图会是空的。
 
+        :param frame: 要画的帧（:class:`~gamebot.atomic.frame.Frame`）。
+            **内部会取它的 numpy 数组** —— 底下画框用的是 cv2，要的是数组，
+            直接传 ``Frame`` 对象会让 ``image.copy()`` 抛异常，
+            而异常被 ``_save`` 的兜底吞掉、只留一条 debug 日志，
+        表现成"点了抓一张、提示说没存图，却看不出为什么"。
         :return: 存下来的路径；没开记录或存失败时是空串。
         """
         self.flush()
         if self.directory is None or self.keep <= 0:
             return ""
         with self._lock:
-            frame_id = self._pending[0] if self._pending else -1
             recent = [r for r in self._entries if r.frame_path == ""][-8:]
         records = list(recent)
         if not records:
+            # 这一帧什么都没查（或查询都没到记录层）—— 仍然存一张，
+            # 好让用户看到"当前画面长什么样"。只是没有框可画。
             records = [
                 MatchRecord(
                     seq=0,
@@ -532,8 +568,7 @@ class RecognitionRecorder:
                     box=None,
                 )
             ]
-        _ = frame_id
-        return self._save(frame, records)
+        return self._save(frame.to_numpy(), records)
 
     def _flush_pending(self, pending: tuple[int, Any, list[MatchRecord]]) -> None:
         _frame_id, image, records = pending

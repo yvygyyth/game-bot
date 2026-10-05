@@ -386,13 +386,18 @@ class MainWindow(QMainWindow):
         try:
             frame = ctx.frame()
             tree = scenario.tree
-            # 在整帧上按每个状态自己的 ROI 跑一遍它的查询 —— 走的就是引擎
-            # 定位时用的那条路，所以框出来的区域就是"它判定状态时看的区域"。
-            for page in tree.pages():
+            # 在整帧上把每个状态**按引擎那条路**跑一遍 —— 用 ``tree.match()``
+            # 而不是自己遍历 ``page.queries`` 调 ``query.run(frame)``：
+            # 后者会**绕过 ROI 继承**（查询自己的 region 会盖掉页面的 roi），
+            # 于是搜的范围比引擎实际搜的大，画出来的框跟引擎的判断不一致 ——
+            # 那就等于给了你一张会骗人的图。
+            #
+            # 这一步的副作用就是"画框"：底层每次 find_image 都会被识图记录器
+            # 记下来，``annotate_now`` 再把这些记录画到图上。
+            for page in tree.pages.values():
                 if page.is_group:
-                    continue
-                for query in page.all_queries:
-                    query.evaluate(frame)
+                    continue  # 分类节点不参与匹配（校验也不允许它有查询）
+                tree.match(frame, page)
             recorder = getattr(ctx, "recorder", None)
             path = recorder.annotate_now(frame, reason=f"手动抓帧 {entry.key}") if recorder else ""
         except Exception as exc:

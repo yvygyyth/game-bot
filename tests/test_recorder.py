@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -195,6 +197,98 @@ class TestFrames:
         assert list(tmp_path.glob("*.png")) == []
         # 但日志照样记（不存图不等于不记）
         assert len(recorder.entries()) == 1
+
+    # ------------------------------------------------------------------ #
+    # 「抓一张」和编号
+    # ------------------------------------------------------------------ #
+    def test_annotate_now_writes_a_frame(self, tmp_path):
+        """「抓一张」必须真的存下一条记录。
+
+        ## 这里踩过的坑
+
+        ``annotate_now`` 一度把 ``Frame`` **对象**直接传给 ``_save``，而底下
+        画框用的是 cv2、要的是 numpy 数组 —— 于是 ``image.copy()`` 抛异常，
+        被 ``_save`` 的兜底吞掉、只留一条 debug 日志。
+        表现是：点「抓一张」，弹一句"抓到了帧，但没存图（vision.record 关了？）"
+        —— 提示指向配置，而真正的原因是类型传错了。**非常难查**。
+
+        所以这条用例只断言"它返回了路径"，不管别的。
+        """
+        recorder = RecognitionRecorder(directory=tmp_path, keep=20)
+        frame = _session(recorder, {"a.png": (Point(1, 1), 0.99)}).capture()
+
+        path = recorder.annotate_now(frame, reason="测试")
+
+        assert path, "annotate_now 应当返回存下来的路径"
+        assert Path(path).is_file()
+        assert Path(path).stat().st_size > 0
+
+    def test_annotate_now_works_with_no_queries_at_all(self, tmp_path):
+        """这一帧什么都没查也要存一张（让人看到当前画面），只是没框可画。"""
+        recorder = RecognitionRecorder(directory=tmp_path, keep=20)
+        frame = _session(recorder).capture()
+
+        path = recorder.annotate_now(frame)
+
+        assert path and Path(path).is_file()
+
+    def test_annotate_now_does_not_modify_the_frame(self, tmp_path):
+        """画框不能改原图（下面的记录器还在用同一帧）。"""
+        recorder = RecognitionRecorder(directory=tmp_path, keep=20)
+        frame = _session(recorder, {"a.png": (Point(1, 1), 0.99)}).capture()
+        before = frame.to_numpy().copy()
+
+        recorder.annotate_now(frame)
+
+        assert (frame.to_numpy() == before).all()
+
+    def test_counter_resumes_from_existing_files(self, tmp_path):
+        """新记录器要接着磁盘上已有的编号 —— **否则会覆盖上一次会话的图**。
+
+        记录器是每次「开始」/「抓一张」新建一个的。编号从 0 起的话，第二次
+        会话就从 ``match_00001.png`` 开始写、把还在的文件覆盖掉，
+        于是"最多留 20 张"这个留存机制形同虚设（实测撞过：磁盘上同时有
+        00001/00002 和 00026~00043，编号回退一大截）。
+        """
+        for index in (1, 2, 26, 43):
+            (tmp_path / f"{FRAME_PREFIX}{index:05d}.png").write_bytes(b"x")
+
+        recorder = RecognitionRecorder(directory=tmp_path, keep=20)
+
+        assert recorder._counter == 43
+
+    def test_counter_starts_at_zero_on_empty_directory(self, tmp_path):
+        assert RecognitionRecorder(directory=tmp_path, keep=20)._counter == 0
+
+    def test_two_sessions_do_not_overwrite_each_other(self, tmp_path):
+        """两次会话写的文件名不能撞 —— 这是上面那条的实际后果。"""
+        first = RecognitionRecorder(directory=tmp_path, keep=20)
+        frame = _session(first, {"a.png": (Point(1, 1), 0.99)}).capture()
+        frame.find_image("a.png")
+        first.flush()
+
+        second = RecognitionRecorder(directory=tmp_path, keep=20)
+        frame2 = _session(second, {"a.png": (Point(1, 1), 0.99)}).capture()
+        frame2.find_image("a.png")
+        second.flush()
+
+        files = sorted(p.name for p in tmp_path.glob(f"{FRAME_PREFIX}*.png"))
+        assert len(files) == 2, f"两次会话应该留下两个文件，实际 {files}"
+
+    def test_counter_ignores_files_that_are_not_ours(self, tmp_path):
+        """别的文件（手工截图、失败帧）不该影响编号。"""
+        (tmp_path / "manual_00999.png").write_bytes(b"x")
+        (tmp_path / "fail_t9_1_x.png").write_bytes(b"x")
+        (tmp_path / f"{FRAME_PREFIX}00007.png").write_bytes(b"x")
+
+        assert RecognitionRecorder(directory=tmp_path, keep=20)._counter == 7
+
+    def test_counter_tolerates_odd_names(self, tmp_path):
+        """前缀对但编号不是数字的文件（手工改过名）忽略掉，不该炸。"""
+        (tmp_path / f"{FRAME_PREFIX}abc.png").write_bytes(b"x")
+        (tmp_path / f"{FRAME_PREFIX}00003.png").write_bytes(b"x")
+
+        assert RecognitionRecorder(directory=tmp_path, keep=20)._counter == 3
 
     def test_save_failure_does_not_break_matching(self, tmp_path, monkeypatch):
         """存图失败绝不能影响识图 —— 记录是旁路。"""
