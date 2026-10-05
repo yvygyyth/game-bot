@@ -54,8 +54,6 @@ def build_scenario() -> Scenario: ...    # 这个脚本做什么（页面树 + �
 ```python
 TITLE = "千里单骑刷本"          # list 里显示的名字
 DESCRIPTION = "自动刷本……"      # 一句话说明
-def prepare() -> int: ...       # 生成/下载资源（图片），返回处理了几个文件
-AUTO_PREPARE = True             # 允许 check 在资源缺失时自动跑 prepare()
 ```
 
 不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。
@@ -66,7 +64,6 @@ AUTO_PREPARE = True             # 允许 check 在资源缺失时自动跑 prepa
 python -m games list                          # 有哪些脚本
 python -m games describe mingjiangsha/jingji  # 页面树 + 流程图长什么样
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
-python -m games setup    mingjiangsha/jingji  # 生成 / 下载资源（幂等）
 ```
 
 `check` 是写脚本时最该反复跑的一条。它挡掉的是这几类问题：

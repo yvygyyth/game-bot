@@ -64,15 +64,13 @@ def _config() -> AppConfig:
 class _Spec:
     """冒充业务层的 ``ScriptSpec``（界面只用到这几个属性/方法）。
 
-    ``prepare`` 也给上：``load_details`` 会读它来判断"这个脚本有没有资源脚本"，
-    少一个属性界面就会在选择脚本时炸 —— 这正是真 ``ScriptSpec`` 的接口面，
-    假对象要照着补齐。
+    假对象要照着真 ``ScriptSpec`` 的接口面补齐，少一个属性界面就会在选择
+    脚本时炸。
     """
 
     def __init__(self, *, max_ticks: int = 3, interval: float = 0.01) -> None:
         self._max_ticks = max_ticks
         self._interval = interval
-        self.prepare = None
 
     def build_config(self) -> AppConfig:
         return _config()

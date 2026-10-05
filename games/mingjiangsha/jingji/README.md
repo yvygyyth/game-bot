@@ -8,7 +8,6 @@
 
 ```bash
 python -m games check    mingjiangsha/jingji   # 定义对不对、缺哪些图
-python -m games setup    mingjiangsha/jingji   # 生成资源（幂等）
 python -m games describe mingjiangsha/jingji   # 状态树 + 流程图长什么样
 python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
 ```

@@ -57,13 +57,6 @@ class ScriptSpec:
     module: str
     build_config: Callable[[], AppConfig]
     build_scenario: Callable[[], Scenario]
-    prepare: Callable[..., Any] | None = None
-    """可选的 ``prepare()`` —— 生成 / 下载这个脚本需要的资源（图片等）。"""
-
-    auto_prepare: bool = False
-    """脚本声明了 ``AUTO_PREPARE = True`` 时，``check`` 发现资源缺失会自动跑
-    ``prepare()``。**真实游戏别开**：下载几百张图这种事不该藏在 check 里。"""
-
 
     def __repr__(self) -> str:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
@@ -180,8 +173,6 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             module=module_name,
             build_config=build_config,
             build_scenario=build_scenario,
-            prepare=getattr(module, "prepare", None),
-            auto_prepare=bool(getattr(module, "AUTO_PREPARE", False)),
         )
 
     _SCRIPTS = found

@@ -3,7 +3,6 @@
     python -m games list                  列出所有脚本
     python -m games describe <脚本>       打印状态树 + 流程图（不连游戏）
     python -m games check <脚本>          校验定义 + 检查模板文件是否齐全
-    python -m games setup <脚本>          生成 / 下载这个脚本需要的资源
     python -m games run <脚本>            **真的跑起来**（会操作游戏！）
 
 除 ``run`` 外都不需要游戏在运行 —— 它们只做静态检查。
@@ -45,11 +44,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     else:
         width = max(len(s.key) for s in scripts)
         for spec in scripts:
-            marks = []
-            if spec.prepare is not None:
-                marks.append("有资源脚本")
-            suffix = f"  [{' / '.join(marks)}]" if marks else ""
-            print(f"  {spec.key:<{width}}  {spec.title}{suffix}")
+            print(f"  {spec.key:<{width}}  {spec.title}")
             if spec.description:
                 print(f"  {'':<{width}}  {spec.description}")
 
@@ -114,34 +109,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     from gamebot.bootstrap import check_templates
 
     missing = check_templates(config, scenario)
-    if missing and spec.auto_prepare and spec.prepare is not None:
-        # 脚本自己声明了"可以帮我准备资源"（AUTO_PREPARE = True）。
-        # 真实游戏不会开这个 —— 下载几百张图不该藏在 check 里。
-        print(f"\n· 缺 {len(missing)} 个资源，脚本声明了 AUTO_PREPARE，正在准备……")
-        written = spec.prepare()
-        print(f"  已生成 {written} 个文件")
-        missing = check_templates(config, scenario)
-
     if missing:
         print(f"\n✗ 缺 {len(missing)} 个模板文件（截好图放到上面的模板根里）:")
         for name in missing:
             print(f"    - {name}")
-        if spec.prepare is not None and not spec.auto_prepare:
-            print(f"\n提示: 这个脚本提供了 prepare()，可以跑 python -m games setup {spec.key}")
         return 1
 
     print("\n✓ 模板文件齐全")
-    return 0
-
-
-def cmd_setup(args: argparse.Namespace) -> int:
-    """生成 / 下载脚本需要的资源（图片等）。幂等。"""
-    spec = get_script(args.script)
-    if spec.prepare is None:
-        print(f"· {spec.key} 没有 prepare()，不需要准备资源")
-        return 0
-    written = spec.prepare(force=args.force) if args.force else spec.prepare()
-    print(f"✓ {spec.key}: 生成/更新了 {written} 个文件")
     return 0
 
 
@@ -295,10 +269,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--window", default="", help="覆盖窗口标题")
     p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
 
-    p_setup = sub.add_parser("setup", help="生成 / 下载脚本需要的资源")
-    p_setup.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
-    p_setup.add_argument("--force", action="store_true", help="已存在的也重新生成")
-
     return parser
 
 
@@ -306,7 +276,6 @@ _HANDLERS = {
     "list": cmd_list,
     "describe": cmd_describe,
     "check": cmd_check,
-    "setup": cmd_setup,
     "run": cmd_run,
 }
 

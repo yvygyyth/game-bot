@@ -54,7 +54,7 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 流程图（图 / 游标 / 决策 / 校验）、**关联表**、`FlowEngine.tick` 的重定位语义、
 执行层（10 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
 （`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与
-`run` / `check` / `setup`、
+`run` / `check` / `describe`、
 **本地控制台**（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程；
 状态树/流程图**真画成图**并点亮当前状态与节点；识图日志 = 每次匹配的带框图 + 表格）、
 **识图记录器**（`vision/recorder.py`：包住 Matcher/TextReader，

@@ -39,8 +39,6 @@ python -m games check  mingjiangsha/jingji    # 静态自检（不需要游戏�
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from gamebot.config.schema import AppConfig
 from gamebot.flow import EngineOptions, Scenario, UnknownPolicy
 from gamebot.state import PageTree
@@ -54,14 +52,6 @@ TITLE = "竞技场"
 DESCRIPTION = "首页点竞技 → 创建队伍 → 添加伙伴 → 开始匹配"
 
 TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
-
-#: 抓下来的"参考画面"放这儿，自检用它验证"认得准不准"。生成物，不入库。
-FIXTURES_DIR = "games/mingjiangsha/fixtures"
-
-#: 声明"资源缺失时 check 可以自动帮我抓一张"。
-#: **抓的时候游戏必须在首页** —— 抓到别的页面，自检会明确报"认不出来"。
-AUTO_PREPARE = True
-
 
 def build_config() -> AppConfig:
     config = _game.base_config()
@@ -92,38 +82,8 @@ def build_scenario() -> Scenario:
     )
 
 
-def prepare(*, force: bool = False) -> int:
-    """抓一张当前画面存成参考图（fixture）。自检靠它验证认得准不准。
-
-    幂等：已经存在就跳过（``force=True`` 才重抓）。
-
-    **抓的时候游戏要在首页**：这个函数不知道也不猜"现在在哪一页"，
-    抓到什么就是什么，认不出来由自检如实报告。
-    """
-    target = _game.PROJECT_ROOT / FIXTURES_DIR / "home.png"
-    if target.is_file() and not force:
-        return 0
-    target.parent.mkdir(parents=True, exist_ok=True)
-
-    from gamebot.bootstrap import build_session_from_config
-
-    session = build_session_from_config(build_config())
-    with session:
-        frame = session.capture()
-        result = frame.save(target)
-    if not result.ok:
-        raise RuntimeError(f"抓参考图失败: {result.message}")
-    return 1
-
-
-def _project_root() -> Path:
-    """项目根（``build_config`` 用它拼模板根和参考图的路径）。"""
-    return _game.PROJECT_ROOT
-
-
 __all__ = [
     "DESCRIPTION",
-    "FIXTURES_DIR",
     "SLUG",
     "TEMPLATES_DIR",
     "TITLE",
@@ -131,5 +91,4 @@ __all__ = [
     "build_graph",
     "build_scenario",
     "build_tree",
-    "prepare",
 ]
