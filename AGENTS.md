@@ -54,9 +54,11 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 **能跑**：截图、窗口枚举、坐标换算、模板匹配、原子层 L0~L5、
 状态树（`locate` 快路径 + `recover` 慢路径 + 分类节点 + 叠加层）、
 流程图（图 / 游标 / 决策 / 校验）、**关联表**、`FlowEngine.tick` 的重定位语义、
-执行层（9 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
-（`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与自检、
-界面阶段 1、真机探针。
+执行层（10 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
+（`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与
+`run` / `check` / `selftest` / `probe`、
+**本地控制台（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程）**、
+真机探针。
 
 **框架侧没有桩了。** 唯一显式的桩是 `PageTree.from_nested`，它是**刻意**不实现的
 （配置解析留在 `flow.loader.parse_pages`，这样状态层不必 import 流程层）。
@@ -65,8 +67,8 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 
 | 缺什么 | 影响 |
 |---|---|
-| UI 阶段 2 接线 | 「开始/停止」按钮还是灰的 —— 引擎侧已就绪，只差把按钮接到 `FlowEngine.run()` |
-| `events.py` 结构化事件流 | UI 状态面板与"每次运行独立日志"的数据源 |
+| `events.py` + 每次运行独立日志 | 现在只有一个总日志文件；回放 / 更细的执行轨迹也等它 |
+| 画面标注、单步执行、断点 | 调 ROI 时有用，属锦上添花 |
 | OCR 实测 | 两个实现已写，但没装依赖跑过 |
 | 真机端到端 | 假后端下整条链已经通了；真机上还要验"照着眼看走完一局" |
 
