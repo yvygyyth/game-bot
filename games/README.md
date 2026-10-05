@@ -18,7 +18,7 @@ games/
         ├── graph.py               这个功能的流程（节点 + 边）
         ├── steps.py               这个功能专用的步骤
         ├── shortcuts.py           这个功能专用的快捷方法
-        ├── checks.py              自检 / 真机探针实现
+        ├── checks.py              ★ 只声明 ChecksSpec（检查逻辑在框架里）
         ├── templates/             这个功能的图片资源
         └── README.md              这个脚本怎么调
 ```
@@ -86,6 +86,81 @@ python -m games probe    mingjiangsha/jingji  # 真机探针：现在屏幕上�
 * **`selftest`** —— 静态：这份定义成不成立？模板裁得对不对？页面之间分得开吗？
   不需要游戏在跑。**"认得出但认错了地方"只有它能查出来。**
 * **`probe`** —— 真机：此刻屏幕上认不认得出来？要游戏开着、并在预期的页面上。
+
+### `checks.py` 只写数据，逻辑在框架里
+
+**不要**在 `checks.py` 里实现检查逻辑。框架提供
+[`gamebot.vision.checks`](../../src/gamebot/vision/checks.py)，你只声明
+一个 `ChecksSpec`：
+
+```python
+from gamebot.types import Point, Region
+from gamebot.vision.checks import ChecksSpec, EntryGroup, EntrySpec, SequenceSpec
+
+CHECKS = ChecksSpec(
+    title="竞技场",
+    # 每个"要认出来的东西"：模板 + 它该命中的位置 + 搜索范围
+    entries=(
+        EntrySpec(
+            template=T_ENTRY,
+            point=ENTRY_CENTER,          # 期望命中点
+            confidence=0.85,
+            tolerance=15,                # 允许偏多少像素
+            roi=ENTRY_ROI,
+            hover=Point(27, -41),        # 悬停会位移多少 → 自动查 ROI 余量够不够
+            origin="home.png",           # 从哪张资产图裁的 → 自动查"裁歪没有"
+            label="竞技入口",
+        ),
+    ),
+    # 真机探针按"组"报：一组 = 一个界面的标识
+    groups=(
+        EntryGroup(name="首页", entries=(...)),
+        EntryGroup(name="队伍", required=False, entries=(...)),  # 只报告，不判成败
+    ),
+    # 顺序探测：按顺序找，第一个过阈值的必须正好是该点的那个
+    sequences=(
+        SequenceSpec(
+            templates=(T_CREATE_TEAM, T_ADD_PET, T_START_MATCH),
+            names=("创建队伍", "添加伙伴", "开始匹配"),
+            roi=TEAM_ROI,
+            confidence=0.85,
+            expected={"jingji.png": T_CREATE_TEAM, "add-pet.png": T_ADD_PET},
+        ),
+    ),
+    states=("jingji.png", "add-pet.png", "start.png"),   # 资产图（真机截图）
+    assets_dir=Path(__file__).parent / "assets",
+    fixture_path=PROJECT_ROOT / FIXTURES_DIR / "home.png",
+    fixture_group="首页",        # 参考图抓的是首页，只要求认出这一组
+)
+
+
+def run(config) -> list[str]:        # ← __init__.py 的 selftest() 接这个
+    return run_checks(CHECKS, config)
+
+
+def probe_live(config) -> list[str]:  # ← __init__.py 的 probe() 接这个
+    return run_probe(CHECKS, config)
+```
+
+**为什么不让每个脚本自己写检查逻辑**：那样每个脚本都会把同一套算法重写一遍，
+而且**语义会漂**——A 脚本把 `tolerance` 当半径、B 脚本当边长，两边还都"能跑"。
+现在算法只有一份，修一次所有脚本受益。
+
+几个字段值得单独记住：
+
+| 字段 | 它防的是什么 |
+|---|---|
+| `hover` | 元素**悬停时会位移**（名将杀首页卡片弹 `(+27,-41)`）。ROI 留小了，鼠标一划过就滑出 ROI、匹配不到 —— **静态看代码完全看不出来** |
+| `origin` | 模板**裁歪了几像素**。在自己那张资产图上拿不到满分就会被报出来 |
+| `expected` | **按钮顺序**。有些按钮天生会在别的状态上拿高分（名将杀的「开始匹配」三种状态下都是 0.999），所以验的不是分数差，而是"第一个过阈值的正好是该点的那个" |
+| `required=False` | 那一组**只报告不判成败**（队伍那三个按钮是用来诊断走到哪一步的） |
+
+`states` / `assets_dir` 指向**真机截图**，它们不入库 —— 没有就自动跳过回归，
+不会让自检失败。
+
+**别在 `checks.py` 里重复通用的检查。** "模板文件在不在""定义自不自洽"归
+`games check`（框架的一份实现，所有脚本共用）。在脚本里再写一遍等于同一件事
+两个出处：改了框架那边这边不会跟着变，两边还会给出不一样的说法。
 
 ## 参考实现
 
