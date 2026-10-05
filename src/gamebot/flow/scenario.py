@@ -23,12 +23,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..exceptions import ConfigError
 from ..state.page import PageId, PageTree
 from ..utils.logging import get_logger
 from .graph import Graph, NodeId
+
+if TYPE_CHECKING:
+    from .binding import StateBinding
 
 log = get_logger("flow.scenario")
 
@@ -137,28 +140,30 @@ class Scenario:
     # 校验
     # ------------------------------------------------------------------ #
     def validate(self) -> None:
-        """跨树和图的完整校验。任何一条不满足都抛异常。
+        """跨状态树和图的完整校验。任何一条不满足都抛异常。
 
-        1. 页面树自身合法（:meth:`PageTree.validate`）；
+        1. 状态树自身合法（:meth:`PageTree.validate`）；
         2. 流程图自身合法（:meth:`Graph.validate`）；
-        3. 每个 ``Node.page`` 都必须在页面树里存在 —— **这条最重要**：
-           写错一个字母不会报错，只是那条流程永远不执行；
+        3. **状态 ↔ 节点的关联合法**（:func:`gamebot.flow.binding.validate_binding`）：
+           每个节点声明的状态必须存在，而且**每个记录信息的状态都必须有节点
+           认领** —— 否则重定位到它就无处可去；
         4. ``options.recovery_node`` 必须在图里存在；
         5. ``options.stop_pages`` 必须在树里存在；
         6. 运行参数合法。
 
-        :raises StateError: 页面树的问题。
+        :raises StateError: 状态树的问题。
         :raises FlowError: 流程图的问题。
-        :raises ConfigError: 跨两者的引用错了（页面 id / 节点 id 对不上）。
+        :raises ConfigError: 跨两者的引用错了（状态 id / 节点 id 对不上）。
         """
+        from .binding import validate_binding
+
         problems: list[str] = []
 
         self.tree.validate()
         self.graph.validate()
+        validate_binding(self.graph, self.tree)
 
         for node in self.graph.nodes.values():
-            if node.page and node.page not in self.tree:
-                problems.append(f"节点 {node.id!r} 声明了不存在的页面 {node.page!r}")
             if node.on_timeout and node.on_timeout not in self.graph.nodes:
                 problems.append(f"节点 {node.id!r} 的 on_timeout 指向不存在的节点")
 
@@ -168,7 +173,7 @@ class Scenario:
             )
         for page_id in self.options.stop_pages:
             if page_id not in self.tree:
-                problems.append(f"stop_pages 里有不存在的页面: {page_id!r}")
+                problems.append(f"stop_pages 里不存在的状态: {page_id!r}")
 
         problems.extend(self.options.validate())
 
@@ -176,25 +181,40 @@ class Scenario:
             raise ConfigError("脚本校验失败:\n  - " + "\n  - ".join(problems))
 
     # ------------------------------------------------------------------ #
+    # 状态 ↔ 节点
+    # ------------------------------------------------------------------ #
+    def binding(self) -> StateBinding:
+        """这份脚本的"状态 ↔ 节点"关联表（引擎和 ``gamebot check`` 用它）。"""
+        from .binding import StateBinding
+
+        return StateBinding(self.graph, self.tree)
+
+    # ------------------------------------------------------------------ #
     # 查询
     # ------------------------------------------------------------------ #
     def unclaimed_pages(self) -> tuple[PageId, ...]:
-        """没有任何节点声明认领的页面。
+        """没有任何节点声明认领的状态。
 
-        两类页面**不算数**，因为它们本来就不该有节点：
+        三类状态**不算数**，因为它们本来就不该有节点：
 
-        * **叠加层**（``kind=OVERLAY``）不是一个"能待着的位置"，
-          而是"主页面之上多了一层"。它由定位逻辑单独识别，不靠节点认领；
-        * **终态页面**（``terminal=True``）进了就结束，也不需要动作。
+        * **分类节点**（``kind=GROUP``）—— 自己不参与匹配，定位结果里
+          永远不会出现它；
+        * **叠加层**（``kind=OVERLAY``）—— 它不是"能待着的位置"，
+          而是"主状态之上多了一层"，由主状态的节点负责；
+        * **终态状态**（``terminal=True``）进了就结束，也不需要动作。
 
-        剩下的未认领页面**不是错误** —— 有些页面就是纯观察（等它自己过去）。
-        但数量多的时候值得看一眼是不是漏写了流程。``gamebot check`` 会提示。
+        剩下的未认领状态**不是错误**：它由 :func:`validate_binding` 在
+        启动期拦下（"记录信息的状态必须能被重定位到"）。
+        这个方法留给 ``gamebot check`` 做"把整棵树摊开看一眼"的展示。
         """
         claimed = {n.page for n in self.graph.nodes.values() if n.page}
         return tuple(
             p.id
             for p in self.tree.walk()
-            if p.id not in claimed and not p.is_overlay and not p.terminal
+            if p.id not in claimed
+            and not p.is_overlay
+            and not p.is_group
+            and not p.terminal
         )
 
     def describe(self) -> str:

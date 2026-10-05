@@ -1,33 +1,40 @@
 # 示例脚本定义
 #
-# 一份定义 = 页面树（我在哪） + 流程图（做什么）。
-# 两者分开是因为变化频率不同：加一个界面 vs 改一条策略。
+# 一份定义 = 状态树（我在哪） + 流程图（做什么）。
 #
-# 运行：gamebot check   （先校验，能挡住模板缺失、页面 id 写错这类问题）
+# 运行：gamebot check   （先校验，能挡住模板缺失、状态 id 写错这类问题）
 #      gamebot run --dry-run
 
 name: example
 
 # ---------- 运行参数 ----------
-initial: home            # 流程图的起始节点
+initial: lobby           # 流程图的起始节点
 tick_interval: 0.3       # 每轮最小间隔；给 0 会打满 CPU 且日志没法看
 max_runtime: 3600        # 总时长上限；null = 不限
 
 on_unknown: wait         # wait | reload_tick | recovery | stop
-recovery_node: home      # on_unknown=recovery 时跳到哪个节点
+recovery_node: lobby     # on_unknown=recovery 时跳到哪个节点
 unknown_grace: 1.5       # 宽容期：过场动画本来就会短暂认不出来
-stop_pages: [closed]     # 进入这些页面即结束
-require_confirmed: true  # 页面未"确认进入"前不执行动作
+stop_pages: [closed]     # 进入这些状态即结束
+require_confirmed: true  # 状态未"确认进入"前不执行动作
 
-# ---------- 页面树：我在哪 ----------
+# ---------- 状态树：我在哪 ----------
+# 两条规则，决定了这棵树怎么长：
+#   1. **只有记录信息的状态才写 queries**；父节点一律 kind: group
+#      （纯分类：自己不匹配，只提供 ROI 继承和组织结构）；
+#   2. **记录信息的状态必须有个流程节点认领**（下面 nodes 里写 page），
+#      否则重定位到它就无处可去 —— 这条由 check 强制，启动期就报错。
+#
 # id 由嵌套位置自动推导（home -> home/qianli -> home/qianli/battle）
-# roi 相对父页面 —— 子页面只需要看自己那一块，这是树最大的性能收益
-pages:
+states:
   home:
     name: 首页
-    queries:
-      - {type: ImageQuery, template: home/logo.png}
+    kind: group                  # 纯分类节点
     children:
+      lobby:
+        name: 主界面
+        queries:
+          - {type: ImageQuery, template: home/logo.png}
       qianli:
         name: 千里单骑
         queries:
@@ -35,19 +42,19 @@ pages:
         children:
           battle:
             name: 战斗
-            roi: [1180, 620, 680, 500]   # 只看右下角技能栏
+            min_stable_frames: 2   # 连续 2 帧才算，过滤进场动画的闪现
+            roi: [1180, 620, 680, 500]   # 只看右下角技能栏（相对父级）
             queries:
               - {type: ImageQuery, template: battle/skillbar.png}
-            children:
-              result:
-                name: 战斗结算
-                min_stable_frames: 2     # 连续 2 帧才算，过滤动画闪现
+          result:
+            name: 战斗结算
+            min_stable_frames: 2
+            queries:
+              - type: OrQuery
+                short_circuit: true
                 queries:
-                  - type: OrQuery
-                    short_circuit: true
-                    queries:
-                      - {type: ImageQuery, template: result/victory.png}
-                      - {type: ImageQuery, template: result/defeat.png}
+                  - {type: ImageQuery, template: result/victory.png}
+                  - {type: ImageQuery, template: result/defeat.png}
 
   closed:
     name: 游戏已关闭
@@ -55,7 +62,8 @@ pages:
     queries:
       - {type: ImageQuery, template: common/window_lost.png, confidence: 0.95}
 
-  # 顶层 + kind: overlay = 全局弹窗，出现在任何页面都能被认出来
+  # 顶层 + kind: overlay = 全局弹窗，出现在任何状态都能被认出来
+  # 叠加层**不需要**节点认领：它盖在主状态之上，由主状态的节点负责。
   network_error:
     name: 网络错误
     kind: overlay
@@ -64,18 +72,18 @@ pages:
       - {type: ImageQuery, template: common/network_error.png}
 
 # ---------- 流程图：做什么 ----------
-# page 声明"这个节点打算在哪个页面上执行"：
-# 实际定位到的页面和它不一致时，一个动作都不会做 —— 防止在错误页面上乱点
+# page 可以不写：不写 = 这一步不校验状态，流程直着走（低心智负担的写法）。
+# 写了 page = 动前校验 + 重定位到它 + 动后预期跟着变 —— 三件事同一个字段。
 nodes:
-  home:
-    page: home
+  lobby:
+    page: home/lobby
     steps:
-      - type: ClickImageStep
-        template: qianli/entry.png
-        name: 进入千里单骑
-        policy:
-          retry: {max_attempts: 3, interval: 0.5}
-          on_error: continue
+      - {type: ClickImageStep, template: qianli/entry.png, name: 进入千里单骑}
+
+  qianli:
+    page: home/qianli
+    steps:
+      - {type: ClickImageStep, template: qianli/start.png, name: 开始战斗}
 
   battle:
     page: home/qianli/battle
@@ -89,7 +97,7 @@ nodes:
           on_error: continue
 
   result:
-    page: home/qianli/battle/result
+    page: home/qianli/result
     on_enter:
       - {type: WaitStep, seconds: 0.5, name: 等结算动画}
     steps:
@@ -106,22 +114,21 @@ nodes:
 # ---------- 边：何时换目标 ----------
 # priority 大的先判断。没条件的边是"兜底"，别给它高优先级。
 edges:
+  - source: lobby
+    target: qianli
+    priority: 10
+    label: 进了千里单骑
+
+  - source: qianli
+    target: battle
+    priority: 10
+    label: 开打了
+
   - source: battle
     target: result
     priority: 30
     label: 战斗结束
     condition: {type: ImageQuery, template: result/victory.png}
-
-  - source: result
-    target: home
-    priority: 20
-    label: 结算完成回首页
-    cooldown: 1.0            # 防抖：1 秒内不重复触发
-
-  - source: home
-    target: battle
-    priority: 10
-    label: 进入战斗
 
   - source: battle
     target: closed
@@ -129,3 +136,9 @@ edges:
     kind: terminal
     label: 游戏关了
     condition: {type: ImageQuery, template: common/window_lost.png}
+
+  - source: result
+    target: lobby
+    priority: 20
+    label: 结算完成回首页
+    cooldown: 1.0            # 防抖：1 秒内不重复触发

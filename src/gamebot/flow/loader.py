@@ -6,68 +6,50 @@
 name: example
 initial: home                # 流程图的起始节点
 tick_interval: 0.3
-max_runtime: 3600
 on_unknown: wait             # wait | reload_tick | recovery | stop
-recovery_node: home
 unknown_grace: 1.5
 stop_pages: [closed]
-require_confirmed: true
 
-# ---------- 页面树：我在哪 ----------
-pages:
+# ---------- 状态树：我在哪 ----------
+# 分类节点（group）只组织结构和提供 ROI 继承，自己不记录信息；
+# 记录信息的只有末梢状态节点。
+states:
   home:
     name: 首页
-    queries:
-      - {type: ImageQuery, template: home/logo.png}
+    kind: group
     children:
-      qianli:
-        queries: [{type: ImageQuery, template: qianli/entry.png}]
-        children:
-          battle:
-            roi: [1180, 620, 680, 500]     # 相对父页面
-            queries: [{type: ImageQuery, template: battle/skillbar.png}]
-            children:
-              result: {queries: [{type: ImageQuery, template: result/victory.png}]}
+      lobby:      {queries: [{type: ImageQuery, template: home/logo.png}]}
+      jingji:     {queries: [{type: ImageQuery, template: jingji/title.png}]}
   network_error:                            # 顶层 = 全局叠加层
     kind: overlay
     priority: 100
     queries: [{type: ImageQuery, template: common/network_error.png}]
 
 # ---------- 流程图：做什么 ----------
+# page 可以不写：不写 = 这一步不校验状态，流程直着走。
 nodes:
   home:
-    page: home                              # 声明期望页面（不符就不动作）
+    page: home/lobby                        # 写了 = 动前校验 + 重定位去向
     steps:
-      - {type: ClickImageStep, template: qianli/entry.png}
-  battle:
-    page: qianli/battle
-    steps:
-      - {type: FunctionStep, func: my_scripts.attack}
-    cooldown: 0.5
-  result:
-    page: qianli/battle/result
-    steps: [{type: ClickImageStep, template: result/confirm.png}]
-    on_enter: [{type: WaitStep, seconds: 0.5}]
-
-edges:
-  - {source: battle, target: result, priority: 30,
-     condition: {type: ImageQuery, template: result/victory.png}, label: 战斗结束}
-  - {source: result, target: home, priority: 20}
-  - {source: home, target: battle, priority: 10}
-  - {source: home, target: closed, priority: 5, kind: terminal}
+      - {type: ClickImageStep, template: jingji/entry.png}
+  jingji:
+    page: home/jingji
+    priority: 10                            # 同状态多节点时谁是主节点
+    steps: [{type: ClickImageStep, template: jingji/create_team.png}]
 ```
 
-## 还差两块拼图
+## 四个刻意的选择
 
-``parse_scenario`` 需要把配置里的字典还原成对象，而这两件事还没做：
-
-* ``atomic.query.query_from_dict`` —— ``{type: ImageQuery, ...}`` -> Query。
-  它有注册表（``query_registry()``）撑着，实现是查表 + 递归构造嵌套查询；
-* ``execution.step.step_from_dict`` —— ``{type: ClickImageStep, ...}`` -> Step。
-  同样有 ``step_registry()``，但还要处理 ``policy`` 子字典。
-
-这两块补上之后 ``gamebot check`` 就能真正校验配置了（在那之前，
-``tests/test_config.py`` 里的样例检查是直接 ``yaml.safe_load`` 做的）。
+1. **状态 id 由嵌套位置推导**（``home/lobby``）。改父节点的 key 会连带
+   改掉整棵子树的 id，:meth:`Scenario.validate` 会立刻发现 ``nodes[].page``
+   对不上 —— 早炸，而不是"跑起来什么都不做"。
+2. **未知键一律报错**。静默忽略拼错的配置，表现是"这一步跑起来什么都没做"，
+   要跑十分钟才撞得到一次。
+3. **``queries`` / ``steps`` 的反序列化放在各自的层里**
+   （``atomic.query`` / ``execution.step``），本模块只负责**拼装** ——
+   这样状态层也能拿到 ``query_from_dict``，而状态层**不许** import 流程层。
+4. **``pages`` 也能写**（``states`` 的旧名字）。同一个概念只该有一个名字，
+   但旧配置不该因为改名就炸 —— 两个都收，日志里提示一次。
 """
 
 from __future__ import annotations
@@ -75,10 +57,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..atomic.query import query_from_dict
 from ..exceptions import ConfigError
-from ..state.page import PageTree
-from .graph import Graph
-from .scenario import EngineOptions, Scenario
+from ..execution.step import step_from_dict
+from ..state.page import Page, PageKind, PageTree
+from ..types import Region
+from .graph import Edge, EdgeKind, Graph, Node
+from .scenario import EngineOptions, Scenario, UnknownPolicy
 
 __all__ = [
     "load_scenario",
@@ -87,6 +72,54 @@ __all__ = [
     "parse_pages",
     "parse_scenario",
 ]
+
+#: 顶层允许出现的键 = EngineOptions 的字段 + 这几个结构性键。
+#: ``initial`` 属于流程图（起点是图的一部分），不属于运行参数。
+_STRUCTURAL_KEYS = {"edges", "initial", "meta", "name", "nodes", "pages", "states"}
+
+#: 页面/状态定义允许的字段。
+_PAGE_KEYS = {
+    "confidence",
+    "description",
+    "exclude",
+    "kind",
+    "meta",
+    "min_stable_frames",
+    "name",
+    "priority",
+    "queries",
+    "roi",
+    "terminal",
+    "timeout",
+}
+
+#: 节点定义允许的字段。
+_NODE_KEYS = {
+    "cooldown",
+    "description",
+    "max_visits",
+    "meta",
+    "on_enter",
+    "on_exit",
+    "on_timeout",
+    "page",
+    "priority",
+    "steps",
+    "timeout",
+}
+
+#: 边定义允许的字段。
+_EDGE_KEYS = {
+    "condition",
+    "cooldown",
+    "kind",
+    "label",
+    "max_times",
+    "meta",
+    "priority",
+    "source",
+    "target",
+}
 
 
 def load_scenario(path: str | Path) -> Scenario:
@@ -120,20 +153,92 @@ def load_scenario(path: str | Path) -> Scenario:
 def parse_scenario(data: dict[str, Any]) -> Scenario:
     """把字典解析成 :class:`Scenario`。
 
-    :raises ConfigError: ``name`` 之类的基础字段类型不对。
+    :raises ConfigError: 基础字段类型不对。
     """
-    raise NotImplementedError(
-        "待实现: parse_pages(data['pages']) + parse_graph(data) + parse_options(data) "
-        "-> Scenario；依赖 atomic.query.query_from_dict 与 execution.step.step_from_dict"
+    if not isinstance(data, dict):
+        raise ConfigError(f"脚本定义必须是映射(mapping)，收到: {type(data).__name__}")
+
+    scenario = Scenario(
+        name=str(data.get("name") or "scenario"),
+        tree=parse_pages(_states_section(data)),
+        graph=parse_graph(data),
+        options=parse_options(data),
+        meta=dict(data.get("meta") or {}),
     )
+    _explain_page_references(scenario)
+    return scenario
 
 
-def parse_pages(data: dict[str, Any]) -> PageTree:
-    """解析嵌套的页面定义（``id`` 由嵌套位置推导成路径形式）。
+def _states_section(data: dict[str, Any]) -> Any:
+    """取状态树那一节：``states`` 优先，兼容旧的 ``pages``。"""
+    if "states" in data:
+        return data.get("states")
+    return data.get("pages")
 
-    ``kind`` 缺省是普通页面（替换式）；``kind: overlay`` 才是叠加层。
+
+def parse_pages(data: Any) -> PageTree:
+    """解析嵌套的状态定义（``id`` 由嵌套位置推导成路径形式）。
+
+    ``kind`` 缺省是**状态节点**；``kind: group`` 是纯分类节点，
+    ``kind: overlay`` 是叠加层。
+
+    递归过程要用 ``query_from_dict``（原子层），所以留在这里而不是
+    ``PageTree.from_nested``：状态层不必知道"配置长什么样"，
+    也就不用为了解析配置去 import 流程层。
     """
-    raise NotImplementedError("待实现：委托给 PageTree.from_nested(data)")
+    tree = PageTree()
+    if data is None:
+        return tree
+    if not isinstance(data, dict):
+        raise ConfigError(f"states 必须是映射(mapping)，收到: {type(data).__name__}")
+
+    for page_id, spec in data.items():
+        _add_nested(tree, str(page_id), spec, parent=None)
+    return tree
+
+
+def _add_nested(tree: PageTree, page_id: str, spec: Any, *, parent: str | None) -> Page:
+    """加一页（含 children）。**父先子后**，满足 :meth:`PageTree.add` 的前置条件。"""
+    if spec is None:
+        spec = {}
+    if not isinstance(spec, dict):
+        raise ConfigError(f"状态 {page_id!r} 的定义必须是映射(mapping)，收到: {spec!r}")
+
+    payload = dict(spec)
+    children = payload.pop("children", None)
+    _reject_unknown(payload, _PAGE_KEYS, f"状态 {page_id!r}")
+
+    if isinstance(payload.get("kind"), str):
+        payload["kind"] = _coerce_enum(PageKind, payload["kind"], f"状态 {page_id!r} 的 kind")
+    if payload.get("roi") is not None:
+        payload["roi"] = _region_from_config(payload["roi"], f"状态 {page_id!r} 的 roi")
+    for key in ("queries", "exclude"):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, (list, tuple)):
+            raise ConfigError(f"状态 {page_id!r} 的 {key} 必须是列表")
+        try:
+            payload[key] = tuple(query_from_dict(item) for item in raw)
+        except ValueError as exc:
+            raise ConfigError(f"状态 {page_id!r} 的 {key} 解析失败: {exc}") from exc
+
+    tree.add(Page(id=page_id, **payload), parent)
+
+    if children is not None:
+        if not isinstance(children, dict):
+            raise ConfigError(f"状态 {page_id!r} 的 children 必须是映射(mapping)")
+        for child_key, child_spec in children.items():
+            name = str(child_key)
+            if "/" in name:
+                # 允许短 key（"lobby" 而不是全路径），但不许写路径：
+                # 那会和"id 由嵌套位置推导"打架，出现两种真相。
+                raise ConfigError(
+                    f"子状态 {name!r} 的名字里不能带 '/' —— id 由嵌套位置推导"
+                    "（父 id + '/' + 子 key）"
+                )
+            _add_nested(tree, f"{page_id}/{name}", child_spec, parent=page_id)
+    return tree.require(page_id)
 
 
 def parse_graph(data: dict[str, Any]) -> Graph:
@@ -142,9 +247,77 @@ def parse_graph(data: dict[str, Any]) -> Graph:
     ``edges[].condition`` 要么是 ``{type: ..., ...}``（走 query_from_dict），
     要么是 ``{func: 模块路径}``（导入一个 Python 函数，逃生舱）。
     """
-    raise NotImplementedError(
-        "待实现: nodes -> Node(steps=step_from_dict(...))；edges -> Edge(condition=...)"
-    )
+    raw_nodes = data.get("nodes") or {}
+    raw_edges = data.get("edges") or []
+    if not isinstance(raw_nodes, dict):
+        raise ConfigError("nodes 必须是映射(mapping)：``节点名: {...}``")
+    if not isinstance(raw_edges, (list, tuple)):
+        raise ConfigError("edges 必须是列表")
+
+    graph = Graph(initial=str(data.get("initial") or ""))
+
+    for node_id, spec in raw_nodes.items():
+        graph.add_node(_node_from_config(str(node_id), spec))
+
+    for index, spec in enumerate(raw_edges):
+        graph.add_edge(_edge_from_config(spec, index))
+
+    if not graph.initial and graph.nodes:
+        # 没写 initial 就用第一个加进去的节点（``Graph.add_node`` 的既有规则）。
+        graph.initial = next(iter(graph.nodes))
+    return graph
+
+
+def _node_from_config(node_id: str, spec: Any) -> Node:
+    if spec is None:
+        spec = {}
+    if not isinstance(spec, dict):
+        raise ConfigError(f"节点 {node_id!r} 的定义必须是映射(mapping)")
+    payload = dict(spec)
+    _reject_unknown(payload, _NODE_KEYS, f"节点 {node_id!r}")
+    for field in ("steps", "on_enter", "on_exit"):
+        payload[field] = _steps_from_config(payload.get(field), f"节点 {node_id!r} 的 {field}")
+    payload.setdefault("on_timeout", "")
+    return Node(id=node_id, **payload)
+
+
+def _edge_from_config(spec: Any, index: int) -> Edge:
+    if not isinstance(spec, dict):
+        raise ConfigError(f"第 {index} 条边必须是映射(mapping)")
+    payload = dict(spec)
+    _reject_unknown(payload, _EDGE_KEYS, f"第 {index} 条边")
+    for field in ("source", "target"):
+        if not payload.get(field):
+            raise ConfigError(f"第 {index} 条边缺少 {field}")
+
+    condition = payload.get("condition")
+    if isinstance(condition, dict):
+        if "func" in condition and "type" not in condition:
+            payload["condition"] = _resolve_function(condition["func"], f"第 {index} 条边的 func")
+        else:
+            try:
+                payload["condition"] = query_from_dict(condition)
+            except ValueError as exc:
+                raise ConfigError(f"第 {index} 条边的 condition 解析失败: {exc}") from exc
+    if isinstance(payload.get("kind"), str):
+        payload["kind"] = _coerce_enum(EdgeKind, payload["kind"], f"第 {index} 条边的 kind")
+    payload.setdefault("label", "")
+    payload.setdefault("meta", {})
+    return Edge(**payload)
+
+
+def _steps_from_config(raw: Any, where: str) -> list[Any]:
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise ConfigError(f"{where} 必须是列表")
+    steps = []
+    for item in raw:
+        try:
+            steps.append(step_from_dict(item))
+        except ConfigError as exc:
+            raise ConfigError(f"{where} 解析失败: {exc}") from exc
+    return steps
 
 
 def parse_options(data: dict[str, Any]) -> EngineOptions:
@@ -152,10 +325,86 @@ def parse_options(data: dict[str, Any]) -> EngineOptions:
 
     只认已知字段，拼错的键直接报错 —— 静默忽略拼错的配置是这类 bug 的头号来源。
     """
-    raise NotImplementedError(
-        "待实现：按 EngineOptions 的字段白名单取顶层键，"
-        "on_unknown 字符串 -> UnknownPolicy，未知键抛 ConfigError"
-    )
+    known = _known_option_keys()
+    payload = {key: data[key] for key in known if key in data}
+    unknown = sorted(key for key in data if key not in set(known) | _STRUCTURAL_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"脚本顶层有未知字段: {', '.join(unknown)}（可用: {sorted(known)}）"
+        )
+
+    if payload.get("on_unknown") is not None:
+        payload["on_unknown"] = _coerce_enum(UnknownPolicy, payload["on_unknown"], "on_unknown")
+    if payload.get("stop_pages") is not None:
+        raw = payload["stop_pages"]
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, (list, tuple)):
+            raise ConfigError("stop_pages 必须是列表或字符串")
+        payload["stop_pages"] = tuple(str(p) for p in raw)
+    return EngineOptions(**payload)
+
+
+def _explain_page_references(scenario: Scenario) -> None:
+    """节点写的 ``page`` 不在树里时给一句**更像人话**的提示。
+
+    父节点的 key 一改，整棵子树的 id 就跟着变 —— 这正是 ``nodes[].page``
+    最容易过期的地方。``Scenario.validate`` 会报"声明了不存在的状态"，
+    但它不会说"它其实还在树里，只是变成了另一个路径"。
+    """
+    for node in scenario.graph.nodes.values():
+        if not node.page or node.page in scenario.tree:
+            continue
+        tail = "/" + node.page.rsplit("/", 1)[-1]
+        candidates = [p.id for p in scenario.tree.walk() if p.id.endswith(tail)]
+        if candidates:
+            raise ConfigError(
+                f"节点 {node.id!r} 声明的状态 {node.page!r} 不在状态树里；"
+                f"同名的状态还有: {', '.join(candidates)} —— 多半是某个父节点的 key 改过"
+            )
+
+
+def _region_from_config(value: Any, where: str) -> Region:
+    """``roi`` 支持 ``[x,y,w,h]`` 和 ``{x,y,w,h}``。"""
+    if isinstance(value, Region):
+        return value
+    if isinstance(value, dict):
+        return Region.from_dict(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 4:
+            raise ConfigError(f"{where} 需要 4 个数字 [x,y,w,h]，收到: {value!r}")
+        return Region.from_tuple(tuple(int(v) for v in value))  # type: ignore[arg-type]
+    raise ConfigError(f"{where} 的写法不认识: {value!r}（用 [x,y,w,h]）")
+
+
+def _resolve_function(path: Any, where: str) -> Any:
+    """逃生舱：``"包.模块.函数"`` -> 可调用对象（复用执行层那套解析）。"""
+    from ..execution.step import _resolve_function as resolve
+
+    try:
+        return resolve(path)
+    except ConfigError as exc:
+        raise ConfigError(f"{where} 解析失败: {exc}") from exc
+
+
+def _reject_unknown(payload: dict[str, Any], allowed: set[str], where: str) -> None:
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(f"{where} 有未知字段: {', '.join(unknown)}（可用: {sorted(allowed)}）")
+
+
+def _coerce_enum(enum_cls: type, value: Any, where: str) -> Any:
+    """把配置里的字符串转成枚举；大小写都容忍一点。"""
+    if isinstance(value, enum_cls):
+        return value
+    text = str(value).strip()
+    for candidate in (text, text.lower(), text.upper()):
+        try:
+            return enum_cls(candidate)
+        except ValueError:
+            continue
+    choices = ", ".join(m.value for m in enum_cls)  # type: ignore[attr-defined]
+    raise ConfigError(f"{where} 的值 {value!r} 不认识（可用: {choices}）")
 
 
 def _known_option_keys() -> tuple[str, ...]:

@@ -1,28 +1,39 @@
 """流程层的引擎 —— 主循环。
 
-一轮 tick 的完整数据流（这就是两个对象怎么协作的全部内容）::
+## 一轮 tick 的完整数据流
 
-    ① frame = ctx.frame()                        拿帧（TTL 内复用，否则重截）
-    ② match = scenario.tree.locate(frame, hint)  空间：我现在在哪
-    ③ tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
-    ④ 终态判断（stop_pages / 页面 terminal）
-    ⑤ 未知页面处理（宽容期内只等，超时后按 on_unknown）
-    ⑥ 位置检查 —— 实测页面 != 当前节点期望的页面时：
-         记一条警告，本轮**一个动作都不做**。
-         注意是"只拦不跳"：跳转必须由图里的边显式表达（见 _position_ok）
-    ⑦ 守卫通过（页面已确认 + 位置对 + 未超次数 + 冷却已过）才执行节点步骤
-    ⑧ cursor.step()                              时间：条件满足就换目标
-    ⑨ 检查预算（时长 / 轮数），sleep(tick_interval)
+```
+(1) frame = ctx.frame()                       拿帧（TTL 内复用，否则重截）
+(2) expected = binding.expects(cursor.current) 流程层自己的预期 = 当前节点声明的状态
+(3) match = tree.locate(frame, expected=...)   快路径：先验预期，只探这一页
+(4) tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
+(5) 终态判断（stop_pages / 状态的 terminal）
+(6) 锚点 == expected ？
+      是 -> 校验通过，执行节点步骤；状态没能确认前不动手
+      否 -> 意外：
+           a. 慢路径 tree.recover(frame, near=expected) 从最近的末梢逐步扩散
+           b. binding.node_for(真锚点) 问出"这归哪个节点管"
+           c. 游标落到那个节点（重定位），本轮不执行 —— 先把位置摆正
+           d. 留一条 Recovery 记录：从哪个状态到哪个状态、试过谁
+(7) cursor.step()                              时间：条件满足就换目标
+(8) 检查预算（时长 / 轮数），sleep(tick_interval)
+```
 
-第 ⑥ 步是整套设计**最重要的安全属性**：实际页面和节点期望的页面不一致时，
-一个动作都不做。识图脚本最危险的失败模式就是在错误页面上瞎点 ——
-点错一个"确认"可能就是消耗道具或者进错关卡。
+## 三个关键语义
 
-第 ⑥ 步之所以"只拦不跳"，是为了让控制流只有一个出处：图。
-自动跳转虽然省事，但那次移动在 RunReport.decisions 里是隐形的，
-排查"它怎么跑那儿去了"时只能靠猜。
+**一、正常路径是"直着走"的。** 流程层只写正常流程：不写 ``page`` 的节点
+完全不校验状态，做完一步就走下一步。这就是"业务流程只关心正常流程"的实现方式。
 
-第 ⑨ 步的 sleep 和所有等待一样是可中止的（``ctx.sleep`` → ``Event.wait``），
+**二、意外路径靠状态树救回来。** 第 (6) 步自检不过时才付"末梢优先 + 逐步扩散"
+的代价（:meth:`gamebot.state.page.PageTree.recover`）。每轮都跑扩散搜索等于
+每帧探测全树 —— 那和树存在的意义（剪枝）正好相反。
+
+**三、重定位是显式的、可解释的。** 跳到哪个节点由 :class:`StateBinding` 决定
+（"记录信息的状态一定有流程节点认领"是启动期就校验过的不变式），
+而且每次都进 :attr:`RunReport.recoveries` —— 排查"它怎么跑那儿去了"
+永远有答案，不用猜。
+
+第 (8) 步的 sleep 和所有等待一样是可中止的（``ctx.sleep`` → ``Event.wait``），
 所以点了停止是毫秒级响应，不是等满这一轮。
 """
 
@@ -33,17 +44,21 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import Cancelled, FlowError
-from ..state.page import PageId
+from ..state.page import UNKNOWN_PAGE, PageId
 from ..state.tracker import PageChange, PageTracker
 from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch, humanize
-from .graph import Decision, GraphCursor, NodeId
+from .binding import StateBinding
+from .graph import Decision, GraphCursor, Node, NodeId
 from .scenario import Scenario, UnknownPolicy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..atomic.frame import Frame
     from ..context import RunContext
     from ..execution.executor import Executor, StepOutcome
+    from ..execution.step import Step
 
 log = get_logger("flow.engine")
 
@@ -79,6 +94,44 @@ class StopReason(StrEnum):
 
 
 @dataclass(slots=True)
+class Recovery:
+    """一次重定位的完整记录。
+
+    **这是"允许自动跳"的代价与回报**：代价是引擎会自己移动游标，
+    回报是那次移动永远有据可查。字段刻意一个都不省：
+
+    :param expected: 流程层以为自己在哪（= 被跳过那个节点声明的状态）。
+    :param actual: 状态层说真实在哪。
+    :param to_node: 最终落到哪个节点；``None`` 表示"认出来了但没人认领"。
+    :param attempts: 慢路径（末梢优先 + 逐步扩散）试过谁、为什么没中。
+        排查"为什么最后认成了这个"只能靠它。
+    """
+
+    at: float = 0.0
+    tick: int = 0
+    from_node: NodeId = ""
+    expected: PageId = ""
+    actual: PageId = ""
+    to_node: NodeId | None = None
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tick": self.tick,
+            "at": round(self.at, 4),
+            "from_node": self.from_node,
+            "expected": self.expected,
+            "actual": self.actual,
+            "to_node": self.to_node,
+            "attempts": self.attempts,
+        }
+
+    def __repr__(self) -> str:
+        target = self.to_node or "<无人认领>"
+        return f"Recovery({self.expected!r} -> {self.actual!r} => {target!r})"
+
+
+@dataclass(slots=True)
 class RunReport:
     """一次运行的完整报告。**排查问题的第一手材料**，不要精简字段。"""
 
@@ -94,6 +147,9 @@ class RunReport:
     changes: list[PageChange] = field(default_factory=list)
     decisions: list[Decision] = field(default_factory=list)
     """转移决策轨迹。**没走成的那次也在里面** —— "为什么它不动"靠这个回答。"""
+
+    recoveries: list[Recovery] = field(default_factory=list)
+    """重定位轨迹。**每次自动跳都在里面** —— "它怎么跑那儿去了"靠这个回答。"""
 
     outcomes: list[StepOutcome] = field(default_factory=list)
     blackboard: dict[str, Any] = field(default_factory=dict)
@@ -140,6 +196,7 @@ class RunReport:
             "final_node": self.final_node,
             "changes": [c.to_dict() for c in self.changes],
             "decisions": [d.to_dict() for d in self.decisions],
+            "recoveries": [r.to_dict() for r in self.recoveries],
             "steps": [o.to_dict() for o in self.outcomes],
             "errors": self.errors,
         }
@@ -170,24 +227,31 @@ class FlowEngine:
             把游戏手动摆到对应状态、选那个节点、点开始就行。
             没有它，调一条后期分支的成本是"每次重跑整个流程"。
 
-            注意起始节点**不影响位置守卫**：它声明的 ``page`` 和实测不符时，
-            动作照样一个都不执行（这是"只拦不跳"的另一面）。
+            注意起始节点**不影响状态校验**：它声明的 ``page`` 和实测不符时，
+            引擎会走重定位（跳到真正该在的节点），而不是硬着头皮执行。
         """
         self.scenario = scenario
         self.ctx = ctx
         self.executor = executor or getattr(ctx, "executor", None)
         self.tracker: PageTracker = tracker or ctx.pages
+        # 单一事实源：状态校验读的是 ctx.page，而 ctx.page 来自 ctx.pages。
+        # 注入的 tracker 必须同步给 ctx，否则会出现"引擎按 A 判断位置、
+        # 跟踪层按 B 判断"—— 两边结论可能相反，而且**只在注入时才复现**。
+        # 刻意不用 assert 兜：python -O 会把 assert 抹掉，这种保证必须是结构性的。
+        ctx.pages = self.tracker
         self.start_node = start_node or scenario.graph.initial
         if start_node and scenario.graph.node(start_node) is None:
             raise FlowError(f"起始节点不存在: {start_node!r}")
+        # 状态 ↔ 节点的关联表：动前校验 / 重定位去向 / 动后预期都靠它
+        self.binding = StateBinding(scenario.graph, scenario.tree)
         self.cursor = GraphCursor(scenario.graph, current=self.start_node)
         self.report = RunReport(scenario=scenario.name)
 
         self._stop_reason: StopReason | None = None
         self._stop_message = ""
         self._unknown_since: float | None = None
-        self._visited_nodes: dict[NodeId, int] = {}
-        self._position_warned: set[tuple[NodeId, PageId]] = set()
+        self._entered_nodes: set[NodeId] = set()
+        self._recovery_warned: set[tuple[NodeId, PageId]] = set()
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -203,7 +267,10 @@ class FlowEngine:
             self._stop_message = message
             log.info("流程停止请求: %s %s", reason.value, message)
 
-    def run(self) -> RunReport:
+    def run(
+        self,
+        on_tick: Callable[[FlowEngine, StepOutcome | None], None] | None = None,
+    ) -> RunReport:
         """跑完整个流程，返回报告。
 
         循环控制（这部分是完整的）：
@@ -212,6 +279,15 @@ class FlowEngine:
         * 一轮结束 ``ctx.sleep(tick_interval)``（**可被中止立刻唤醒**）；
         * 异常一律收进 ``report.errors`` 并停止，不往上抛 ——
           脚本跑到一半崩掉时，报告比 traceback 有用得多。
+
+        :param on_tick: 每轮结束后的回调 ``(engine, 本轮结果)``。
+            给**外部观察者**用：UI 把状态推到界面上、测试要在"轮与轮之间"
+            做点什么（比如让模拟画面跟上来）。刻意做成回调，而不是让调用方
+            自己循环 ``tick()`` —— 后者会绕开 ``run()`` 的预算检查、异常兜底
+            和报告收集（``report.outcomes`` 只在 ``run()`` 里从 executor 收过来，
+            而且每调一次 ``run()`` 就重置一次报告）。
+            回调里抛异常按流程异常处理（会被记进 ``report.errors`` 并停止）——
+            观察者的问题不该被静默吞掉。
         """
         options = self.scenario.options
         self.scenario.validate()
@@ -242,7 +318,9 @@ class FlowEngine:
 
                 self.report.ticks += 1
                 self.tracker.advance_tick()
-                self.tick()
+                outcome = self.tick()
+                if on_tick is not None:
+                    on_tick(self, outcome)
                 if self.running:
                     self.ctx.sleep(self._tick_interval())
         except KeyboardInterrupt:  # pragma: no cover - 人工中断
@@ -271,20 +349,184 @@ class FlowEngine:
     # ------------------------------------------------------------------ #
     # 单轮
     # ------------------------------------------------------------------ #
-    def tick(self) -> StepOutcome | None:
+    def tick(self, *, now: float = 0.0) -> StepOutcome | None:
         """执行一轮。返回本轮"做了什么"，什么都没做（纯等待）时返回 None。
 
-        待实现 —— 按模块 docstring 里的 ①~⑨ 走。依赖 ``PageTree.locate()``。
+        顺序就是模块 docstring 里的 (1)~(8)：
+
+        1. 拿帧；
+        2. 问关联表"当前节点期望哪个状态"，然后用**快路径**验它；
+        3. 跟踪层更新；
+        4. 终态判断；
+        5. **锚点对得上就干活、对不上就重定位**（这是本方法的核心）；
+        6. 推进游标 + 记决策。
+
+        三条不能动的性质：
+
+        * **正常路径不查树**（只探预期那一页）。扩散搜索只在意外时跑，
+          否则每帧探测全树，树的剪枝收益就没了；
+        * **状态没确认前不动手**（``require_confirmed``）—— 过滤动画里的"闪现"；
+        * **重定位一定留痕**（:attr:`RunReport.recoveries`）。自动跳的唯一毛病
+          就是"隐形"，所以每次跳都带 expected / actual / node / 试过谁。
         """
-        raise NotImplementedError(
-            "待实现: frame -> tree.locate -> tracker.update -> 终态判断 -> "
-            "未知页面宽限 -> 位置对齐(node_for_page) -> cursor.should_run -> "
-            "executor.run_many(node.steps) -> cursor.step"
+        now = now or self.ctx.now()
+
+        # (1) 拿帧（TTL 内复用，所以同一轮里所有判断看的是同一张图）
+        frame = self._frame()
+
+        node = self.scenario.graph.node(self.cursor.current)
+        if node is None:
+            self.stop(StopReason.ERROR, f"当前节点不存在: {self.cursor.current!r}")
+            return None
+
+        # (2) 流程层自己的预期 + 快路径验证
+        expected = self.binding.expects(node)
+        found = self.scenario.tree.locate(frame, expected, expected=expected, now=now)
+        if not found.ok:
+            # 定位**出错**不等于"认不出来"：模板缺失、Matcher 抛异常都属于
+            # 配置/环境问题，当成未知状态会让脚本带着坏掉的识别规则一直空转。
+            log.error("状态定位出错: %s", found.message)
+            self.report.errors.append(f"状态定位出错: {found.message}")
+            self.stop(StopReason.ERROR, found.message)
+            return None
+        match = found.value
+
+        # (3) 跟踪层：连续几帧了、从何时起、换状态了没有
+        self.tracker.update(match, now=now, reason="定位")
+        anchor = self.tracker.current_id
+
+        # (4) 终态判断（stop_pages 或状态的 terminal 标记）
+        if self._check_terminal(anchor, now=now):
+            return None
+
+        # (5) 状态自检：锚点对得上就干活，对不上就重定位
+        if expected is None or anchor == expected:
+            return self._run_current(node, now=now)
+        return self._realign(frame, node, expected, anchor, now=now)
+
+    # ------------------------------------------------------------------ #
+    # 两条分支
+    # ------------------------------------------------------------------ #
+    def _run_current(self, node: Node, *, now: float) -> StepOutcome | None:
+        """状态对得上：走正常路径（干活）。"""
+        options = self.scenario.options
+
+        # 状态还没"确认进入"（连续命中帧数不够）前不动手
+        if options.require_confirmed and not self.tracker.confirmed:
+            self._note_advance(now=now)
+            return None
+
+        # 状态停太久了：给它声明的出路（on_timeout / recovery_node）
+        self._check_node_timeout(node, now)
+
+        run_ok, run_why = self.cursor.should_run(self.ctx, now=now)
+        if not run_ok:
+            log.debug("本轮不执行 %r: %s", node.id, run_why)
+            self._note_advance(now=now)
+            return None
+
+        outcomes = self._run_node(node.id)
+        # 转移决策：**没走成的也记**（"为什么它不动"要靠这个回答）
+        self._note_advance(now=now)
+        return outcomes[-1] if outcomes else None
+
+    def _realign(
+        self,
+        frame: Frame,
+        node: Node,
+        expected: PageId,
+        anchor: PageId,
+        *,
+        now: float,
+    ) -> StepOutcome | None:
+        """状态对不上：走意外路径（重定位）。
+
+        这是"状态树用来在意外时重定位到某个流程节点"的实现：
+
+        1. 锚点认不出来（``unknown``）-> 宽容期内只等，超时按 ``on_unknown`` 处理。
+           认不出来时**绝不猜**，也绝不动作；
+        2. 认得出但和预期不同 -> 用**慢路径**确认一下真实状态（快路径只验了预期），
+           再问关联表"这归哪个节点管"，把游标挪过去；
+        3. 挪过去之后**本轮不执行** —— 重定位是"先把位置摆正"，
+           干活留给下一轮（那时的自检会自然通过）。
+        """
+        if anchor == UNKNOWN_PAGE:
+            self._handle_unknown(now)
+            self._note_advance(now=now)
+            return None
+        self._unknown_since = None
+
+        # 慢路径：末梢优先 + 逐步扩散。快路径只验了 expected，所以这里要重找一遍。
+        recovered = self.scenario.tree.recover(frame, near=expected, now=now)
+        if recovered.ok:
+            candidate = recovered.value
+            if candidate.id != UNKNOWN_PAGE and candidate.id != expected:
+                anchor = candidate.id
+                self.tracker.update(candidate, now=now, reason="重定位")
+                anchor = self.tracker.current_id
+
+        target = self.binding.node_for(anchor)
+        if target is None:
+            # 启动期 validate_binding 已经保证"有信息的状态都有节点认领"，
+            # 所以走到这里通常意味着热改过配置，或者锚点是个没认领的状态。
+            self._note_recovery(node.id, expected, anchor, None, recovered.value)
+            log.warning(
+                "重定位到状态 %r，但没有任何节点认领它 —— 保持原地", anchor
+            )
+            self._note_advance(now=now)
+            return None
+
+        self.cursor.advance(target.id, now=now)
+        self._entered_nodes.discard(target.id)
+        self._note_recovery(node.id, expected, anchor, target.id, recovered.value)
+        log.info(
+            "状态自检不符：节点 %r 期望 %r，实测 %r -> 重定位到节点 %r",
+            node.id,
+            expected,
+            anchor,
+            target.id,
         )
+        # 本轮不再执行：先把位置摆正，干活交给下一轮
+        self._note_advance(now=now)
+        return None
 
     # ------------------------------------------------------------------ #
     # 内部
     # ------------------------------------------------------------------ #
+    def _note_advance(self, *, now: float) -> None:
+        """记一笔转移决策 + 推进游标。
+
+        "记决策 + 走一步"是所有"本轮不动作"分支的公共尾巴，收在一处是为了
+        保证**没有哪个分支会忘记推进**（忘了就是永久卡死）。
+        """
+        self._note_decision(self.cursor.evaluate(self.ctx, now=now))
+        self.cursor.step(self.ctx, now=now)
+
+    def _note_recovery(
+        self,
+        from_node: NodeId,
+        expected: PageId,
+        actual: PageId,
+        to_node: NodeId | None,
+        match: Any,
+    ) -> None:
+        """记一次重定位。
+
+        **这是"自动跳"能被接受的全部理由**：它不隐形。每次跳都带上
+        "我以为在哪 / 实际在哪 / 落到哪个节点 / 慢路径试过谁"，
+        排查"它怎么跑那儿去了"时永远有答案。
+        """
+        record = Recovery(
+            at=self.ctx.now(),
+            tick=self.report.ticks,
+            from_node=from_node,
+            expected=expected,
+            actual=actual,
+            to_node=to_node,
+            attempts=[a.to_dict() for a in getattr(match, "attempts", [])],
+        )
+        self.report.recoveries.append(record)
+
     def _tick_interval(self) -> float:
         """本轮结束后的等待时长。
 
@@ -317,62 +559,87 @@ class FlowEngine:
             self._unknown_since = None
         # WAIT: 什么都不做，继续等
 
-    def _position_ok(self, page_id: PageId) -> tuple[bool, str]:
-        """实测页面和当前节点声明的 ``page`` 一致吗。
+    def check_state(self, anchor: PageId | None = None) -> tuple[bool, str]:
+        """动手前的状态校验（走关联表）。
 
-        ## 只拦不跳（这是刻意选的）
+        这是 :meth:`StateBinding.check` 的转发，**保留成引擎上的公开方法**
+        是因为它对排查很有用：想知道"这一步到底校没校验、校验的是什么"，
+        在 REPL 里问引擎就行。
 
-        不一致时**只返回 False**（本轮一个动作都不执行），**不**自动跳到
-        "认领了该页面的节点"。跳转必须由图里的边显式表达。理由：
+        ``Node.page is None`` 的节点永远通过 —— 那正是"流程图只写正常流程"
+        的实现方式：不写就不校验。
 
-        * 控制流只有一个出处 —— "为什么它动了"永远能在图里找到答案；
-        * 每次移动都会进 :attr:`RunReport.decisions`，可调试性最好；
-        * 反过来做（自动跳）虽然"忘写边也能跑"，但那次移动在报告里
-          是隐形的，排查时只能靠猜。
-
-        代价是忘写边就原地不动。所以这里返回的说明会被引擎记成一条
-        警告（:meth:`_warn_position`）—— "不动"必须是有解释的，不是静默的。
-
-        ``Node.page is None`` 的节点不绑定页面，永远通过。
+        :param anchor: 实测锚点；不给就用跟踪器当前状态。
         """
-        node = self.scenario.graph.node(self.cursor.current)
-        if node is None:
-            return False, f"当前节点不存在: {self.cursor.current!r}"
-        if node.page is None:
-            return True, "节点不绑定页面"
-        if node.page == page_id:
-            return True, "位置正确"
-        return False, f"节点 {node.id!r} 期望页面 {node.page!r}，实测是 {page_id!r}"
-
-    def _warn_position(self, node_id: NodeId, page_id: PageId, reason: str) -> None:
-        """位置不符时记一条警告 —— 但**同一组合只记一次**。
-
-        每轮都记的话，一个卡住的脚本会在一分钟内刷出几千行同样的日志，
-        真正有用的信息反而被埋掉。
-        """
-        key = (node_id, page_id)
-        if key in self._position_warned:
-            return
-        self._position_warned.add(key)
-        log.warning(
-            "本轮不执行动作：%s。如果这是意料之外的，检查图里有没有从 %r 到"
-            '"认领该页面的节点"的边',
-            reason,
-            node_id,
-        )
+        if anchor is None:
+            anchor = self.tracker.current_id
+        return self.binding.check(self.cursor.current, anchor)
 
     def _run_node(self, state_id: NodeId) -> list[StepOutcome]:
-        """执行某节点的步骤（含 on_enter 首次执行）。"""
-        raise NotImplementedError("待实现：取 node -> 首次进入跑 on_enter -> 跑 steps -> 汇总")
+        """执行某节点的步骤（含 ``on_enter`` 首次执行）。
+
+        :return: 本次真正执行过的步骤结果（按执行顺序）。
+            单个步骤失败**不在这里中断** —— 处理权在 ``StepPolicy.on_error``
+            （抛异常 / 停流程 / 继续 / 放弃本轮），那是业务决策，
+            流程层只负责如实上报"这一轮做了什么"。
+        """
+        node = self.scenario.graph.require(state_id)
+        outcomes: list[StepOutcome] = []
+
+        if state_id not in self._entered_nodes:
+            self._entered_nodes.add(state_id)
+            if node.on_enter:
+                log.debug("节点 %r 首次进入，执行 on_enter", state_id)
+                outcomes.extend(self._run_steps(node.on_enter, state_id))
+
+        outcomes.extend(self._run_steps(node.steps, state_id))
+        return outcomes
+
+    def _run_steps(self, steps: list[Step], node_id: NodeId) -> list[StepOutcome]:
+        """按顺序跑一串步骤，逐个记账。"""
+        collected: list[StepOutcome] = []
+        for step in steps:
+            if step.needs_fresh_frame:
+                # 步骤显式声明要新图 —— 由引擎兑现，而不是让步骤自己截图。
+                # 这样"我看到了新画面"永远是一个显式事件，不藏在副作用里。
+                self.ctx.frame(fresh=True)
+            if self.executor is None:  # pragma: no cover - 装配期必然有执行器
+                log.warning("没有执行器，跳过步骤 %r", step.name)
+                continue
+            outcome = self.executor.run(step)
+            self._note_outcome(outcome)
+            collected.append(outcome)
+        return collected
+
+    def _check_node_timeout(self, node: Node, now: float) -> None:
+        """节点停留超预算时按 ``on_timeout`` 走出去。
+
+        只在**确实超过了**才动游标，而且只走一次：超时后节点的 ``since``
+        会在下一次进这个节点时重置（那是跟踪层的职责），所以这里不需要
+        额外的"已处理"标记。
+        """
+        if node.timeout is None or self.tracker.elapsed(now) < node.timeout:
+            return
+        target = node.on_timeout or self.scenario.options.recovery_node
+        if not target or target == node.id:
+            return
+        log.warning(
+            "节点 %r 停留超过 %.1fs，按超时出路跳到 %r",
+            node.id,
+            node.timeout,
+            target,
+        )
+        self.cursor.advance(target, now=now)
+        self._entered_nodes.discard(target)
 
     def _check_terminal(self, page_id: PageId, *, now: float) -> bool:
-        """终态判断：stop_pages 或页面的 terminal 标记。"""
+        """终态判断：stop_pages 或状态的 terminal 标记。"""
         if page_id in self.scenario.options.stop_pages:
-            self.stop(StopReason.STOP_PAGE, f"进入终态页面 {page_id}")
+            self.stop(StopReason.STOP_PAGE, f"进入终态状态 {page_id}")
             return True
         page = self.scenario.tree.get(page_id)
         if page is not None and page.terminal:
-            self.stop(StopReason.STOP_PAGE, f"页面 {page_id} 是终态")
+            self.stop(StopReason.STOP_PAGE, f"状态 {page_id} 是终态")
             return True
         return False
 

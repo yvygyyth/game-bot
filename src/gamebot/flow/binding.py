@@ -39,7 +39,42 @@ if TYPE_CHECKING:
 
 log = get_logger("flow.binding")
 
-__all__ = ["StateBinding"]
+__all__ = ["StateBinding", "validate_binding"]
+
+
+def validate_binding(graph: Any, tree: Any) -> None:
+    """装配期校验"状态 ↔ 节点"的引用，**不需要**构造 :class:`StateBinding`。
+
+    单独放一个函数（而不是只做 :meth:`StateBinding.validate`）是为了让
+    ``Scenario.validate()`` 能直接调它 —— 那边只需要"校验"，不需要查表；
+    而查表对象是运行期的东西，装配期造一个出来纯属多余。
+
+    :raises ConfigError: 校验失败，message 里带上全部问题。
+    """
+    from ..state.page import PageKind
+
+    problems: list[str] = []
+    bound: set[str] = set()
+    for node in graph.nodes.values():
+        if not node.page:
+            continue
+        bound.add(node.page)
+        if node.page not in tree:
+            problems.append(f"节点 {node.id!r} 声明的状态 {node.page!r} 不在状态树里")
+
+    for page in tree.walk():
+        # 分类节点自己不参与匹配，定位结果里永远不会出现它 —— 不需要认领；
+        # 叠加层是"盖在某一页上的一层"，由主状态的节点负责。
+        if page.kind is PageKind.GROUP or page.is_overlay:
+            continue
+        if page.id not in bound:
+            problems.append(
+                f"状态 {page.id!r} 没有任何流程节点认领 —— 重定位到它之后无处可去。"
+                "给它加一个节点并写上 page，或把它标成 kind: group"
+            )
+
+    if problems:
+        raise ConfigError("状态-流程关联校验失败:\n  - " + "\n  - ".join(problems))
 
 
 class StateBinding:
@@ -53,7 +88,7 @@ class StateBinding:
         ``None`` 时跳过那项检查（单测里常这么用）。
     """
 
-    __slots__ = ("_by_page", "_bound", "_graph", "_tree")
+    __slots__ = ("_bound", "_by_page", "_graph", "_tree")
 
     def __init__(self, graph: Any, tree: PageTree | None = None) -> None:
         self._graph = graph
@@ -142,47 +177,26 @@ class StateBinding:
 
         检查项：
 
-        1. 每个节点声明的状态都必须在页面树里存在（写错一个字母，那条流程
+        1. 每个节点声明的状态都必须在状态树里存在（写错一个字母，那条流程
            就永远不执行 —— 而且不报错，只是"什么也没发生"）；
-        2. ``require_state_node`` 为真时，**每个记录信息的末梢状态都必须有
+        2. ``require_state_node`` 为真时，**每个记录信息的状态都必须有
            节点认领**。这是用户定的不变式：重定位到它之后必须有个地方可去。
            ``GROUP`` 分类节点不算 —— 它自己不做匹配，定位结果里永远不会出现它；
            叠加层也不算 —— 它盖在主状态之上，由主状态的节点负责。
 
         :raises ConfigError: 校验失败，message 里带上全部问题。
         """
-        problems: list[str] = []
-
-        for page_id, nodes in self._bound.items():
-            if self._tree is not None and page_id not in self._tree:
-                names = ", ".join(sorted(n.id for n in nodes))
-                problems.append(
-                    f"节点 {names} 声明的状态 {page_id!r} 不在页面树里"
-                )
-
-        if require_state_node and self._tree is not None:
-            unclaimed = self._unclaimed_states()
-            if unclaimed:
-                problems.append(
-                    "以下状态没有任何流程节点认领，重定位到它们之后无处可去: "
-                    + ", ".join(unclaimed)
-                    + "。（给它加一个节点并写上 page，或把它标成 kind: group）"
-                )
-
-        if problems:
-            raise ConfigError("状态-流程关联校验失败:\n  - " + "\n  - ".join(problems))
-
-    def _unclaimed_states(self) -> list[str]:
-        assert self._tree is not None
-        from ..state.page import PageKind
-
-        missing: list[str] = []
-        for page in self._tree.walk():
-            if page.kind is PageKind.GROUP or page.is_overlay:
-                continue
-            if not self.is_bound(page.id):
-                missing.append(page.id)
-        return sorted(missing)
+        if self._tree is None:
+            # 没给状态树就只能查"节点 -> 状态"那半边
+            problems = [
+                f"节点 {node.id!r} 声明了状态但没提供状态树，无法校验"
+                for node in self._graph.nodes.values()
+                if node.page
+            ]
+            if problems:
+                raise ConfigError("状态-流程关联校验失败:\n  - " + "\n  - ".join(problems))
+            return
+        validate_binding(self._graph, self._tree)
 
     # ------------------------------------------------------------------ #
     # 描述
