@@ -3,7 +3,7 @@
 ## 为什么要单独一个文件
 
 快捷键最容易出的问题不是"没绑上"，而是**说的和做的不一致**：
-tooltip 里写着 F5，代码里绑的是 F6；帮助里写着 Esc 停止，实际绑在 F8。
+tooltip 里写着 F5，代码里绑的却是 F6；帮助里写着 Esc 停止，实际绑在 F7。
 过两周连作者自己都记不清哪个对。
 
 所以这里只留一张表，然后由它派生：
@@ -61,12 +61,10 @@ class Shortcut:
 #: * ``F5`` 开始 / ``Esc`` 停止 —— 沿用 IDE 和播放器的直觉，闭眼能按；
 #: * ``Esc`` 只在**运行中**才有反应（``QShortcut`` 跟着按钮的 enabled 走），
 #:   所以平时按它不会莫名其妙触发什么，也不和下拉框的"关掉弹窗"打架；
-#: * ``F8`` 只抓一张 —— 调试时按得最多的就是它，所以给它一个单键；
 #: * ``Ctrl+1/2/3`` 切左边三页；``F1`` 出帮助。
 SHORTCUTS: tuple[Shortcut, ...] = (
     Shortcut("run", "F5", "开始运行", button="start"),
     Shortcut("stop", "Esc", "停止（毫秒级）", button="stop"),
-    Shortcut("grab", "F8", "抓一张：截一帧并画出识别到的框", button="grab"),
     Shortcut("check", "F6", "检查定义与模板文件", button="check"),
     Shortcut("detect", "F7", "重新检测可见软件窗口", button="detect"),
     Shortcut("page_diagram", "Ctrl+1", "切到「状态 / 流程」"),

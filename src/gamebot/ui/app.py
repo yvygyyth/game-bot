@@ -35,7 +35,6 @@ SNAPSHOT_SETTLE = 1.6
 
 
 def main(
-    config_path: str = "config/app.yaml",
     *,
     script_key: str = "",
     snapshot: str = "",
@@ -50,7 +49,7 @@ def main(
     app.setApplicationDisplayName("gamebot 控制台")
     apply_dark_theme(app)
 
-    window = MainWindow(config_path, initial_script=script_key)
+    window = MainWindow(initial_script=script_key)
     window.resize(*DEFAULT_SIZE)
 
     if snapshot:

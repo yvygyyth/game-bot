@@ -28,7 +28,7 @@ class TestTable:
     def test_core_actions_exist(self):
         """这几个是承诺过的，别不小心删了。"""
         actions = {spec.action for spec in SHORTCUTS}
-        assert {"run", "stop", "grab", "help"} <= actions
+        assert {"run", "stop", "help"} <= actions
 
     def test_stop_is_escape_and_run_is_f5(self):
         """用户问的就是这个，钉住。"""
@@ -38,7 +38,7 @@ class TestTable:
 
     def test_button_names_are_known(self):
         """``button`` 只能是控件栏里真有的那几种，否则 tooltip 会静默贴不上。"""
-        known = {"start", "stop", "grab", "check", "detect"}
+        known = {"start", "stop", "check", "detect"}
         for spec in SHORTCUTS:
             assert spec.button in known | {""}, spec
 

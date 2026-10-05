@@ -210,7 +210,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
 
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     return run_ui(
-        args.config,
         script_key=args.script or "",
         snapshot=args.snapshot or "",
     )

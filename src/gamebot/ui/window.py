@@ -5,7 +5,10 @@
 窗口是界面线程唯一的"大老板"。它持有：
 
 * 一个 :class:`LogBridge` —— 日志过来（可能来自工作线程的 emit）；
-* 一个 ``QThread`` + :class:`CaptureWorker` —— 抓帧在那里跑。
+* 一个 ``QThread`` + :class:`EngineWorker` —— 引擎那个阻塞循环在那里跑。
+
+**没有抓帧线程了**：界面上的实时画面已经删掉（看不出问题），
+"它认到的是哪一块"由识图日志回答。
 
 两条规矩（见 ``docs/ui.md`` 第四节）：
 
@@ -32,8 +35,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config.loader import load_config
-from ..exceptions import GameBotError
 from ..utils.logging import get_logger
 from .engine import EngineWorker
 from .logbridge import LogBridge
@@ -56,18 +57,13 @@ _WINDOW_TITLE = "gamebot 控制台"
 class MainWindow(QMainWindow):
     """本地控制台。"""
 
-    #: 请求工作线程重建抓屏会话（跨线程，所以走信号）
-    configureSource = Signal(object, str)
-
     def __init__(
         self,
-        config_path: str = "config/app.yaml",
         *,
         initial_script: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._config_path = config_path
         self._entry: ScriptEntry | None = None
         self._details: ScriptDetails | None = None
         self._engine_running = False
@@ -104,7 +100,7 @@ class MainWindow(QMainWindow):
         # 界面初始化也照这个顺序，否则第一眼看到的是个空下拉框。
         self.controls.refresh_windows()
         self._load_scripts(initial_script)
-        log.info("界面已启动（配置文件: %s）", config_path)
+        log.info("界面已启动")
         self._warn_about_unimplemented()
 
     # ------------------------------------------------------------------ #
@@ -216,7 +212,6 @@ class MainWindow(QMainWindow):
         self.controls.checkRequested.connect(self._run_check)
         self.controls.startRequested.connect(self._on_start)
         self.controls.stopRequested.connect(self._on_stop)
-        self.controls.grabRequested.connect(self._grab_annotated)
 
         # 注意：日志信号由 LogView 在它自己的构造里接上（那块归它管）。
         # 这里**不要**再连一次 —— 连两次的话每条日志会被追加两遍。
@@ -250,7 +245,6 @@ class MainWindow(QMainWindow):
             self.recognition.set_recorder(None)
             self.controls.set_nodes(())
             self.controls.set_runnable(False, "先选一个脚本")
-            self._request_source()
             return
 
         details = load_details(entry)
@@ -268,7 +262,7 @@ class MainWindow(QMainWindow):
         self.diagram.set_scenario(scenario)
 
         # 识别记录器：**界面自己造一个并一直用**（换脚本才换）。
-        # 理由是这样"抓一张"和"开始运行"写的是同一份记录、同一个列表 ——
+        # 理由是"开始运行"写的就是这份记录（界面只有这一条路了）——
         # 否则每次开始运行都会新建一个记录器，界面上那栏会莫名其妙清空。
         # 构造它只是建目录 + 计数器，不碰游戏窗口。
         try:
@@ -296,41 +290,19 @@ class MainWindow(QMainWindow):
                 f"{entry.key}: {details.pages} 状态 / {details.nodes} 节点 / "
                 f"{details.edges} 边"
             )
-        self._request_source()
 
     @Slot(object)
     def _on_window_changed(self, title: str) -> None:
-        self._request_source(title)
+        """换了软件窗口。
+
+        界面不再自己抓屏（没有实时画面），所以这里只是记一条日志 ——
+        真正用到窗口的是「开始」那一刻，它会把标题交给引擎的抓屏会话。
+        """
+        log.debug("目标窗口改为 %r", title)
 
     # ------------------------------------------------------------------ #
     # 抓屏
     # ------------------------------------------------------------------ #
-    def _current_config(self) -> Any:
-        """当前该用哪份配置：优先脚本自己的，退回配置文件。"""
-        if self._entry is not None and self._entry.spec is not None:
-            try:
-                return self._entry.spec.build_config()
-            except Exception as exc:
-                log.warning("用脚本的配置失败，改为读配置文件: %s", exc)
-        try:
-            return load_config(self._config_path)
-        except GameBotError as exc:
-            log.error("读配置失败: %s", exc)
-            return None
-
-    def _request_source(self, title: str = "") -> None:
-        """让工作线程重建抓屏会话。
-
-        ``title`` 为空表示"没有明确选软件" —— 这时**不要**用下拉框里那一项
-        （它可能只是枚举出来的第一个），而是让配置里的 ``window_title`` 生效。
-        否则界面会一启动就去抓某个恰好排在第一的窗口，而你想要的是整屏。
-        """
-        config = self._current_config()
-        if config is None:
-            self._status.setText("没有可用的配置")
-            return
-        self.configureSource.emit(config, title or self.controls.window_title)
-
     @Slot(object)
     def _on_tick(self, event: object) -> None:
         """每轮刷新：状态面板 + **把当前状态/节点在图上点亮**。"""
@@ -351,69 +323,6 @@ class MainWindow(QMainWindow):
         node_id = getattr(node, "node_id", "") or ""
         page = getattr(node, "page", "") or ""
         self.diagram.refresh(current_node=node_id, current_node_page=page)
-
-    # ------------------------------------------------------------------ #
-    # 抓一张（带框）
-    # ------------------------------------------------------------------ #
-    def _grab_annotated(self) -> None:
-        """截一帧，把**当前脚本的所有查询**跑一遍，并把框画出来存下。
-
-        为什么不复用"实时预览"：预览每 200ms 就抓一张、还不查任何模板，
-        存出来的图是没有框的，等于没用。这里抓完就跑一遍状态树上的查询，
-        于是图上会真的有框 —— 这才是"我能直接看到它识别到的区域"。
-        """
-        entry = self._entry
-        if entry is None or entry.spec is None:
-            self._info_box("先选脚本", "「抓一张」要按某份定义去查，先选一个脚本。")
-            return
-        try:
-            config = entry.spec.build_config()
-            config.screen.window_title = self.controls.window_title or config.screen.window_title
-            scenario = entry.spec.build_scenario()
-            from ..bootstrap import build_context
-
-            ctx = build_context(
-                config,
-                scenario=scenario,
-                recorder=self._recorder,
-                scenario_options=scenario.options,
-            )
-        except Exception as exc:
-            self._info_box("抓不了", f"{type(exc).__name__}: {exc}")
-            log.exception("抓帧失败")
-            return
-
-        try:
-            frame = ctx.frame()
-            tree = scenario.tree
-            # 在整帧上把每个状态**按引擎那条路**跑一遍 —— 用 ``tree.match()``
-            # 而不是自己遍历 ``page.queries`` 调 ``query.run(frame)``：
-            # 后者会**绕过 ROI 继承**（查询自己的 region 会盖掉页面的 roi），
-            # 于是搜的范围比引擎实际搜的大，画出来的框跟引擎的判断不一致 ——
-            # 那就等于给了你一张会骗人的图。
-            #
-            # 这一步的副作用就是"画框"：底层每次 find_image 都会被识图记录器
-            # 记下来，``annotate_now`` 再把这些记录画到图上。
-            for page in tree.pages.values():
-                if page.is_group:
-                    continue  # 分类节点不参与匹配（校验也不允许它有查询）
-                tree.match(frame, page)
-            recorder = getattr(ctx, "recorder", None)
-            path = recorder.annotate_now(frame, reason=f"手动抓帧 {entry.key}") if recorder else ""
-        except Exception as exc:
-            self._info_box("抓不了", f"{type(exc).__name__}: {exc}")
-            log.exception("抓帧失败")
-            return
-        finally:
-            ctx.close()
-
-        self.recognition.refresh(force=True)
-        self.workspace.setCurrentWidget(self.recognition)
-        if path:
-            self._status.setText(f"已存带框的图: {path}")
-            log.info("手动抓帧已存: %s", path)
-        else:
-            self._status.setText("抓到了帧，但没存图（vision.record 关了？）")
 
     # ------------------------------------------------------------------ #
     # 检查 / 自检
@@ -647,7 +556,6 @@ class MainWindow(QMainWindow):
             {
                 "run": self._on_start,
                 "stop": self._on_stop,
-                "grab": self._grab_annotated,
                 "check": self._run_check,
                 "detect": self.controls.refresh_windows,
                 "page_diagram": lambda: self.workspace.setCurrentIndex(0),
@@ -660,7 +568,6 @@ class MainWindow(QMainWindow):
             {
                 "start": self.controls.start_btn,
                 "stop": self.controls.stop_btn,
-                "grab": self.controls.grab_btn,
                 "check": self.controls.check_btn,
                 "detect": self.controls.detect,
             }

@@ -7,7 +7,7 @@
 用法::
 
     from gamebot.ui import run_ui
-    run_ui("config/app.yaml")
+    run_ui()
 
 或者命令行：``gamebot ui``。
 """
@@ -34,7 +34,6 @@ def require_qt() -> None:
 
 
 def run_ui(
-    config_path: str = "config/app.yaml",
     *,
     script_key: str = "",
     snapshot: str = "",
@@ -44,12 +43,12 @@ def run_ui(
 
     :param script_key: 预选的脚本 key（``"mingjiangsha/jingji"``）。
     :param snapshot: 非空时**不开窗口**，渲染一张界面截图存到这个路径就退出。
-        用途：无头环境下自检、给文档配图。需要 ``QT_QPA_PLATFORM=offscreen``。
+        用途：无头环境下给文档配图、CI 里验证界面能起来。需要 ``QT_QPA_PLATFORM=offscreen``。
     """
     require_qt()
     from .app import main
 
-    return main(config_path, script_key=script_key, snapshot=snapshot, argv=argv)
+    return main(script_key=script_key, snapshot=snapshot, argv=argv)
 
 
 def ui_available() -> tuple[bool, str]:

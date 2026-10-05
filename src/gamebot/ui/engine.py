@@ -19,14 +19,13 @@
    引擎会在下一次 ``ctx.sleep()`` 时被立刻唤醒（毫秒级）并退出循环。
    所以「停止」按钮直接调它就行，不需要跨线程信号，也不需要 ``terminate()``。
 
-## 帧从哪来
+## 它不发画面
 
-预览原来是自己抓帧（``CaptureWorker``）。引擎跑起来之后**必须**换成"复用引擎
-那一帧"：两个 mss 实例同时截屏会互相拖慢，而且界面显示的会是一张和引擎判断
-所用的**不同的**图 —— 那正是这个项目一直在避免的"判断和动手看的不是同一张图"。
+它**不**再发帧给界面了 —— 界面上的实时画面已经删掉（看不见问题的东西不该占位置）。
+"它认到的是哪一块"现在由**识图日志**回答：记录器把每次匹配的框画在真机上
+（红=命中 / 橙=未命中 / 蓝=搜索范围），跑完一轮去那一页看就行。
 
-所以引擎一跑起来，预览就让位：``EngineWorker`` 把引擎当帧转成 ``QImage`` 发出去，
-主窗口把它接到预览上。
+引擎每轮仍然会通过 ``on_tick`` 回调把状态推给界面（``ticked`` 信号）。
 """
 
 from __future__ import annotations
@@ -82,10 +81,6 @@ class EngineWorker(QObject):
     因为"跑到一半换场景"会让报告和界面各说各话。
     """
 
-    #: 一帧预览画面：``(QImage, 尺寸)``。和 ``CaptureWorker.frameReady`` 同构，
-    #: 所以主窗口可以直接接到 ``PreviewPanel.show_frame`` 上。
-    frameReady = Signal(object, tuple)
-
     #: 一轮的状态快照
     ticked = Signal(object)  # TickEvent
 
@@ -100,8 +95,6 @@ class EngineWorker(QObject):
         self._ctx: RunContext | None = None
         self._engine: FlowEngine | None = None
         self._running = False
-        self._frames_every = 1
-        self._frames_seen = 0
 
     # ------------------------------------------------------------------ #
     # 配置（在主线程调用，但只是赋值，不在那一刻开始跑）
@@ -114,18 +107,8 @@ class EngineWorker(QObject):
             return
         self._ctx = ctx  # type: ignore[assignment]
         self._engine = engine  # type: ignore[assignment]
-        self._frames_seen = 0
         if start_node:
             self._engine.start_node = start_node  # type: ignore[union-attr]
-
-    @Slot(int)
-    def set_frame_every(self, every: int) -> None:
-        """每 N 轮发一张预览画面。
-
-        为什么不是每轮都发：截图转 ``QImage`` 要跨线程排队，30 轮/秒地推给界面
-        会把界面线程压满，而人眼在 200ms 内看不出差别。默认每 5 轮一张。
-        """
-        self._frames_every = max(1, every)
 
     # ------------------------------------------------------------------ #
     # 跑
@@ -202,17 +185,6 @@ class EngineWorker(QObject):
         )
         self.ticked.emit(event)
 
-        self._frames_seen += 1
-        if self._frames_seen % self._frames_every:
-            return
-        frame = ctx.current_frame
-        if frame is None:
-            return
-        from .panels.preview import to_qimage
-
-        image = to_qimage(frame)
-        if image is not None:
-            self.frameReady.emit(image, frame.size)
 
 
 def _summarize(report: RunReport) -> str:
