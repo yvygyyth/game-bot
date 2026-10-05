@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
 
 from ..types import ActionResult, Point, Region
@@ -308,7 +308,7 @@ def query_registry() -> dict[str, type]:
     return dict(_REGISTRY)
 
 
-def query_from_dict(data: dict[str, Any]) -> Query:
+def query_from_dict(data: Any) -> Query:
     """把配置里的字典还原成 Query 对象。
 
     支持的形式（YAML 里两种写法都行）::
@@ -316,11 +316,75 @@ def query_from_dict(data: dict[str, Any]) -> Query:
         {type: ImageQuery, template: a.png, confidence: 0.9}
         ImageQuery(template=a.png)
 
-    :raises ValueError: type 缺失或未注册。
+    :raises ValueError: type 缺失 / 未注册 / 字段拼错 / 嵌套结构不对。
+        **拼错一个键就报错，不静默忽略** —— 静默忽略的表现是
+        "这个条件永远成立或永远不成立"，属于最难查的一类配置 bug。
+
+    放在**原子层**（而不是 ``flow.loader``）是有原因的：查询注册表本来就在
+    这里，而且 `PageTree` 的使用者（业务层手写页面树时）也要用它 ——
+    状态层不许 import 流程层（``tests/test_structure.py`` 用 AST 盯着）。
     """
-    raise NotImplementedError(
-        "待实现：按 type 查 _REGISTRY，嵌套 queries 递归构造，region 用 Region.from_dict"
-    )
+    if isinstance(data, str):
+        # 简写：直接给模板名，等价于 ImageQuery(template=...)。
+        # 只对"看图"这一种最常见的条件开这个口子，别的类型一律要写全。
+        return ImageQuery(template=data)
+    if not isinstance(data, dict):
+        raise ValueError(f"查询定义必须是映射(mapping)或模板名字符串，收到: {data!r}")
+
+    payload = dict(data)
+    type_name = str(payload.pop("type", "")).strip()
+    if not type_name:
+        raise ValueError(f"查询定义缺少 type: {data!r}")
+
+    cls = _REGISTRY.get(type_name)
+    if cls is None:
+        known = ", ".join(sorted(_REGISTRY))
+        raise ValueError(f"未登记的查询类型 {type_name!r}。可用的有: {known}")
+
+    nested = payload.get("queries")
+    if isinstance(nested, (list, tuple)):
+        payload["queries"] = tuple(query_from_dict(item) for item in nested)
+    if "query" in payload and isinstance(payload["query"], (dict, str)):
+        payload["query"] = query_from_dict(payload["query"])
+
+    if payload.get("region") is not None:
+        payload["region"] = _region_from_config(payload["region"])
+    if "point" in payload and not isinstance(payload["point"], Point):
+        payload["point"] = _point_from_config(payload["point"])
+
+    allowed = {f.name for f in fields(cls)}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ValueError(
+            f"{type_name} 有未知字段: {', '.join(unknown)}（可用: {sorted(allowed)}）"
+        )
+    return cls(**payload)
+
+
+def _region_from_config(value: Any) -> Region:
+    """``region`` 三种写法都收：``[x,y,w,h]`` / ``{x,y,w,h}`` / ``Region``。"""
+    if isinstance(value, Region):
+        return value
+    if isinstance(value, dict):
+        return Region.from_dict(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 4:
+            raise ValueError(f"region 需要 4 个数字 [x,y,w,h]，收到: {value!r}")
+        return Region.from_tuple(tuple(int(v) for v in value))  # type: ignore[arg-type]
+    raise ValueError(f"region 的写法不认识: {value!r}（用 [x,y,w,h] 或 {{x,y,w,h}}）")
+
+
+def _point_from_config(value: Any) -> Point:
+    """``point`` 三种写法：``[x,y]`` / ``{x,y}`` / ``Point``。"""
+    if isinstance(value, Point):
+        return value
+    if isinstance(value, dict):
+        return Point.from_dict(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ValueError(f"point 需要 2 个数字 [x,y]，收到: {value!r}")
+        return Point.from_tuple(tuple(int(v) for v in value))  # type: ignore[arg-type]
+    raise ValueError(f"point 的写法不认识: {value!r}（用 [x,y] 或 {{x,y}}）")
 
 
 def _color_close(

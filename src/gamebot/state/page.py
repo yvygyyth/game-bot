@@ -45,12 +45,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
+# 帧内组合子（L4）。依赖方向是 state -> atomic，符合分层规则；
+# 它们只在**传进来的帧**上跑查询，不会让状态层自己截图。
+from ..atomic.combinators import find_all_of, find_any_of
 from ..exceptions import StateError
-from ..types import ActionResult, Region
+from ..types import ActionResult, ActionStatus, Region
 from ..utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -78,6 +81,30 @@ UNKNOWN_PAGE: PageId = "unknown"
 认不出来是最常见的真实情况（过场动画、加载、切场景），
 所以每个流程都必须显式定义它的应对方式。"""
 
+DEFAULT_CONFIDENCE = 0.9
+"""没指定阈值时的默认相似度。
+
+单独提出来是为了让"默认值"这件事只有一个出处：``Page.confidence`` 的默认、
+:data:`_UNSET` 的解释、文档里提到的数字都指它。
+"""
+
+
+class _Unset:
+    """"调用方没传这个参数"的哨兵。
+
+    为什么不能拿 ``Page.confidence`` 的默认值 0.9 当"没传"：那样一个页面
+    只要写了 ``confidence=0.95``（最常见的用法）就会把**它下面所有查询**
+    各自的阈值一起覆盖掉 —— 而查询级阈值往往是被实测数据校准过的
+    （名将杀首页给的是 0.55，被 0.9 盖掉会让它在悬浮态直接失配）。
+    参数默认值和"没传"必须是两个不同的东西。
+    """
+
+    __slots__ = ()
+
+
+_UNSET = _Unset()
+"""``locate`` / ``match`` / ``Page`` 内部用来区分"没给 confidence"和"给了 0.9"。"""
+
 
 class PageKind(StrEnum):
     """页面和它父节点的关系。"""
@@ -88,13 +115,31 @@ class PageKind(StrEnum):
     OVERLAY = "overlay"
     """叠加式：父页面依然成立，它只是盖在上面（弹窗、加载遮罩）。"""
 
+    GROUP = "group"
+    """**纯分类节点：自己不记录任何信息，也就不参与匹配。**
+
+    它只做两件事：给子树提供 ROI 继承、把状态组织成树。定位时**直接下探它的
+    子节点**，不要求它自己成立 —— 这一点很关键：要求"父页面成立"会让
+    「首页 → 竞技场 → 战斗」这种链条一进下一层就全部失效，
+    因为上一层的特征已经不在屏幕上了。
+
+    所以：**记录信息的只能是末梢状态节点，父节点一律是 group。**
+    父节点上写 ``queries`` 是配置错误（解析/校验会指出来）；
+    真要表达"中间层也有自己的画面"，就把它建成一个真正的状态节点，
+    再给它挂子状态。
+    """
+
 
 # --------------------------------------------------------------------------- #
 # 页面
 # --------------------------------------------------------------------------- #
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class Page:
     """页面树的一个节点。**只有识别规则，没有行为。**
+
+    只有 :attr:`kind` 是 ``PAGE`` 的节点才记录信息（末梢状态）；
+    ``GROUP`` 是纯分类节点（自己不匹配，直接下探子节点），
+    ``OVERLAY`` 是盖在主状态之上的一层。见 :class:`PageKind`。
 
     :param id: 唯一标识。``add()`` 会按嵌套位置自动推导成路径形式，
         也可以在配置里显式指定。
@@ -104,12 +149,15 @@ class Page:
         用来处理"子页面和父页面长得太像"这类冲突。
     :param roi: 搜索区域，**相对父页面**（None = 与父页面相同）。
         这是树最大的性能收益来源：别整屏匹配。
-    :param confidence: 相似度阈值；具体查询可以各自覆盖。
+    :param confidence: 相似度阈值。**显式传进来才会覆盖页面里各查询自己的阈值**；
+        不传（默认）时每个查询用自己的 —— 查询级阈值通常是被实测校准过的
+        （名将杀首页给的是 0.55），被页面级的 0.9 硬盖掉会让它在悬浮态失配。
+        见 :data:`_UNSET`。
     :param min_stable_frames: 连续命中多少帧才算确认进入。
         >1 能过滤动画过程中的"闪现"（加载类页面建议 2~3）。
         **由跟踪层使用**，本模块的单帧匹配不管它。
     :param priority: 同级之间谁先试。弹窗类给高值。
-    :param kind: 替换式还是叠加式，见 :class:`PageKind`。
+    :param kind: 记录信息的状态 / 纯分类 / 叠加层，见 :class:`PageKind`。
     :param terminal: 终态，进入即结束整个流程（如"游戏已关闭"）。
     :param timeout: 允许在该页面停留的秒数，超了算异常。None = 不限。
     :param name: 人看的名字，进日志。
@@ -121,7 +169,7 @@ class Page:
     queries: tuple[Query, ...] = ()
     exclude: tuple[Query, ...] = ()
     roi: Region | None = None
-    confidence: float = 0.9
+    confidence: float = DEFAULT_CONFIDENCE
     min_stable_frames: int = 1
     priority: int = 0
     kind: PageKind = PageKind.PAGE
@@ -130,6 +178,48 @@ class Page:
     name: str = ""
     description: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+    confidence_explicit: bool = field(default=False, compare=False)
+    """``confidence`` 是作者显式写的，还是默认值。
+
+    只有知道"这个值是不是作者写的"，才能实现"页面阈值只覆盖那些没写自己
+    阈值的查询"（见 :attr:`effective_confidence`）。
+    """
+
+    def __init__(
+        self,
+        id: PageId,
+        queries: tuple[Query, ...] = (),
+        exclude: tuple[Query, ...] = (),
+        roi: Region | None = None,
+        confidence: float | _Unset | None = _UNSET,
+        min_stable_frames: int = 1,
+        priority: int = 0,
+        kind: PageKind = PageKind.PAGE,
+        terminal: bool = False,
+        timeout: float | None = None,
+        name: str = "",
+        description: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        explicit = not isinstance(confidence, _Unset) and confidence is not None
+        object.__setattr__(self, "id", id)
+        object.__setattr__(self, "queries", tuple(queries))
+        object.__setattr__(self, "exclude", tuple(exclude))
+        object.__setattr__(self, "roi", roi)
+        object.__setattr__(
+            self,
+            "confidence",
+            DEFAULT_CONFIDENCE if not explicit else float(confidence),  # type: ignore[arg-type]
+        )
+        object.__setattr__(self, "confidence_explicit", explicit)
+        object.__setattr__(self, "min_stable_frames", min_stable_frames)
+        object.__setattr__(self, "priority", priority)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "terminal", terminal)
+        object.__setattr__(self, "timeout", timeout)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "meta", dict(meta or {}))
 
     @property
     def display(self) -> str:
@@ -140,9 +230,23 @@ class Page:
         return self.kind is PageKind.OVERLAY
 
     @property
+    def is_group(self) -> bool:
+        """纯分类节点：自己不记录信息，也就不参与匹配。"""
+        return self.kind is PageKind.GROUP
+
+    @property
+    def effective_confidence(self) -> float | _Unset:
+        """要传给查询的阈值：没显式写就是"不覆盖"。"""
+        return self.confidence if self.confidence_explicit else _UNSET
+
+    @property
     def has_conditions(self) -> bool:
-        """没有查询条件的页面永远匹配 —— 只有根节点应该这样。"""
-        return bool(self.queries)
+        """这个节点**自己**有没有识别条件。
+
+        ``GROUP`` 永远返回 False —— 它按定义不记录信息。这一点让
+        "父节点是分类"这条纪律变成可校验的：给 group 写 queries 是配置错误。
+        """
+        return bool(self.queries) and not self.is_group
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -434,34 +538,163 @@ class PageTree:
         return region
 
     # ------------------------------------------------------------------ #
-    # 定位
+    # 单页匹配
+    # ------------------------------------------------------------------ #
+    def match(
+        self,
+        frame: Frame,
+        page: Page | PageId,
+        *,
+        roi: Region | None = None,
+        confidence: float | _Unset | None = _UNSET,
+    ) -> ActionResult[dict[str, Any]]:
+        """判断某一页在**这一帧**上成不成立。
+
+        :param roi: 覆盖页面自身的 roi；不传就用 :meth:`effective_roi`。
+        :param confidence: 覆盖查询各自的阈值；**不传则各查询用自己的**。
+            页面显式写的 ``confidence`` 由 :meth:`locate` 传进来
+            （见 :attr:`Page.effective_confidence`）。
+        :return: 命中 ``success(value={"values":..., "scores":...})``；
+            未命中 ``not_found``（message 说明是 exclusions 否决还是哪个查询没中）；
+            查询求值出错 ``error`` —— 这一条**必须**和"未命中"分开：
+            模板路径写错会让这一页永远认不出来，把它当"未命中"排查时
+            会以为游戏画面变了。
+        """
+        target = self._pages.get(page) if isinstance(page, str) else page
+        if target is None:
+            return ActionResult.error(f"页面不存在: {page!r}")
+
+        if roi is None:
+            roi = self.effective_roi(target.id)
+        if isinstance(confidence, _Unset):
+            confidence = target.effective_confidence
+
+        # ① 否决条件优先：exclude 命中就不必再验 queries 了。
+        #    顺序反过来的话，"结算画面"会先被父页面的 queries 认成"战斗中"。
+        if target.exclude:
+            vetoed = find_any_of(frame, list(target.exclude), short_circuit=True)
+            if vetoed.ok:
+                return ActionResult.not_found(
+                    f"{target.id!r} 被 exclude 否决: {vetoed.message}"
+                )
+            if vetoed.status is ActionStatus.ERROR:
+                return ActionResult.error(
+                    f"页面 {target.id!r} 的 exclude 求值出错: {vetoed.message}"
+                )
+
+        # ② 没有 queries 的页面永远命中（pass-through 分组；空壳叶节点由 validate 拦掉）
+        if not target.queries:
+            return ActionResult.success({"values": {}, "scores": {}})
+
+        try:
+            specified = [self._specify(query, roi, confidence) for query in target.queries]
+        except ValueError as exc:
+            # roi 和查询自己的 region 完全不重叠 = 这个页面永远认不出来。
+            # 静默返回"未命中"会把配置错误伪装成游戏画面变了。
+            return ActionResult.error(f"页面 {target.id!r} 的搜索区域自相矛盾: {exc}")
+
+        found = find_all_of(frame, specified)
+        if found.status is ActionStatus.ERROR:
+            return ActionResult.error(f"页面 {target.id!r} 的识别条件求值出错: {found.message}")
+        if not found.ok:
+            return ActionResult.not_found(
+                f"页面 {target.id!r} 的识别条件未全部命中: {found.message}",
+                results=found.meta.get("results"),
+            )
+
+        values: dict[str, Any] = {}
+        scores: dict[str, float] = {}
+        for index, child in enumerate(found.value or []):
+            if not child.ok:
+                continue
+            name = self._label(target.queries[index], index)
+            values[name] = child.value
+            score = child.meta.get("score")
+            if isinstance(score, (int, float)):
+                scores[name] = float(score)
+        return ActionResult.success({"values": values, "scores": scores})
+
+    @staticmethod
+    def _specify(
+        query: Query,
+        roi: Region | None,
+        confidence: float | _Unset | None,
+    ) -> Query:
+        """把页面级的 roi / confidence 具化到单个查询上。
+
+        三件事，缺一个都会出问题：
+
+        1. **roi 和查询自己的 region 求交，谁也不覆盖谁**。覆盖 region 会让
+           脚本作者显式写的框失效；反过来让 region 覆盖 roi，树剪枝（"子页面
+           只看右下角"）就全废了 —— 而那是这棵树最大的性能收益来源；
+        2. **只处理有 ``region`` 字段的查询**（Image/AllImages/Text/AllTexts/
+           Compare）。``PixelQuery`` 用的是 ``point``、``NotQuery`` 里套的是
+           别的查询，强行套 roi 是错的，原样返回；
+        3. **求交为空直接抛**，不静默变成"永远未命中"。
+        """
+        if not hasattr(query, "region"):
+            return query
+
+        region = getattr(query, "region", None)
+        if roi is not None:
+            if region is None:
+                region = roi
+            else:
+                region = roi.intersect(region)
+                if region is None:
+                    return _impossible(query, roi)
+
+        updates: dict[str, Any] = {}
+        if region is not getattr(query, "region", None):
+            updates["region"] = region
+        if not isinstance(confidence, _Unset) and hasattr(query, "confidence"):
+            updates["confidence"] = confidence
+        return replace(query, **updates) if updates else query
+
+    @staticmethod
+    def _label(query: Any, index: int) -> str:
+        """给一个查询起个能在日志里认出来的名字。"""
+        name = getattr(query, "template", None) or getattr(query, "text", None)
+        return str(name) if name else f"query[{index}]"
+
+    # ------------------------------------------------------------------ #
+    # 定位：两条路径
     # ------------------------------------------------------------------ #
     def locate(
         self,
         frame: Frame,
         hint: PageId | None = None,
         *,
+        expected: PageId | None = None,
         now: float = 0.0,
     ) -> ActionResult[PageMatch]:
-        """定位当前帧是哪个页面。
+        """定位当前帧是哪个状态（**快路径**：自顶向下找最深命中）。
+
+        ## 两条路径，别混用
+
+        * **快路径（本方法）**：正常一轮用它。``expected`` 是流程层自己的预期，
+          先精确验它一下；不成再按 ``hint`` 优化过的顺序自顶向下走一遍。
+          代价是"一两次匹配"。
+        * **慢路径（:meth:`recover`）**：自检不过、或者快路径认不出来时才用它。
+          从"最近的末梢"开始逐步扩大范围。代价高，但能把脚本救回来。
+
+        每轮都跑慢路径等于每帧探测全树 —— 那和树存在的意义（剪枝）正好相反。
 
         ## 算法
 
-        1. **起点**：``hint``（一般是上一帧的页面）或所有顶层页面。
-        2. **自顶向下**：先确认顶层，再逐个往下走。某层不成立就退回最近
-           仍然成立的祖先，从那里继续试它的其他子节点。
-        3. **同级按 priority 试**；每个候选的查询都在
-           :meth:`effective_roi` 算出的区域里跑（子页面只看自己那块）。
-        4. 走到走不动为止，**最深**的那个命中节点就是当前页面。
-        5. 再扫一遍叠加层：当前页面的 ``OVERLAY`` 子节点 + 全局叠加层，
-           命中的全部收进 ``PageMatch.overlays``（按优先级降序）。
-        6. 一个都没命中 -> ``success(PageMatch(id=UNKNOWN_PAGE))``。
+        1. **``expected`` 优先**：它就是流程层说的"我应该在这儿"。
+           命中就直接返回它（再扫一遍叠加层），一次匹配解决问题。
+        2. 否则从 ``hint`` 的顶层祖先（或全部顶层）开始，**逐层下探**：
+           ``GROUP`` 分类节点自己不匹配、直接下探子节点；命中的最深的那个
+           **末梢状态**就是当前状态。
+        3. 再扫叠加层：当前状态的 ``OVERLAY`` 子节点 + 全局叠加层。
+        4. 一个都没命中 -> ``success(PageMatch(id=UNKNOWN_PAGE))``。
 
         ## 关键性质
 
-        **``hint`` 只影响尝试顺序，不影响正确性。** 所以即使 hint 完全错了
-        （画面已经跳到别的分支），也能自顶向下重新走对 —— 只是多花几次匹配。
-        这是它敢用 hint 做优化的前提；如果 hint 影响结果，一旦定位错了就永远出不来。
+        **``hint`` / ``expected`` 都不影响正确性。** ``expected`` 只决定
+        "先试谁"，``hint`` 只决定"从哪一支开始试" —— 两者错了都只是多花几次
+        匹配，结果和全量搜索一致。这是敢拿它们做优化的前提。
 
         ## 返回
 
@@ -470,12 +703,273 @@ class PageTree:
         * ``error`` —— 只用于底层真出错（模板文件缺失、Matcher 抛异常）。
           把它当成"认不出来"会把配置错误伪装成游戏行为，极难排查。
         """
-        raise NotImplementedError(
-            "待实现：见 docstring 的 6 步。"
-            "每层的匹配用 combinators.find_all_of(frame, page.queries)"
-            "（AND 语义）先求 exclude 否决，再按 priority 逐层下探，"
-            "最后扫叠加层。"
+        attempts: list[PageAttempt] = []
+
+        # ---- ① 先验流程层的预期（一次匹配） ----
+        if expected and expected in self._pages:
+            page = self._pages[expected]
+            if page.has_conditions:
+                ok, _why, values = self._probe(frame, page, attempts)
+                if ok:
+                    overlays = self._scan_overlays(frame, expected, attempts, seen=set())
+                    return ActionResult.success(
+                        self._build_match(
+                            frame, expected, values, overlays, attempts, now=now
+                        )
+                    )
+
+        # ---- ② 自顶向下（hint 只用来少试几支） ----
+        start_id: PageId | None = None
+        if hint and hint in self._pages and not self._pages[hint].is_overlay:
+            root = hint
+            while self._parent.get(root) is not None:
+                root = self._parent[root]  # type: ignore[assignment]
+            if not self._is_guessable(f"{hint}/"):
+                start_id = root
+
+        roots = self._searchable_children(None)
+        if start_id is not None:
+            roots.sort(key=lambda p: p.id != start_id)
+
+        current_id = UNKNOWN_PAGE
+        current_values: dict[str, Any] = {}
+        hint_verified = False
+        if start_id is not None:
+            page = self._pages.get(start_id)
+            if page is not None:
+                if page.is_group:
+                    # 分类节点：自己不匹配，直接进它的子节点
+                    hint_verified = True
+                    current_id = page.id
+                else:
+                    ok, _why, values = self._probe(frame, page, attempts)
+                    if ok:
+                        current_id, current_values = page.id, values
+                        hint_verified = page.id == hint
+
+        candidates = (
+            self._searchable_children(current_id) if hint_verified else roots
         )
+        while candidates:
+            hit_page: Page | None = None
+            hit_values: dict[str, Any] = {}
+            for page in candidates:
+                ok, _why, values = self._probe(frame, page, attempts)
+                if ok:
+                    hit_page, hit_values = page, values
+                    break
+            if hit_page is None:
+                break
+            current_id, current_values = hit_page.id, hit_values
+            if hit_page.is_group:
+                # 分类节点只是组织结构和 ROI 的载体，不进定位结果
+                current_id = UNKNOWN_PAGE
+            candidates = self._searchable_children(hit_page.id)
+
+        overlays = self._scan_overlays(frame, current_id, attempts, seen=set())
+        return ActionResult.success(
+            self._build_match(frame, current_id, current_values, overlays, attempts, now=now)
+        )
+
+    def recover(
+        self,
+        frame: Frame,
+        near: PageId | None = None,
+        *,
+        now: float = 0.0,
+    ) -> ActionResult[PageMatch]:
+        """**慢路径**：从"最近的末梢"开始逐步扩大范围，把真实状态找出来。
+
+        用途只有一个：**意外时的重定位**（自检不过、或者快路径认不出来）。
+        正常一轮别调它。
+
+        ## 扩散顺序（从近到远，并且从"看得少"到"看得多"）
+
+        ```
+        第 0 圈：near 自己（加上它的叠加层）
+        第 1 圈：它所在分组里的兄弟末梢
+        第 2 圈：上一层分组的全部末梢
+        ……      逐级往上，直到根
+        最后一圈：全局叠加层 + 认不出来
+        ```
+
+        每一圈内部按 **ROI 面积升序** 试 —— "看得少"既更快、也更不容易误判，
+        这个理由和树剪枝的理由是同一个，所以扩散顺序也沿用它。
+
+        :param near: 从哪附近开始找。一般是"我以为我在的那个状态"。
+            给了不存在的 id 就退化成从根开始的全量搜索。
+        :return: 和 :meth:`locate` 同构；认不出来同样是 ``success(UNKNOWN_PAGE)``。
+            ``PageMatch.attempts`` 会记录**每一圈试过谁**，
+            "为什么最后认成了这个"必须能直接读出来。
+        """
+        attempts: list[PageAttempt] = []
+        near_page = self._pages.get(near) if near else None
+
+        # ---- 第 0 圈：near 自己 ----
+        if near_page is not None and near_page.has_conditions:
+            ok, _why, values = self._probe(frame, near_page, attempts)
+            if ok:
+                overlays = self._scan_overlays(frame, near_page.id, attempts, seen=set())
+                return ActionResult.success(
+                    self._build_match(frame, near_page.id, values, overlays, attempts, now=now)
+                )
+
+        # ---- 逐级往上扩散：每层把"这一层分组的全部末梢"试一遍 ----
+        # 起点是 near 的父分组（near 自己已经试过了）；near 不在树里就从根开始。
+        level = self._parent.get(near_page.id) if near_page is not None else None
+        visited_levels: set[PageId | None] = set()
+        while level not in visited_levels:
+            visited_levels.add(level)
+            for page in self._states_below(level, exclude_ids={near} if near else set()):
+                ok, _why, values = self._probe(frame, page, attempts)
+                if ok:
+                    overlays = self._scan_overlays(frame, page.id, attempts, seen=set())
+                    return ActionResult.success(
+                        self._build_match(frame, page.id, values, overlays, attempts, now=now)
+                    )
+            if level is None:
+                break
+            level = self._parent.get(level)
+
+        # ---- 最后一圈：叠加层（主状态认不出来，但可能只是弹了个窗 / 掉线了） ----
+        fallback_overlays = self._scan_overlays(frame, UNKNOWN_PAGE, attempts, seen=set())
+
+        return ActionResult.success(
+            self._build_match(
+                frame, UNKNOWN_PAGE, {}, fallback_overlays, attempts, now=now
+            )
+        )
+
+    # ------------------------------------------------------------------ #
+    # 定位用的内部件
+    # ------------------------------------------------------------------ #
+    def _searchable_children(self, page_id: PageId | None) -> list[Page]:
+        """下一层该试哪些页面。
+
+        排除两类：**叠加层**（它是"盖在某一页上的一层"，由
+        :meth:`_scan_overlays` 单独处理；当成主状态候选的话，一个断线弹窗
+        会把主状态整个顶掉，位置校验随即认为"期望 home、实测 net"）
+        和挂在 group 下的 group（会由它的子节点继续代表）——
+
+        实际上第二个排除不需要写：group 会被正常下探，只是不进结果。
+        见 :meth:`locate` 的循环。
+        """
+        return [p for p in self.children_of(page_id) if not p.is_overlay]
+
+    def _states_below(
+        self, page_id: PageId | None, *, exclude_ids: set[PageId]
+    ) -> list[Page]:
+        """某一层分组的**全部末梢状态**（不含 group / 叠加层），按"看起来更便宜"排序。
+
+        排序目的是让扩散搜索**先试成本低的**（ROI 小 = 匹配像素少）：既快，
+        也更不容易误判。"看得少"是这套设计一贯的偏好。
+        """
+        collected: list[Page] = []
+        queue = list(self._searchable_children(page_id))
+        while queue:
+            page = queue.pop(0)
+            if page.id in exclude_ids:
+                continue
+            if page.is_group:
+                queue.extend(self._searchable_children(page.id))
+                continue
+            if page.queries:
+                collected.append(page)
+        return sorted(collected, key=self._cost)
+
+    def _cost(self, page: Page) -> tuple[int, int, int]:
+        """越小的越先试：ROI 面积 -> 查询个数 -> 深度。"""
+        roi = self.effective_roi(page.id)
+        area = roi.area if roi is not None else 1 << 30
+        return (area, len(page.queries), self.depth_of(page.id))
+
+    def _probe(
+        self,
+        frame: Frame,
+        page: Page,
+        attempts: list[PageAttempt],
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """试一个页面，把痕迹写进 ``attempts``。
+
+        :return: ``(命中?, 说明, values)``。求值出错按**未命中**处理并留下
+            一条带 "求值出错" 的说明 —— 单帧定位没法用返回值表达"这一页的
+            配置坏了"，而整棵树为了一页的配置错误停摆也不对。
+            这种痕迹会出现在 ``PageMatch.attempts`` 里，排查时一眼能看到。
+        """
+        result = self.match(frame, page)
+        if result.status is ActionStatus.ERROR:
+            attempts.append(PageAttempt(page.id, False, result.message))
+            log.warning("页面 %r 识别出错（按未命中处理）: %s", page.id, result.message)
+            return False, result.message, {}
+        if not result.ok:
+            attempts.append(PageAttempt(page.id, False, result.message))
+            return False, result.message, {}
+        payload = result.value or {}
+        scores = payload.get("scores") or {}
+        best = max(scores.values()) if scores else 0.0
+        attempts.append(PageAttempt(page.id, True, "命中", best))
+        return True, "命中", dict(payload.get("values") or {})
+
+    def _scan_overlays(
+        self,
+        frame: Frame,
+        page_id: PageId,
+        attempts: list[PageAttempt],
+        *,
+        seen: set[PageId],
+    ) -> tuple[PageId, ...]:
+        """扫叠加层：当前状态的 ``OVERLAY`` 子节点 + 顶层全局叠加层。
+
+        两者**都收**：前者是"这一页专属的弹窗"，后者是"哪一页都可能出现的
+        弹窗"（断线重连、网络错误）。按 ``priority`` 降序。
+        """
+        candidates: list[Page] = []
+        if page_id != UNKNOWN_PAGE:
+            candidates.extend(self.overlays_of(page_id))
+        candidates.extend(self.global_overlays())
+
+        matched: list[PageId] = []
+        for page in sorted(candidates, key=lambda p: p.priority, reverse=True):
+            if page.id in seen:
+                continue
+            seen.add(page.id)
+            ok, _why, _values = self._probe(frame, page, attempts)
+            if ok:
+                matched.append(page.id)
+        return tuple(matched)
+
+    def _build_match(
+        self,
+        frame: Frame,
+        page_id: PageId,
+        values: dict[str, Any],
+        overlays: tuple[PageId, ...],
+        attempts: list[PageAttempt],
+        *,
+        now: float,
+    ) -> PageMatch:
+        return PageMatch(
+            id=page_id,
+            path=self.path_of(page_id) if page_id != UNKNOWN_PAGE else (),
+            overlays=overlays,
+            confidence=self._pages[page_id].confidence if page_id in self._pages else 0.0,
+            observed_at=now,
+            frame_id=getattr(frame, "frame_id", -1),
+            values=values,
+            attempts=attempts,
+            message="" if page_id != UNKNOWN_PAGE else "没有任何状态命中",
+        )
+
+    def _is_guessable(self, prefix: str) -> bool:
+        """有没有页面的 id 真的以 ``prefix`` 打头（hint 能不能真省下工作）。
+
+        **按 id 前缀判断，而不是按 parent 链**：id 的前缀是硬约束
+        （"a/b" 的子页面只能写成 "a/b/..."），parent 链不是 ——
+        一个页面完全可以写成 ``Page("battle", parent="home")`` 而 id 是
+        ``home/jingji/battle``。按 parent 链判断会以为 hint 下面还有东西，
+        白跑一趟"必然不成立"的确认。
+        """
+        return any(page_id.startswith(prefix) for page_id in self._pages)
 
     # ------------------------------------------------------------------ #
     # 校验（装配期）
@@ -489,10 +983,9 @@ class PageTree:
         2. 没有空 id；
         3. ``min_stable_frames >= 1``、``confidence`` 在 ``(0, 1]`` 之间；
         4. ``roi`` 非 None 时必须非空（``w > 0 and h > 0``）；
-        5. **无识别条件的叶节点** —— 它永远随父页面一起匹配，不带任何信息量，
-           等于空壳（多半是忘了写 ``queries``）。
-           **中间节点允许无条件**：那是合法的 pass-through 分组，
-           只用来挂 ``roi`` 或组织结构；
+        5. **状态节点必须有识别条件**：没有条件的叶节点永远不会被认出来
+           （多半是忘了写 ``queries``）。只想做组织结构就标 ``kind: group`` ——
+           分类节点按定义不记录信息，给它写 ``queries`` 反而是配置错误；
         6. 叠加层不能有子页面 —— 弹窗里再套层级会让定位结果无法解释；
         7. ``terminal`` 页面不该有子页面；
         8. **子页面的 roi 必须落在父页面的有效 roi 内**。roi 是**整棵子树**的
@@ -523,10 +1016,25 @@ class PageTree:
         for page in self._pages.values():
             children = [c for c in self._children.get(page.id, []) if c in self._pages]
 
-            if not children and not page.queries:
+            if page.is_group:
+                # 分类节点按定义**不记录信息**：它只是组织结构和 ROI 的载体。
+                # 给它写 queries 是自相矛盾的配置 —— 那说明作者以为它会参与匹配。
+                if page.queries:
+                    problems.append(
+                        f"分类节点 {page.id!r}（kind: group）不该写 queries —— "
+                        "它自己不参与匹配，只负责组织结构与 ROI 继承。"
+                        "要让它记录信息就把它建成普通状态节点。"
+                    )
+                if not children:
+                    problems.append(
+                        f"分类节点 {page.id!r}（kind: group）没有任何子页面 —— "
+                        "空分组没有任何意义，要么给它加子状态，要么删掉它"
+                    )
+            elif not children and not page.queries:
                 problems.append(
-                    f"页面 {page.id!r} 没有识别条件又是叶节点 —— 它永远随父页面匹配，"
-                    "等于空壳。（只想做分组的话，给它加子页面）"
+                    f"状态节点 {page.id!r} 既没有识别条件又是叶节点 —— "
+                    "它永远不会被认出来（多半是忘了写 queries）。"
+                    "只想做分组的话请标成 kind: group。"
                 )
             if page.is_overlay and children:
                 problems.append(
@@ -587,3 +1095,19 @@ class PageTree:
 
     def __repr__(self) -> str:
         return f"PageTree({len(self._pages)} 个页面, roots={list(self._roots)})"
+
+
+def _impossible(query: Any, roi: Region) -> NoReturn:
+    """页面 roi 和查询自己的 region 完全不重叠时抛出去。
+
+    为什么这必须是**错误**而不是"未命中"：这两块区域都是脚本作者显式写的，
+    交为空说明配置自相矛盾 —— 这一页从此永远认不出来。静默返回 not_found
+    会让现象表现为"这个页面有时候认不出"，而真正的原因是它**从来没有**
+    被搜索过。message 里把两个框都打出来，一眼就能看到错在哪。
+    """
+    mine = getattr(query, "region", None)
+    label = getattr(query, "template", None) or repr(query)
+    raise ValueError(
+        f"页面 roi {roi.to_tuple()} 与查询 {label!r} 的 region "
+        f"{mine.to_tuple() if mine is not None else 'None'} 没有交集"
+    )
