@@ -42,7 +42,7 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 | 当前进度、下一步清单 | `README.md` 的"进度"和"下一步" |
 | 为什么这么分层、有哪些关键决策 | `docs/architecture.md` |
 | **状态树和流程图怎么结合**（关联表、两条定位路径、重定位） | `docs/state-and-flow.md` |
-| 业务层怎么写一个脚本 | `games/README.md` |
+| 业务层怎么写一个脚本（含**运行参数 + 动态表单**） | `games/README.md` |
 | **真机识图怎么调**（阈值、悬浮态、ROI） | `games/mingjiangsha/jingji/README.md` |
 | 界面设计 + 做完之后踩的坑 | `docs/ui.md` |
 | 50 个原子方法的契约 | `docs/atomic-inventory.md` |
@@ -55,7 +55,10 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 执行层（10 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
 （`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与
 `run` / `check` / `describe`、
-**本地控制台**（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程；
+**运行参数**（`ctx.param`：这次运行的输入，跑的过程中不变，和黑板是两件事）、
+**动态表单**（`gamebot/params.py` 声明 + `ui/panels/params.py` 渲染：
+勾选/选择/文本/数字四种控件，按脚本的 `FORM` 生成，值经 `FORM.fill()` 进 `ctx.params`）、
+**本地控制台**（选软件 → 选游戏 → 选脚本 → 调参数 → 开始/停止，引擎跑在工作线程；
 状态树/流程图**真画成图**并点亮当前状态与节点；识图日志 = 每次匹配的带框图 + 表格）、
 **识图记录器**（`vision/recorder.py`：包住 Matcher/TextReader，
 红框=命中 / 橙框=未命中 / 蓝框=搜索范围，一帧一张图、最多留 20 张）。
@@ -102,6 +105,15 @@ python -m games run mingjiangsha/jingji --max-runtime 300
    把算法写进 docstring，而不是留个 `pass`。
 10. **测试放在该放的地方。** 框架的单元测试在 `tests/`；
     业务层脚本没有自己的检查代码 —— 定义和模板由 `games check` 统一查。
+11. **运行参数和黑板是两件东西。** `ctx.param(name, default)` 是**这次运行的
+    输入**（表单 / `--param` / 测试给的），跑的过程中不变、`ctx.reset()` 不清；
+    `ctx.blackboard` 是**跑出来的状态**，一直在变、每次运行开始清。
+    判断方法："用户还没点开始时它就有值了吗？"有 → 参数。
+12. **表单值要现读，不要塞进步骤的构造函数。** 步骤是 `build_scenario()` 里的
+    静态对象，那次调用拿不到表单值。所以走
+    `FORM 声明 → 用户填 → FORM.fill() → ctx.params → 步骤 run() 时 ctx.param(...)`。
+    **步骤里不要再写一遍默认值** —— `fill()` 保证每个声明过的字段都有值，
+    默认值只有 `FORM` 一处出处。
 
 ## 真机相关的注意事项
 

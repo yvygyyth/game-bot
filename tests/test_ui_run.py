@@ -26,6 +26,7 @@ from gamebot.atomic.session import BaseSession
 from gamebot.config.schema import AppConfig, BackendKind
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
+from gamebot.params import FormSpec
 from gamebot.state.page import Page, PageTree
 from gamebot.types import Point
 
@@ -65,12 +66,21 @@ class _Spec:
     """冒充业务层的 ``ScriptSpec``（界面只用到这几个属性/方法）。
 
     假对象要照着真 ``ScriptSpec`` 的接口面补齐，少一个属性界面就会在选择
-    脚本时炸。
+    脚本时炸 —— 而且炸得不明显：``_on_start`` 会提前返回、``_engine_running``
+    一直是 False，于是"等引擎停下来"的用例**没有超时地一直等**（真踩过：
+    跑一次全套用了 8 分钟）。
     """
 
-    def __init__(self, *, max_ticks: int = 3, interval: float = 0.01) -> None:
+    def __init__(
+        self,
+        *,
+        max_ticks: int = 3,
+        interval: float = 0.01,
+        form: FormSpec | None = None,
+    ) -> None:
         self._max_ticks = max_ticks
         self._interval = interval
+        self.form = form or FormSpec()
 
     def build_config(self) -> AppConfig:
         return _config()
@@ -79,7 +89,7 @@ class _Spec:
         return _scenario(max_ticks=self._max_ticks, interval=self._interval)
 
 
-def _entry(max_ticks: int = 3, interval: float = 0.01):
+def _entry(max_ticks: int = 3, interval: float = 0.01, form: FormSpec | None = None):
     from gamebot.ui.registry import ScriptEntry
 
     return ScriptEntry(
@@ -88,7 +98,7 @@ def _entry(max_ticks: int = 3, interval: float = 0.01):
         slug="ui",
         title="假脚本",
         description="界面冒烟用",
-        spec=_Spec(max_ticks=max_ticks, interval=interval),
+        spec=_Spec(max_ticks=max_ticks, interval=interval, form=form),
     )
 
 

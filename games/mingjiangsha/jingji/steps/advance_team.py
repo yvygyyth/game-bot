@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from gamebot.execution.policy import StepPolicy
 
 __all__ = [
-    "CONF_BUTTON",
     "TEAM_ROI",
     "T_ADD_PET",
     "T_CREATE_TEAM",
@@ -41,9 +40,14 @@ T_START_MATCH = "jingji/start_match.png"
 #: 三个按钮都在这儿，而左上角的标题、左边的三个功能按钮都在框外。
 TEAM_ROI = Region(1400, 630, 470, 360)
 
-#: 按钮阈值。实测：自己的图上 1.000，**彼此之间最高 0.690**
-#: （创建队伍 vs 添加伙伴 —— 位置一样、只有文字不同，所以还能差出 0.31）。
-CONF_BUTTON = 0.85
+#: 按钮阈值的默认值。**只作为声明的镜像** —— 真正生效的值来自运行参数
+#: ``jingji.confidence``（表单可调）。实测：自己的图上 1.000、**按钮之间最高
+#: 0.690**（创建队伍 vs 添加伙伴 —— 位置一样、只有文字不同，所以还能差出 0.31），
+#: 所以 0.85 留了很大余量。
+DEFAULT_CONF = 0.85
+
+#: 点完默认等多久（秒）。同样只是镜像，真正的值来自 ``jingji.settle``。
+DEFAULT_SETTLE = 1.0
 
 
 class AdvanceTeamStep(Step):
@@ -60,29 +64,27 @@ class AdvanceTeamStep(Step):
         (T_START_MATCH, "开始匹配"),
     )
 
-    SETTLE = 1.0
-    """点完之后给界面反应的时间（秒）。"""
-
-    def __init__(
-        self, *, settle: float | None = None, policy: StepPolicy | None = None
-    ) -> None:
+    def __init__(self, *, policy: StepPolicy | None = None) -> None:
         super().__init__("推进队伍流程", policy=policy, needs_fresh_frame=True)
-        self.settle = self.SETTLE if settle is None else settle
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
         frame = ctx.frame()
+        # 阈值和等待时间都来自**运行参数**（表单可调）。它们在每次 run 时现读，
+        # 所以同一个步骤对象在两次运行里可以用不同的值。
+        confidence = ctx.param("jingji.confidence", DEFAULT_CONF)
+        settle = ctx.param("jingji.settle", DEFAULT_SETTLE)
         seen: list[str] = []
 
         for template, label in self.SEQUENCE:
-            found = frame.find_image(template, region=TEAM_ROI, confidence=CONF_BUTTON)
+            found = frame.find_image(template, region=TEAM_ROI, confidence=confidence)
             if not found.ok or found.value is None:
-                seen.append(f"{label} 未达 {CONF_BUTTON:.2f}")
+                seen.append(f"{label} 未达 {confidence:.2f}")
                 continue
 
             clicked = actions.click_source_point(ctx.session, found.value)
             if not clicked.ok:
                 return clicked
-            ctx.sleep(self.settle)
+            ctx.sleep(settle)
             ctx.invalidate_frame()
             return ActionResult.success(
                 found.value,

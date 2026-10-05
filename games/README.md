@@ -14,6 +14,7 @@ games/
     ├── templates/                游戏级公共模板
     └── <功能>/                    二级：一个脚本功能一个目录
         ├── __init__.py            ★ build_config() + build_scenario()
+        ├── form.py                动态表单声明（FORM，没人调参数就不用写）
         ├── pages.py               状态（**一个文件就够**，再复杂也别拆）
         ├── graph.py               流程（同上）
         ├── steps/                 ★ 一个步骤一个文件
@@ -148,7 +149,7 @@ python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=60
 | | `ctx.param(name, default)` | `ctx.blackboard` |
 |---|---|---|
 | 是什么 | **入参**：这次运行的输入 | **跑出来的状态** |
-| 谁写 | 外面（命令行 / 界面 / 测试） | 步骤自己 |
+| 谁写 | 外面（表单 / 命令行 / 测试） | 步骤自己 |
 | 跑的过程中变吗 | **不变** | 一直在变 |
 | 每次运行开始时清吗 | **不清** | 清 |
 
@@ -158,6 +159,66 @@ python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=60
 参数名建议点分层级（`"farm.rounds"`），避免和别的脚本/别的用途撞名。
 命令行传的值会尽量转成 int / float / 布尔 —— 否则步骤里拿到字符串，
 `range("5")` 直接炸，而报错点在步骤、跟命令行看不出关系。
+
+## 运行参数的表单（让人能调）
+
+参数有了机制，还得有个**界面**——不然每调一个值都要敲命令行。在功能目录里加
+`form.py` 声明一个 `FORM`，界面上就会出现对应的控件：
+
+```python
+# games/<游戏>/<功能>/form.py
+from gamebot.params import FieldKind, FormSpec, ParamField
+
+FORM = FormSpec(
+    title="竞技场参数",
+    fields=(
+        ParamField("farm.rounds", FieldKind.INT, 1, label="刷几轮",
+                   help="0 = 一直刷", min=0, max=99),
+        ParamField("farm.team", FieldKind.CHOICE, "auto", label="队伍",
+                   choices=(("auto", "自动"), ("main", "主力队"))),
+        ParamField("farm.strict", FieldKind.BOOL, False, label="严格模式"),
+        ParamField("farm.note", FieldKind.TEXT, "", label="备注"),
+    ),
+)
+```
+
+**只有四种控件** —— 想表达更复杂的东西就往文本里塞 JSON，或者别用表单
+（那是代码和命令行的事）：
+
+| 声明 | 控件 | 说明 |
+|---|---|---|
+| `BOOL` | 复选框 | |
+| `INT` / `FLOAT` | 数字输入框 | `min`/`max` **直接设成控件范围**，用户输不进越界值 |
+| `TEXT` | 输入框 | 有长度上限（表单值会进日志） |
+| `CHOICE` | 选择器 | `choices=((值, 显示名), ...)`，传下去的是**值**不是显示名 |
+
+### 三条必须记住的
+
+**1. 声明写错在 `ParamField(...)` 那一行就炸。** 重名、`CHOICE` 没给选项、
+默认值不在选项里、`min > max` …… 全都当场 `ConfigError`，不会拖到用户点了开始。
+
+**2. 值进的是运行参数，不是配置。** 点「开始」时 `FORM.fill(表单值)` 凑一份
+完整参数交给 `ctx.params`，步骤里 `ctx.param("farm.rounds")` 现读：
+
+```
+FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步骤 run() 时现读
+```
+
+所以步骤**不要在构造函数里收表单值**（那是静态的、拿不到），也别给 `ctx.param`
+再写一遍默认值 —— `fill()` 保证每个声明过的字段都有值，**默认值只有 `FORM`
+一处出处**。
+
+**3. 校验只有一份配置。** 控件的范围由 `FORM` 生成，表单提交走
+`FORM.fill()`，命令行 `--param` 走**同一个** `fill()`。两处各写一份的话，
+迟早出现"界面拦得住的、命令行拦不住"，而用户会以为是自己参数写错了。
+
+### 表单里没有的参数照样能用
+
+表单是运行参数的一个**子集入口**，不是唯一出处：
+
+* 表单里有的字段，用户能调；
+* 表单里**没有**的参数（测试注入的假后端、只在代码里传的配置）照样走
+  `ctx.params`，命令行 `--param` 也允许传 —— 那些不受表单约束。
 
 ## 参考实现
 

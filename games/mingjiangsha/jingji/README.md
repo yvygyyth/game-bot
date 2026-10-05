@@ -44,6 +44,31 @@ python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
 模板（运行期真正要用的那几张几十 KB 的小图，在 `templates/`）是**入库**的，
 和 assets 无关。
 
+## 可调的运行参数（`form.py`）
+
+四个值从代码里搬到了表单上 —— 它们全都是"同一次跑和下一次跑可以不一样"的东西，
+写死的代价是**每调一次都要改代码、重启、重跑**：
+
+| 参数 | 默认 | 为什么要能调 |
+|---|---|---|
+| `jingji.rounds` | 1 | 刷几轮 |
+| `jingji.settle` | 1.0 | 点完等多久。网络慢/机器卡就调大 —— 硬编码的时间不是太短就是太长 |
+| `jingji.confidence` | 0.85 | 按钮阈值。实测自己的图上 1.000、按钮之间最高 0.690，所以 0.85 余量大；误认就调高，认不出就调低 |
+| `jingji.strict` | False | 严格模式。调脚本时想看"认不出来就停" |
+
+**它们不在步骤的构造函数里**，而是步骤 `run()` 时用
+`ctx.param("jingji.settle", ...)` 现读。原因是步骤在 `build_scenario()` 里构造、
+那时拿不到表单值 —— 详见 `games/README.md` 的"运行参数的表单"。
+
+界面上是右上角那块（四个控件 + 重置按钮）。命令行同样能覆盖：
+
+```bash
+python -m games run mingjiangsha/jingji --param jingji.rounds=3 --param jingji.strict=true
+```
+
+两条路走**同一个** `FORM.fill()` 做校验 —— 所以不会出现"界面拦得住的、
+命令行拦不住"。
+
 ## 关键设计：一个节点 + 顺序探测，而不是三个节点三条边
 
 竞技场的三个状态**是同一个页面** —— 页面标识（左上角「竞技场」标题）

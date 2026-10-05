@@ -173,15 +173,31 @@ def cmd_run(args: argparse.Namespace) -> int:
     * ``steps`` 里的失败项：哪一步没成、重试了几次。journal 文件里有逐条记录。
     """
     from gamebot.bootstrap import build_context, build_engine
+    from gamebot.exceptions import ConfigError
     from gamebot.execution.journal import JsonlJournal, NullJournal
     from gamebot.flow.engine import StopReason
     from gamebot.utils.logging import setup_logging
 
     spec = get_script(args.script)
-    params, bad = _parse_params(args.param)
+    given, bad = _parse_params(args.param)
     if bad:
         print(f"✗ --param 格式应该是 名字=值，这几条没看懂: {', '.join(bad)}", file=sys.stderr)
         return 2
+
+    # 运行参数走**和界面同一个入口**：``FORM.fill()``。
+    #
+    # 界面那边是"表单值 → fill()"，这里是"--param → fill()"，两条路共用同一份
+    # 声明做校验/转换。各写一份的话迟早出现"界面拦得住的、命令行拦不住"
+    # （或者反过来），而那种不一致查起来很难 —— 用户会以为是自己参数写错了。
+    #
+    # 顺带把**声明的默认值**也补齐：命令行只给一两个参数时，步骤读其它参数
+    # 仍然拿得到值，不必再写一遍默认值。
+    try:
+        params = spec.form.fill(given)
+    except ConfigError as exc:
+        print(f"✗ 参数不对: {exc}", file=sys.stderr)
+        return 2
+
     config = spec.build_config()
     if args.window:
         config.screen.window_title = args.window

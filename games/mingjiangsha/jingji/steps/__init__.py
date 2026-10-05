@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 from .advance_team import (
-    CONF_BUTTON,
     T_ADD_PET,
     T_CREATE_TEAM,
     T_START_MATCH,
@@ -32,7 +31,6 @@ from .advance_team import (
 from .enter_jingji import EnterJingjiStep
 
 __all__ = [
-    "CONF_BUTTON",
     "TEAM_ROI",
     "T_ADD_PET",
     "T_CREATE_TEAM",

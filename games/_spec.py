@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from gamebot.exceptions import ConfigError
+from gamebot.params import FormSpec
 
 if TYPE_CHECKING:
     from gamebot.config.schema import AppConfig
@@ -57,9 +60,53 @@ class ScriptSpec:
     module: str
     build_config: Callable[[], AppConfig]
     build_scenario: Callable[[], Scenario]
+    form: FormSpec = field(default_factory=FormSpec)
+    """动态表单的声明。没有就是空表单（界面上不显示那一块）。
+
+    它在 ``form.py`` 里声明，由 :func:`_read_form` 读进来并**当场校验** ——
+    表单写错了应该在这里报，而不是等用户点了开始。
+    """
 
     def __repr__(self) -> str:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
+
+
+def _read_form(module: Any, key: str, errors: list[tuple[str, str]]) -> FormSpec:
+    """读脚本的 ``form.py`` 里的 ``FORM``。
+
+    只在**功能目录**里找 ``form.py`` —— 游戏级不放表单：表单描述的是
+    "这个脚本这次怎么跑"，而游戏级是所有脚本共用的，放那儿语义不对。
+
+    读不到就当"没有表单"（不是错误：绝大多数脚本不需要它）。
+    读到了但类型不对 → 记进 ``errors``，**不抛异常** —— 一个脚本的表单写错，
+    不该让整个列表页打不开（和注册表里其他项的容错策略一致）。
+    """
+    name = f"{module.__name__}.form"
+    try:
+        form_module = importlib.import_module(name)
+    except ModuleNotFoundError as exc:
+        # 只有"form 模块本身不存在"才算没有表单；它内部 import 失败要报出来
+        if exc.name != name:
+            errors.append((key, f"form.py 导入失败: {exc}"))
+        return FormSpec()
+    except Exception as exc:
+        errors.append((key, f"form.py 导入失败: {type(exc).__name__}: {exc}"))
+        return FormSpec()
+
+    form = getattr(form_module, "FORM", None)
+    if form is None:
+        return FormSpec()
+    if not isinstance(form, FormSpec):
+        errors.append(
+            (key, f"form.py 里的 FORM 应该是 FormSpec，实际是 {type(form).__name__}")
+        )
+        return FormSpec()
+    try:
+        form.validate()
+    except ConfigError as exc:
+        errors.append((key, f"表单声明有问题: {exc}"))
+        return FormSpec()
+    return form
 
 
 _SCRIPTS: dict[str, ScriptSpec] | None = None
@@ -173,6 +220,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             module=module_name,
             build_config=build_config,
             build_scenario=build_scenario,
+            form=_read_form(module, key, errors),
         )
 
     _SCRIPTS = found

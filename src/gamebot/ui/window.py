@@ -42,6 +42,7 @@ from .panels.controls import ControlsBar
 from .panels.diagram import DiagramPanel
 from .panels.info import InfoPanel
 from .panels.logview import LogView
+from .panels.params import ParamsPanel
 from .panels.recognition import RecognitionPanel
 from .registry import ScriptDetails, ScriptEntry, load_details, load_scripts
 from .shortcuts import SHORTCUTS, Keymap
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self.diagram = DiagramPanel(self)
         self.recognition = RecognitionPanel(self)
         self.workspace = self._make_workspace()
+        self.params = ParamsPanel(self)
         self.info = InfoPanel(self)
         self.logview = LogView(self.bridge, self)
 
@@ -115,7 +117,21 @@ class MainWindow(QMainWindow):
         """
         upper = QSplitter(Qt.Orientation.Horizontal, self)
         upper.addWidget(self.workspace)
-        upper.addWidget(self.info)
+
+        # 右栏是**竖着叠的两个面板**（运行参数在上、运行状态在下），整栏当作
+        # 横 splitter 的**第二块**。
+        #
+        # 别把它们直接 addWidget 到这个横 splitter 上：那样是**三块**，而
+        # setSizes 只给两个值的话第三块会被压成 0 宽、直接看不见 ——
+        # 「运行状态」就这么消失过一次（没有任何报错）。
+        side = QSplitter(Qt.Orientation.Vertical, self)
+        side.addWidget(self.params)
+        side.addWidget(self.info)
+        side.setStretchFactor(0, 0)  # 参数块按内容高度，别抢
+        side.setStretchFactor(1, 1)  # 多出来的高度都给运行状态
+        side.setSizes([260, 520])
+        upper.addWidget(side)
+
         upper.setStretchFactor(0, 3)
         upper.setStretchFactor(1, 2)
         upper.setSizes([760, 430])
@@ -240,6 +256,7 @@ class MainWindow(QMainWindow):
         self._entry = entry
         if entry is None:
             self._details = None
+            self.params.set_form(None)
             self.info.set_details(None, None)
             self.diagram.set_scenario(None)
             self.recognition.set_recorder(None)
@@ -249,6 +266,7 @@ class MainWindow(QMainWindow):
 
         details = load_details(entry)
         self._details = details
+        self.params.set_form(entry.spec.form if entry.spec is not None else None)
         self.info.set_details(entry, details)
 
         # 左边那两个图要的是 Scenario 对象（不是文字），所以在这里真的构造一次。
@@ -387,6 +405,22 @@ class MainWindow(QMainWindow):
             log.exception("装配失败")
             return
 
+        # 表单值在这里**读一次**（数据单向：表单是唯一的改值处）。
+        # fill() 会把"用户没动过的字段"补上声明里的默认值，所以步骤那边
+        # ctx.param(...) 一定拿得到值，不必再写一遍默认值 —— 默认值只有
+        # FORM 一处出处，两处迟早不一致。
+        #
+        # 校验失败理论上不该发生（控件层已经卡住范围了）。真失败也只弹框：
+        # 那说明声明和控件的行为对不上，是要修的 bug，不该静默拿个错值往下跑。
+        try:
+            params = entry.spec.form.fill(self.params.values())
+        except Exception as exc:
+            self._info_box("参数不对", f"{type(exc).__name__}: {exc}")
+            log.exception("表单值校验失败")
+            return
+        if params:
+            log.info("运行参数: %s", params)
+
         missing = check_templates(config, scenario)
         if missing:
             self._info_box(
@@ -410,6 +444,7 @@ class MainWindow(QMainWindow):
                 journal=journal,
                 recorder=self._recorder,
                 scenario_options=scenario.options,
+                params=params,
             )
             engine = build_engine(config, ctx, scenario)
         except Exception as exc:
