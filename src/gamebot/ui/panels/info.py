@@ -13,14 +13,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QLabel,
-    QPlainTextEdit,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ..registry import NodeEntry, ScriptDetails, ScriptEntry
-from ..theme import monospace
 
 __all__ = ["InfoPanel"]
 
@@ -78,6 +75,7 @@ class InfoPanel(QWidget):
         self._node_page = QLabel("—", self)
         self._node_steps = QLabel("—", self)
         self._node_edges = QLabel("—", self)
+        self._node_page.setWordWrap(True)
         node_form = QFormLayout()
         node_form.addRow("期望状态", self._node_page)
         node_form.addRow("步骤数", self._node_steps)
@@ -86,30 +84,15 @@ class InfoPanel(QWidget):
         node_layout = QVBoxLayout(node_box)
         node_layout.addLayout(node_form)
 
-        # ---- 状态树 / 流程图 / 检查输出 ----
-        self._tree = self._readonly()
-        self._graph = self._readonly()
-        self._report = self._readonly()
-        tabs = QTabWidget(self)
-        tabs.addTab(self._tree, "状态树")
-        tabs.addTab(self._graph, "流程图")
-        tabs.addTab(self._report, "检查输出")
-
+        # **故意没有**"状态树 / 流程图 / 检查输出"那三页了：
+        # 左边就是那三页，而且能画成图、能点。这里再放一份是把同一份数据
+        # 在两个地方各显示一遍 —— 占位置，还会让人以为是两份不同的东西。
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(run_box)
         layout.addWidget(summary)
         layout.addWidget(node_box)
-        layout.addWidget(tabs, 1)
-
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def _readonly() -> QPlainTextEdit:
-        widget = QPlainTextEdit()
-        widget.setReadOnly(True)
-        widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        monospace(widget)
-        return widget
+        layout.addStretch(1)
 
     # ------------------------------------------------------------------ #
     # 运行状态
@@ -154,8 +137,6 @@ class InfoPanel(QWidget):
             self._scale.setText("—")
             self._unclaimed.setText("—")
             self._roots.setText("—")
-            self._tree.setPlainText("")
-            self._graph.setPlainText("")
             return
 
         self._title.setText(f"{entry.title}   ({entry.key})")
@@ -169,10 +150,6 @@ class InfoPanel(QWidget):
             else "无（分类节点和叠加层不需要节点）"
         )
         self._roots.setText("\n".join(details.template_roots) or "—")
-        self._tree.setPlainText(details.tree_text)
-        self._graph.setPlainText(details.graph_text)
-        if details.problems:
-            self.show_report("定义有问题", list(details.problems))
 
     def set_node(self, node: NodeEntry | None) -> None:
         """换起始节点。"""
@@ -184,11 +161,3 @@ class InfoPanel(QWidget):
         self._node_page.setText(node.page or "（不绑定状态 —— 不做校验）")
         self._node_steps.setText(str(node.steps))
         self._node_edges.setText(str(node.out_edges))
-
-    def show_report(self, title: str, lines: list[str]) -> None:
-        """把检查 / 自检的结果写进"检查输出"页。"""
-        body = "\n".join(lines) if lines else "（无输出）"
-        self._report.setPlainText(f"== {title} ==\n{body}")
-        tabs = self.findChild(QTabWidget)
-        if tabs is not None:
-            tabs.setCurrentIndex(2)

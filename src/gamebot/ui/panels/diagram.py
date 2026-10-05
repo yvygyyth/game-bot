@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -372,7 +374,13 @@ class FlowDiagramView(_Diagram):
 
 
 class DiagramPanel(QWidget):
-    """状态树 / 流程图 两页，带上"回到当前"和缩放。"""
+    """状态树 / 流程图：上面画图、下面同时给**完整文字版**。
+
+    为什么两个都给：图能一眼看出结构（谁连着谁、当前在哪一格），
+    但图里放不下细节 —— 节点 id 长了要省略、ROI 数值、边的优先级、
+    "这个状态有没有节点认领"。文字版一行不漏，翻起来慢但**信息全**。
+    两个上下摆着看，比在两页之间来回切要省事。
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -386,21 +394,42 @@ class DiagramPanel(QWidget):
 
         self._hint = QLabel("—", self)
         self._hint.setStyleSheet("color:#8ab4f8;")
+        self._hint.setWordWrap(True)
         monospace(self._hint)
+
+        self._text = QPlainTextEdit(self)
+        self._text.setReadOnly(True)
+        self._text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._text.setToolTip("完整文字版：一行不漏（图里放不下的细节都在这）")
+        monospace(self._text)
 
         bar = QHBoxLayout()
         bar.addWidget(self._which)
         bar.addWidget(self._hint, 1)
 
-        self._stack = QVBoxLayout()
-        self._stack.addWidget(self._tree_view)
-        self._stack.addWidget(self._graph_view)
+        views = QWidget(self)
+        views_layout = QVBoxLayout(views)
+        views_layout.setContentsMargins(0, 0, 0, 0)
+        views_layout.addWidget(self._tree_view)
+        views_layout.addWidget(self._graph_view)
         self._graph_view.hide()
+
+        # 用 splitter 而不是固定高度：用户自己决定"多看结构"还是"多看文字"。
+        # 文字那块给够最小高度（约 5 行），免得被压成一条缝 —— 那正是
+        # 上一版"信息被吃掉"的原因（PageTree 只显示了前两行）。
+        vertical = QSplitter(Qt.Orientation.Vertical, self)
+        vertical.addWidget(views)
+        vertical.addWidget(self._text)
+        vertical.setStretchFactor(0, 2)
+        vertical.setStretchFactor(1, 2)
+        views.setMinimumHeight(150)
+        self._text.setMinimumHeight(110)
+        vertical.setSizes([280, 175])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addLayout(bar)
-        layout.addLayout(self._stack, 1)
+        layout.addWidget(vertical, 1)
 
     def set_scenario(self, scenario: Scenario | None) -> None:
         self._scenario = scenario
@@ -419,6 +448,7 @@ class DiagramPanel(QWidget):
         if scenario is None:
             self._tree_view.show_tree(None)
             self._graph_view.show_graph(None)
+            self._text.setPlainText("（没有场景：先选一个脚本）")
             self._hint.setText("—")
             return
         self._tree_view.show_tree(
@@ -428,6 +458,7 @@ class DiagramPanel(QWidget):
             overlay_pages=overlays,
         )
         self._graph_view.show_graph(scenario.graph, current=current_node)
+        self._text.setPlainText(_describe(scenario, current_page, current_node))
         if current_page or current_node:
             where = current_page or "unknown"
             expect = current_node_page or "（不校验）"
@@ -439,3 +470,30 @@ class DiagramPanel(QWidget):
         self._tree_view.setVisible(index == 0)
         self._graph_view.setVisible(index == 1)
         (self._tree_view if index == 0 else self._graph_view).reset_view()
+
+
+def _describe(scenario: Any, current_page: str, current_node: str) -> str:
+    """完整文字版：树 + 图 + 当前位置。
+
+    ``tree.describe()`` / ``graph.describe()`` 是状态层和流程层自己提供的
+    权威描述 —— 界面**不再自己拼**一份，避免"界面说的"和"定义实际内容"
+    两套说法（那会让人不知道该信哪个）。
+    """
+    tree = scenario.tree
+    graph = scenario.graph
+    lines = [
+        tree.describe(),
+        "",
+        graph.describe(),
+        "",
+        "── 当前 ──",
+        f"  状态  {current_page or 'unknown'}",
+        f"  节点  {current_node or '（未运行）'}",
+    ]
+    if current_node:
+        node = graph.node(current_node)
+        if node is not None:
+            edges = len(graph.out_edges(current_node))
+            lines.append(f"  期望  {node.page or '（不校验状态）'}")
+            lines.append(f"  步骤  {len(node.steps)} 个 / 出边 {edges} 条")
+    return "\n".join(lines)

@@ -146,7 +146,8 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget(self)
         tabs.addTab(self.diagram, "状态 / 流程")
         tabs.addTab(self.recognition, "识图日志")
-        tabs.addTab(self._check_output_view(), "检查输出")
+        self._check_page = self._check_output_view()
+        tabs.addTab(self._check_page, "检查输出")
         tabs.setCurrentIndex(0)
         return tabs
 
@@ -230,7 +231,6 @@ class MainWindow(QMainWindow):
         if not entries:
             msg = note or "没有发现任何脚本"
             log.warning(msg)
-            self.info.show_report("脚本列表为空", [msg])
             self._show_check_output("脚本列表为空", [msg])
             self._status.setText("没有可用脚本")
             return
@@ -433,7 +433,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             lines.append(f"✗ {type(exc).__name__}: {exc}")
 
-        self.info.show_report(f"检查 {entry.key}", lines)
         self._show_check_output(f"检查 {entry.key}", lines)
         for line in lines:
             log.info("[check] %s", line)
@@ -443,7 +442,6 @@ class MainWindow(QMainWindow):
         if entry is None or entry.spec is None:
             return
         if entry.spec.selftest is None:
-            self.info.show_report(f"自检 {entry.key}", ["· 这个脚本没有 selftest()"])
             return
         lines: list[str] = []
         try:
@@ -459,7 +457,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             lines.append(f"✗ {type(exc).__name__}: {exc}")
 
-        self.info.show_report(f"自检 {entry.key}", lines)
         self._show_check_output(f"自检 {entry.key}", lines)
         for line in lines:
             log.info("[selftest] %s", line)
@@ -569,7 +566,6 @@ class MainWindow(QMainWindow):
             lines.append("")
             lines.append("错误:")
             lines.extend(f"  {message}" for message in errors[:10])
-        self.info.show_report("本次运行", lines)
         self._show_check_output("本次运行", lines)
 
         self._release_run()
@@ -581,7 +577,6 @@ class MainWindow(QMainWindow):
         self.controls.set_running(False)
         self.controls.note_runnable(True)
         self._status.setText("运行出错")
-        self.info.show_report("运行出错", [message])
         self._show_check_output("运行出错", [message])
         self._release_run()
         log.error("引擎出错: %s", message)
@@ -605,14 +600,15 @@ class MainWindow(QMainWindow):
         log.info("[%s] %s", title, body)
 
     def _show_check_output(self, title: str, lines: list[str]) -> None:
-        """把检查/自检/运行结论也写到左上「检查输出」那一页。
+        """把检查/自检/运行结论写到「检查输出」那一页，并切过去。
 
-        和右侧 InfoPanel 里那份是同一份数据：那边小、顺手看；
-        这边占满宽，看长输出（缺一堆模板文件时）不费眼。
+        **只在这一处显示**：以前右侧面板里还有一份一模一样的（小的），
+        同一份数据两处显示会让人以为是两份不同的东西，而且右边那份还占掉了
+        大半屏。现在检查结果只有这一个位置。
         """
         body = "\n".join(lines) if lines else "（无输出）"
         self._check_view.setPlainText(f"== {title} ==\n{body}")
-        self.workspace.setCurrentWidget(self._check_view.parentWidget())
+        self.workspace.setCurrentWidget(self._check_page)
 
     def _warn_about_unimplemented(self) -> None:
         log.info("=" * 60)
