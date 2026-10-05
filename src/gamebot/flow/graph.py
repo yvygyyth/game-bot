@@ -104,9 +104,20 @@ class Node:
 
     :param id: 唯一标识。建议和页面同名（``"home/qianli/battle"``），好对照。
     :param steps: 每次轮到这个节点时执行的步骤，按顺序。空列表 = 纯等待/观察节点。
-    :param page: **期望处于哪个页面**（``PageId``）；None = 不检查。
-        实际定位到的页面和它不符时，引擎应该**拒绝执行 steps** ——
-        这是防止在错误页面上乱点的第一道闸。见 ``docs/state-and-flow.md``。
+    :param page: **声明"我负责哪个状态"**（``PageId``）；None = 不声明，也就不校验。
+
+        这一个字段有三个用途，全都由 :class:`gamebot.flow.binding.StateBinding`
+        实现（那是两侧唯一的桥）：
+
+        1. **动前校验**：实测状态和它不符时拒绝执行 steps —— 防止在错误页面上乱点；
+        2. **重定位去向**：状态层报出真实锚点后，靠它反查"该落到哪个节点"；
+        3. **动后预期**：节点跑完，当前"预期状态"跟着游标变成它的 ``page``。
+
+        不写它的节点就是"纯逻辑/纯等待"节点：不校验、不参与重定位，
+        流程图因此可以只写正常流程。见 ``docs/state-and-flow.md``。
+    :param priority: 多个节点声明同一个 ``page`` 时谁是**主节点**。
+        重定位必须落到唯一一个节点上，所以同状态多节点时要能选出主节点：
+        取 ``priority`` 最大者，并列时取先声明的。
     :param on_enter: 进入该节点时执行一次（进入 = 从别的节点切过来）。
     :param on_exit: 离开该节点时执行一次。
     :param max_visits: 一轮运行中最多执行几次；``0`` = 不限。
@@ -121,6 +132,7 @@ class Node:
     id: NodeId
     steps: list[Step] = field(default_factory=list)
     page: PageId | None = None
+    priority: int = 0
     on_enter: list[Step] = field(default_factory=list)
     on_exit: list[Step] = field(default_factory=list)
     max_visits: int = 0
@@ -148,6 +160,7 @@ class Node:
         return {
             "id": self.id,
             "page": self.page,
+            "priority": self.priority,
             "steps": len(self.steps),
             "on_enter": len(self.on_enter),
             "on_exit": len(self.on_exit),
