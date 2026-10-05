@@ -69,21 +69,22 @@ class _Spec:
     假对象要照着补齐。
     """
 
-    def __init__(self, *, max_ticks: int = 3) -> None:
+    def __init__(self, *, max_ticks: int = 3, interval: float = 0.01) -> None:
         self._max_ticks = max_ticks
+        self._interval = interval
         self.prepare = None
 
     def build_config(self) -> AppConfig:
         return _config()
 
     def build_scenario(self) -> Scenario:
-        return _scenario(max_ticks=self._max_ticks)
+        return _scenario(max_ticks=self._max_ticks, interval=self._interval)
 
     def selftest(self) -> list[str]:
         return []
 
 
-def _entry():
+def _entry(max_ticks: int = 3, interval: float = 0.01):
     from gamebot.ui.registry import ScriptEntry
 
     return ScriptEntry(
@@ -92,7 +93,7 @@ def _entry():
         slug="ui",
         title="假脚本",
         description="界面冒烟用",
-        spec=_Spec(),
+        spec=_Spec(max_ticks=max_ticks, interval=interval),
     )
 
 
@@ -135,6 +136,51 @@ def ui(qt_app, tmp_path, monkeypatch):
     try:
         yield main, entry, real_build
     finally:
+        main.close()
+        qt_app.processEvents()
+
+
+@pytest.fixture
+def ui_long(qt_app, tmp_path, monkeypatch):
+    """和 ``ui`` 一样，但脚本是"跑不完"的。
+
+    为什么必须单独一个：要验"停止真的停得住"，场景就**不能自己跑完** ——
+    否则"最后停了"可能是 ``max_ticks`` 干的，测试变假绿（这正是原来那条用例
+    的问题：它设 ``max_ticks=3``，几十毫秒自己就完了，断言却只写"最终会停"）。
+    这里 ``max_ticks=5000``、轮间隔 20ms，正常情况下它绝不会在测试时限内跑完，
+    所以"停了"只可能是被我们停的。
+    """
+    from gamebot import bootstrap as bs
+    from gamebot.ui import window as win_mod
+
+    entry = _entry(max_ticks=5000, interval=0.02)
+    monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
+    monkeypatch.setattr(win_mod, "load_details", win_mod.load_details)
+
+    def fake_session(config, *, recorder=None):
+        matcher = FakeMatcher(matches={"home.png": (Point(1, 1), 0.99)})
+        if recorder is not None:
+            matcher = recorder.wrap_matcher(matcher)
+        return BaseSession(
+            build_fake_backends(size=(640, 360)),
+            matcher=matcher,
+            reader=recorder.wrap_reader(FakeReader()) if recorder else FakeReader(),
+        )
+
+    monkeypatch.setattr(bs, "build_session_from_config", fake_session)
+    monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: [])
+
+    main = win_mod.MainWindow()
+    main.resize(900, 700)
+    main.show()
+    qt_app.processEvents()
+    try:
+        yield main, entry, None
+    finally:
+        # 关窗自己会请求停止；这里兜一层，别让用例失败时留个还在转的线程
+        if main._engine_running:
+            main._request_engine_stop()
+            _wait_until(qt_app, lambda: not main._engine_running)
         main.close()
         qt_app.processEvents()
 
@@ -230,3 +276,84 @@ class TestButtonWiring:
         assert not main.controls.window.isEnabled()
         _wait_until(qt_app, lambda: not main._engine_running)
         assert main.controls.script.isEnabled()
+
+
+class TestStopping:
+    """「停止」必须真的停得住 —— 这条曾经是假绿的。
+
+    ## 踩过的坑（别再犯）
+
+    ``_on_stop`` 原来发一个**队列信号**让引擎线程去执行 ``request_stop``。
+    队列连接的槽要等目标线程回到事件循环才投递，而引擎线程正卡在
+    ``engine.run()`` 那个阻塞循环里 —— 停止请求永远排队、永远不执行。
+    表现：点了停止，脚本照跑。
+
+    ## 为什么原来的测试没发现
+
+    那个用例的场景设了 ``max_ticks=3``，**它自己几十毫秒就跑完了**；
+    断言只写"最终会停" —— 不管是我停的还是它自己跑完的，都过。
+    所以这里必须两样都验：
+
+    1. 请求停止时**引擎还在跑**（还没跑完）；
+    2. 结束原因是 ``user``，不是 ``max_ticks``。
+    """
+
+    @staticmethod
+    def _stop_and_wait(qt_app, main, timeout: float = 3.0) -> float:
+        started = time.monotonic()
+        main._on_stop()
+        assert _wait_until(qt_app, lambda: not main._engine_running, timeout), "停止没生效"
+        return time.monotonic() - started
+
+    def test_stop_interrupts_a_running_engine(self, qt_app, ui_long) -> None:
+        """跑到一半点停止：立刻停，且原因是 user。"""
+        main, _, _ = ui_long
+        main._on_start()
+
+        # 等它真的跑起来（至少两轮），这时它离 max_ticks 还远
+        assert _wait_until(
+            qt_app,
+            lambda: main._engine_worker.engine is not None
+            and main._engine_worker.engine.report.ticks >= 2,
+        ), "引擎没跑起来"
+        report = main._engine_worker.engine.report
+        assert report.ticks < 200, "还没到 max_ticks，所以下面停下来一定是被停的"
+
+        elapsed = self._stop_and_wait(qt_app, main)
+
+        assert elapsed < 1.0, f"停止花了 {elapsed:.2f}s，太慢"
+        assert main._last_report is not None
+        assert main._last_report.stop_reason.value == "user", (
+            f"结束原因是 {main._last_report.stop_reason}，说明它不是被停止的"
+        )
+
+    def test_stop_reaches_the_session_so_sleeps_are_interrupted(self, qt_app, ui_long) -> None:
+        """中止标志必须写到 **Session** 上。
+
+        ``engine.stop()`` 只设自己的标志位是不够的：``ctx.sleep()`` 要能被立刻
+        唤醒，看的是 ``session`` 上那个 ``Event``。只设引擎的，就得等当前这一觉
+        睡满才停 —— 节点声明了 cooldown 时那就是好几秒。
+        """
+        main, _, _ = ui_long
+        main._on_start()
+        assert _wait_until(qt_app, lambda: main._engine_worker.engine is not None)
+
+        engine = main._engine_worker.engine
+        main._request_engine_stop()
+
+        assert engine.ctx.session.stop_requested, "中止标志没写到 session 上"
+        _wait_until(qt_app, lambda: not main._engine_running)
+
+    def test_close_while_running_stops_and_does_not_hang(self, qt_app, ui_long) -> None:
+        """跑着关窗：得停下来收摊，不能卡在 wait(5000)。"""
+        main, _, _ = ui_long
+        main._on_start()
+        assert _wait_until(qt_app, lambda: main._engine_worker.engine is not None)
+
+        started = time.monotonic()
+        main.close()
+        qt_app.processEvents()
+        elapsed = time.monotonic() - started
+
+        assert main._engine_running is False
+        assert elapsed < 4.0, f"关窗花了 {elapsed:.2f}s，可能卡在等引擎退出"

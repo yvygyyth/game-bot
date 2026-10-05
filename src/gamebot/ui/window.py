@@ -185,24 +185,21 @@ class MainWindow(QMainWindow):
     def _start_engine_thread(self) -> None:
         """引擎线程：只跑 ``FlowEngine.run()`` 那一个阻塞循环。
 
-        三条连接各有理由：
+        两条连接各有理由：
 
-        * ``configure`` **直连**（不是队列连接）—— 它只是赋值，必须在界面线程
-          执行完再去触发 ``run``。走队列的话"配置好了没"和"开始跑"会变成两个
-          互不知情的异步事件，偶发地先跑后配；
-        * ``run`` 走**队列连接**，由 ``_engineTickRelay`` 触发 ——
-          这就是"把阻塞循环甩到工作线程"的那一步；
-        * ``request_stop`` 也走队列，但即使它被直接调用也是安全的：
-          它只设一个标志位。
+        * ``run`` 走**队列连接**，由 ``_engineTickRelay`` 触发 —— 这就是"把阻塞
+          循环甩到工作线程"的那一步。**这个方向是对的**：发信号时引擎线程还空着
+          （事件循环在转），所以事件能立刻被投递；
+        * **停止不走信号**（这条以前写错过）：反方向发信号意味着"要等引擎线程回到
+          事件循环"，而它正卡在 ``run()`` 里 —— 停止请求会永远排队。所以停止是
+          界面线程**直接调** ``engine.stop()``，见 :meth:`_on_stop`。
         """
         self._engine_thread = QThread(self)
         self._engine_worker = EngineWorker()
         self._engine_worker.moveToThread(self._engine_thread)
         self._engineTickRelay = _SignalRelay(self)
-        self._engineStopRelay = _SignalRelay(self)
 
         self._engineTickRelay.triggered.connect(self._engine_worker.run)
-        self._engineStopRelay.triggered.connect(self._engine_worker.request_stop)
         self._engine_worker.ticked.connect(self._on_tick)
         self._engine_worker.finished.connect(self._on_engine_finished)
         self._engine_worker.failed.connect(self._on_engine_failed)
@@ -549,14 +546,40 @@ class MainWindow(QMainWindow):
         log.info("开始运行 %s（起始节点 %s）", entry.key, node_id or scenario.graph.initial)
 
     def _on_stop(self) -> None:
-        """请求停止。引擎在下一次 sleep 时被唤醒（毫秒级），不杀线程。"""
+        """请求停止。**直接在界面线程调 ``engine.stop()``**，不走队列信号。
+
+        ## 这里踩过一个坑，别"优化"回去
+
+        原来的写法是 ``self._engineStopRelay.triggered.emit()``，想靠队列连接把
+        ``request_stop`` 排到引擎线程去执行。**那是错的，而且是致命的**：
+
+        队列连接的槽要等**目标线程回到事件循环**才会被投递，而引擎线程正卡在
+        ``engine.run()`` 那个阻塞循环里，永远回不到事件循环。于是停止请求一直
+        排队、永远不执行 —— 表现就是"点了停止，脚本照跑"。
+
+        ``engine.stop()`` 本来就只是设个标志位 + 写 ``Session`` 上的中止事件
+        （``threading.Event``），**它本身就是线程安全的**，从任意线程直接调都对。
+        绕一层信号不仅没好处，还把唯一能停下来的那条路堵死了。
+
+        以后要加"重试/确认"之类的东西，在这条**直接调用**上加，别改回信号。
+        """
         if not self._engine_running:
             log.info("「停止」被点了，当前没有在跑的脚本")
             return
         self.controls.stop_btn.setEnabled(False)
         self.controls.stop_btn.setToolTip("正在等引擎退出这一轮……")
         self._status.setText("正在停止……")
-        self._engineStopRelay.triggered.emit()
+        self._request_engine_stop()
+
+    def _request_engine_stop(self) -> None:
+        """请求停止的**唯一入口**：按钮、Esc、关窗都走它。
+
+        直接调而不是发信号 —— 理由见 :meth:`_on_stop` 的 docstring。
+        """
+        engine = self._engine_worker.engine
+        if engine is None:
+            return
+        engine.stop()
 
     @Slot(object, str)
     def _on_engine_finished(self, report: object, summary: str) -> None:
@@ -715,7 +738,9 @@ class MainWindow(QMainWindow):
         """
         log.info("界面关闭，正在收摊……")
         if self._engine_running:
-            self._engineStopRelay.triggered.emit()
+            # 和按钮走同一个入口（**直接调**，不发信号）—— 发信号的话这里也会
+            # 卡住，然后 wait(5000) 超时、窗口"关不掉"。
+            self._request_engine_stop()
 
         # 引擎线程：让它把当前这一轮跑完（ctx.sleep 会被停止请求立刻唤醒）
         self._engine_thread.quit()

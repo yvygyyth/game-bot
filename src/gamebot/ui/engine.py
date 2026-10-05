@@ -169,6 +169,17 @@ class EngineWorker(QObject):
     def running(self) -> bool:
         return self._running
 
+    @property
+    def engine(self) -> FlowEngine | None:
+        """当前装着的那台引擎（还没配置就是 ``None``）。
+
+        界面用它来**直接请求停止**：``engine.stop()`` 只设标志位、线程安全，
+        从界面线程调是对的。反过来"发个队列信号让引擎线程去调"是错的 ——
+        引擎线程正卡在 ``run()`` 里，队列里的槽永远等不到执行
+        （``window._on_stop`` 的 docstring 里记了这次踩坑）。
+        """
+        return self._engine
+
     # ------------------------------------------------------------------ #
     # 每轮回调（在**本线程**里执行，由 engine.run 调用）
     # ------------------------------------------------------------------ #
