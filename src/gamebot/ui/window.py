@@ -19,13 +19,15 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
-from PySide6.QtCore import QMetaObject, QObject, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QImage
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -36,10 +38,12 @@ from ..utils.logging import get_logger
 from .engine import EngineWorker
 from .logbridge import LogBridge
 from .panels.controls import ControlsBar
+from .panels.diagram import DiagramPanel
 from .panels.info import InfoPanel
 from .panels.logview import LogView
-from .panels.preview import CaptureWorker, PreviewPanel
+from .panels.recognition import RecognitionPanel
 from .registry import ScriptDetails, ScriptEntry, load_details, load_scripts
+from .theme import monospace
 
 log = get_logger("ui.window")
 
@@ -68,6 +72,7 @@ class MainWindow(QMainWindow):
         self._engine_running = False
         self._run_ctx: Any = None
         self._run_journal: Any = None
+        self._recorder: Any = None
 
         self.setWindowTitle(_WINDOW_TITLE)
 
@@ -75,9 +80,11 @@ class MainWindow(QMainWindow):
         self.bridge = LogBridge(maxlen=2000)
         self.bridge.attach()
 
-        # ---- 三块面板 ----
+        # ---- 面板 ----
         self.controls = ControlsBar(self)
-        self.preview = PreviewPanel(self)
+        self.diagram = DiagramPanel(self)
+        self.recognition = RecognitionPanel(self)
+        self.workspace = self._make_workspace()
         self.info = InfoPanel(self)
         self.logview = LogView(self.bridge, self)
 
@@ -85,9 +92,7 @@ class MainWindow(QMainWindow):
         self._status.setStyleSheet("color:#7f8c8d; padding:2px 6px;")
 
         self._build_layout()
-        self._make_capture_thread()
         self._wire()
-        self._start_capture_thread()
         self._start_engine_thread()
 
         # ---- 首次填充 ----
@@ -102,12 +107,18 @@ class MainWindow(QMainWindow):
     # 布局
     # ------------------------------------------------------------------ #
     def _build_layout(self) -> None:
+        """上面是"看它怎么想"的标签页，下面是日志大框。
+
+        **没有实时画面了**（用户反馈：实时画面看不出问题）。取而代之的是
+        「状态 / 流程」「识图日志」「检查输出」三页 —— 它们回答的是
+        "它认到的是哪一块、为什么这么走"，而不是"屏幕现在长什么样"。
+        """
         upper = QSplitter(Qt.Orientation.Horizontal, self)
-        upper.addWidget(self.preview)
+        upper.addWidget(self.workspace)
         upper.addWidget(self.info)
         upper.setStretchFactor(0, 3)
         upper.setStretchFactor(1, 2)
-        upper.setSizes([700, 460])
+        upper.setSizes([760, 430])
 
         lower = QWidget(self)
         lower_layout = QVBoxLayout(lower)
@@ -130,16 +141,33 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._status)
         self.setCentralWidget(central)
 
-    def _banner(self) -> QLabel:
-        """一条常驻提示：把"哪些按钮现在还不能用"说在前面。
+    def _make_workspace(self) -> QTabWidget:
+        """左上那三页：状态/流程图・识图日志・检查输出。"""
+        tabs = QTabWidget(self)
+        tabs.addTab(self.diagram, "状态 / 流程")
+        tabs.addTab(self.recognition, "识图日志")
+        tabs.addTab(self._check_output_view(), "检查输出")
+        tabs.setCurrentIndex(0)
+        return tabs
 
-        比让用户逐个去试要好 —— 阶段 1 的界面上确实有灰按钮，
-        与其让人以为是 bug，不如直接说清。
-        """
+    def _check_output_view(self) -> QWidget:
+        """「检查输出」页：把 InfoPanel 的检查结果也在这边放一份大图看。"""
+        holder = QWidget(self)
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(6, 6, 6, 6)
+        self._check_view = QPlainTextEdit(holder)
+        self._check_view.setReadOnly(True)
+        self._check_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        monospace(self._check_view)
+        layout.addWidget(self._check_view, 1)
+        return holder
+
+    def _banner(self) -> QLabel:
+        """一条常驻提示：把"怎么用、现在是什么模式"说在前面。"""
         label = QLabel(
-            "阶段 1：选脚本 / 看画面 / 看日志已可用；"
-            "「开始」还没接线 —— 引擎侧（状态定位 + 主循环 + 执行器）已经就绪，"
-            "但界面还没把「开始」接到 FlowEngine.run() 上（阶段 2）。",
+            "① 选软件（右边会显示客户区坐标）→ ② 选游戏 → ③ 选脚本 → 「▶ 开始」。"
+            "跑起来后左边看「状态 / 流程」哪一格亮了、「识图日志」里它认到了哪一块"
+            "（红框 = 命中，橙框 = 没中，蓝框 = 搜索范围）。",
             self,
         )
         label.setWordWrap(True)
@@ -170,8 +198,7 @@ class MainWindow(QMainWindow):
 
         self._engineTickRelay.triggered.connect(self._engine_worker.run)
         self._engineStopRelay.triggered.connect(self._engine_worker.request_stop)
-        self._engine_worker.frameReady.connect(self._on_engine_frame)
-        self._engine_worker.ticked.connect(self.info.set_run_state)
+        self._engine_worker.ticked.connect(self._on_tick)
         self._engine_worker.finished.connect(self._on_engine_finished)
         self._engine_worker.failed.connect(self._on_engine_failed)
 
@@ -182,47 +209,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def _wire(self) -> None:
         self.controls.scriptChanged.connect(self._on_script_changed)
-        self.controls.nodeChanged.connect(self.info.set_node)
+        self.controls.nodeChanged.connect(self._on_node_changed)
         self.controls.windowChanged.connect(self._on_window_changed)
         self.controls.checkRequested.connect(self._run_check)
         self.controls.selftestRequested.connect(self._run_selftest)
         self.controls.startRequested.connect(self._on_start)
         self.controls.stopRequested.connect(self._on_stop)
-
-        self.preview.intervalChanged.connect(self._on_interval_changed)
-        self.preview.liveChanged.connect(self._on_live_changed)
-        self.preview.grabRequested.connect(self._request_grab)
+        self.controls.grabRequested.connect(self._grab_annotated)
 
         # 注意：日志信号由 LogView 在它自己的构造里接上（那块归它管）。
         # 这里**不要**再连一次 —— 连两次的话每条日志会被追加两遍。
-
-        # 跨线程：窗口 -> 抓帧线程 / 引擎线程
-        self.configureSource.connect(self._worker.configure)
-
-    def _make_capture_thread(self) -> None:
-        """造工作线程与三个"把值发给它"的中继信号。
-
-        中继先建、后接线：``PreviewPanel`` 在构造时就会发一次
-        ``intervalChanged``（它把下拉框设成默认值），那时中继必须已经存在。
-        """
-        self._thread = QThread(self)
-        self._worker = CaptureWorker(interval_ms=self.preview.interval_ms)
-        self._worker.moveToThread(self._thread)
-        self._grabRelay = _SignalRelay(self)
-        self._intervalRelay = _SignalRelay(self)
-        self._liveRelay = _SignalRelay(self)
-
-    def _start_capture_thread(self) -> None:
-        self._thread.started.connect(self._worker.start)
-        self._worker.frameReady.connect(self._on_frame)
-        self._worker.failed.connect(self._on_capture_failed)
-        self._worker.sourceReady.connect(self.preview.set_source_label)
-
-        self._grabRelay.triggered.connect(self._worker.grab_once)
-        self._intervalRelay.value.connect(self._worker.set_interval)
-        self._liveRelay.flag.connect(self._worker.set_live)
-
-        self._thread.start()
+        # 实时画面已经去掉：用户反馈"看不出问题"，能看出问题的是带框的识图记录。
 
     # ------------------------------------------------------------------ #
     # 脚本
@@ -234,6 +231,7 @@ class MainWindow(QMainWindow):
             msg = note or "没有发现任何脚本"
             log.warning(msg)
             self.info.show_report("脚本列表为空", [msg])
+            self._show_check_output("脚本列表为空", [msg])
             self._status.setText("没有可用脚本")
             return
         if initial_script and not self.controls.select_script(initial_script):
@@ -246,28 +244,54 @@ class MainWindow(QMainWindow):
         if entry is None:
             self._details = None
             self.info.set_details(None, None)
+            self.diagram.set_scenario(None)
+            self.recognition.set_recorder(None)
             self.controls.set_nodes(())
             self.controls.set_runnable(False, "先选一个脚本")
-            # 也要重建抓屏会话：这时改用配置文件里的设置（通常是真后端），
-            # 于是"不选脚本"就能单纯看画面。忘了这一句的话预览会一直
-            # 停留在上一个脚本的后端上（表现是"切了脚本画面没变"）。
             self._request_source()
             return
 
         details = load_details(entry)
         self._details = details
         self.info.set_details(entry, details)
+
+        # 左边那两个图要的是 Scenario 对象（不是文字），所以在这里真的构造一次。
+        # 静态构造不碰游戏窗口，出错也不影响选择 —— 出错就画空白图 + 记日志。
+        scenario = None
+        try:
+            if entry.spec is not None:
+                scenario = entry.spec.build_scenario()
+        except Exception as exc:
+            log.warning("构造 %s 的场景失败，图将画不出来: %s", entry.key, exc)
+        self.diagram.set_scenario(scenario)
+
+        # 识别记录器：**界面自己造一个并一直用**（换脚本才换）。
+        # 理由是这样"抓一张"和"开始运行"写的是同一份记录、同一个列表 ——
+        # 否则每次开始运行都会新建一个记录器，界面上那栏会莫名其妙清空。
+        # 构造它只是建目录 + 计数器，不碰游戏窗口。
+        try:
+            from ..bootstrap import build_recorder
+
+            config_for_recorder = entry.spec.build_config() if entry.spec else None
+            self._recorder = (
+                build_recorder(config_for_recorder) if config_for_recorder else None
+            )
+        except Exception as exc:
+            log.warning("造识别记录器失败（识图日志将不可用）: %s", exc)
+            self._recorder = None
+        self.recognition.set_recorder(self._recorder)
+
         self.controls.set_nodes(
             details.node_list,
             enabled=bool(details.node_list),
         )
-        self.controls.set_runnable(False, "界面还没接到 FlowEngine.run()（阶段 2）")
+        self.controls.set_runnable(True, "开始运行（会操作游戏）")
         if details.problems:
             self._status.setText(f"{entry.key}: 定义有问题（见「检查输出」）")
             log.warning("脚本 %s 的定义有问题: %s", entry.key, details.problems)
         else:
             self._status.setText(
-                f"{entry.key}: {details.pages} 页面 / {details.nodes} 节点 / "
+                f"{entry.key}: {details.pages} 状态 / {details.nodes} 节点 / "
                 f"{details.edges} 边"
             )
         self._request_source()
@@ -301,41 +325,83 @@ class MainWindow(QMainWindow):
         """
         config = self._current_config()
         if config is None:
-            self.preview.show_error("没有可用的配置")
+            self._status.setText("没有可用的配置")
             return
         self.configureSource.emit(config, title or self.controls.window_title)
 
-    @Slot(QImage, float, tuple, int)
-    def _on_frame(self, image: QImage, elapsed: float, size: tuple, seq: int) -> None:
-        self.preview.show_frame(image, elapsed, size, seq)
+    @Slot(object)
+    def _on_tick(self, event: object) -> None:
+        """每轮刷新：状态面板 + **把当前状态/节点在图上点亮**。"""
+        self.info.set_run_state(event)
+        self.diagram.refresh(
+            current_page=getattr(event, "page", ""),
+            current_node=getattr(event, "node", ""),
+            current_node_page=getattr(event, "expected", ""),
+            overlays=tuple(getattr(event, "overlays", ())),
+        )
 
-    @Slot(object, tuple)
-    def _on_engine_frame(self, image: QImage, size: tuple) -> None:
-        """引擎那一帧也送去预览。
+    def _on_node_changed(self, node: object) -> None:
+        """换起始节点：右侧显示它的详情，左侧图上**预点亮**它。
 
-        引擎跑起来时抓帧线程已经被静音（``_liveRelay.flag.emit(False)``），
-        所以不会两边同时往预览里塞画面 —— 那会让人看到画面在"闪两套图"。
-
-        耗时填 0：这一帧是引擎**已经截好并用过**的，量它的抓帧耗时没有意义，
-        预览那行文字留着显示尺寸和计数。
+        这样点「开始」之前就能看清"我要从哪一格起跑"，而不是跑起来才知道。
         """
-        self.preview.show_frame(image, 0.0, size, 0)
+        self.info.set_node(node)
+        node_id = getattr(node, "node_id", "") or ""
+        page = getattr(node, "page", "") or ""
+        self.diagram.refresh(current_node=node_id, current_node_page=page)
 
-    @Slot(str)
-    def _on_capture_failed(self, message: str) -> None:
-        self.preview.show_error(message)
-        log.error(message)
+    # ------------------------------------------------------------------ #
+    # 抓一张（带框）
+    # ------------------------------------------------------------------ #
+    def _grab_annotated(self) -> None:
+        """截一帧，把**当前脚本的所有查询**跑一遍，并把框画出来存下。
 
-    @Slot(int)
-    def _on_interval_changed(self, interval_ms: int) -> None:
-        self._intervalRelay.value.emit(interval_ms)
+        为什么不复用"实时预览"：预览每 200ms 就抓一张、还不查任何模板，
+        存出来的图是没有框的，等于没用。这里抓完就跑一遍状态树上的查询，
+        于是图上会真的有框 —— 这才是"我能直接看到它识别到的区域"。
+        """
+        entry = self._entry
+        if entry is None or entry.spec is None:
+            self._info_box("先选脚本", "「抓一张」要按某份定义去查，先选一个脚本。")
+            return
+        try:
+            config = entry.spec.build_config()
+            config.screen.window_title = self.controls.window_title or config.screen.window_title
+            scenario = entry.spec.build_scenario()
+            from ..bootstrap import build_context
 
-    @Slot(bool)
-    def _on_live_changed(self, on: bool) -> None:
-        self._liveRelay.flag.emit(on)
+            ctx = build_context(config, scenario=scenario, recorder=self._recorder)
+        except Exception as exc:
+            self._info_box("抓不了", f"{type(exc).__name__}: {exc}")
+            log.exception("抓帧失败")
+            return
 
-    def _request_grab(self) -> None:
-        self._grabRelay.triggered.emit()
+        try:
+            frame = ctx.frame()
+            tree = scenario.tree
+            # 在整帧上按每个状态自己的 ROI 跑一遍它的查询 —— 走的就是引擎
+            # 定位时用的那条路，所以框出来的区域就是"它判定状态时看的区域"。
+            for page in tree.pages():
+                if page.is_group:
+                    continue
+                for query in page.all_queries:
+                    query.evaluate(frame)
+            recorder = getattr(ctx, "recorder", None)
+            path = recorder.annotate_now(frame, reason=f"手动抓帧 {entry.key}") if recorder else ""
+        except Exception as exc:
+            self._info_box("抓不了", f"{type(exc).__name__}: {exc}")
+            log.exception("抓帧失败")
+            return
+        finally:
+            ctx.close()
+
+        self.recognition.refresh(force=True)
+        self.workspace.setCurrentWidget(self.recognition)
+        if path:
+            self._status.setText(f"已存带框的图: {path}")
+            log.info("手动抓帧已存: %s", path)
+        else:
+            self._status.setText("抓到了帧，但没存图（vision.record 关了？）")
 
     # ------------------------------------------------------------------ #
     # 检查 / 自检
@@ -368,6 +434,7 @@ class MainWindow(QMainWindow):
             lines.append(f"✗ {type(exc).__name__}: {exc}")
 
         self.info.show_report(f"检查 {entry.key}", lines)
+        self._show_check_output(f"检查 {entry.key}", lines)
         for line in lines:
             log.info("[check] %s", line)
 
@@ -393,6 +460,7 @@ class MainWindow(QMainWindow):
             lines.append(f"✗ {type(exc).__name__}: {exc}")
 
         self.info.show_report(f"自检 {entry.key}", lines)
+        self._show_check_output(f"自检 {entry.key}", lines)
         for line in lines:
             log.info("[selftest] %s", line)
 
@@ -442,7 +510,9 @@ class MainWindow(QMainWindow):
             config.paths.resolve(config.paths.journals) / f"{entry.slug}.jsonl"
         )
         try:
-            ctx = build_context(config, scenario=scenario, journal=journal)
+            ctx = build_context(
+                config, scenario=scenario, journal=journal, recorder=self._recorder
+            )
             engine = build_engine(config, ctx, scenario)
         except Exception as exc:
             journal.close()
@@ -458,8 +528,6 @@ class MainWindow(QMainWindow):
         self._status.setText(f"运行中：{entry.key}")
         self.info.set_run_state(None)
 
-        # 预览交给引擎（它自己抓帧），别再让 CaptureWorker 抢同一个后端
-        self._liveRelay.flag.emit(False)
         self._engine_worker.configure(ctx, engine, node_id)
         self._engine_tick_relay.triggered.emit()
         log.info("开始运行 %s（起始节点 %s）", entry.key, node_id or scenario.graph.initial)
@@ -481,9 +549,8 @@ class MainWindow(QMainWindow):
         self.controls.set_running(False)
         self.controls.note_runnable(True)
         self.controls.stop_btn.setToolTip("还没在跑")
-        self.preview.set_live_enabled(True)
-        self._liveRelay.flag.emit(self.preview.live)
-
+        self.recognition.refresh(force=True)
+        # 图上把"最后停在哪一格"留着，不清空 —— 停下之后最想看的就是它
         self._status.setText(summary)
 
         lines = [report.summary()]  # type: ignore[attr-defined]
@@ -503,6 +570,7 @@ class MainWindow(QMainWindow):
             lines.append("错误:")
             lines.extend(f"  {message}" for message in errors[:10])
         self.info.show_report("本次运行", lines)
+        self._show_check_output("本次运行", lines)
 
         self._release_run()
         log.info("运行结束: %s", summary)
@@ -512,10 +580,9 @@ class MainWindow(QMainWindow):
         self._engine_running = False
         self.controls.set_running(False)
         self.controls.note_runnable(True)
-        self.preview.set_live_enabled(True)
-        self._liveRelay.flag.emit(self.preview.live)
         self._status.setText("运行出错")
         self.info.show_report("运行出错", [message])
+        self._show_check_output("运行出错", [message])
         self._release_run()
         log.error("引擎出错: %s", message)
 
@@ -537,6 +604,16 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, title, body)
         log.info("[%s] %s", title, body)
 
+    def _show_check_output(self, title: str, lines: list[str]) -> None:
+        """把检查/自检/运行结论也写到左上「检查输出」那一页。
+
+        和右侧 InfoPanel 里那份是同一份数据：那边小、顺手看；
+        这边占满宽，看长输出（缺一堆模板文件时）不费眼。
+        """
+        body = "\n".join(lines) if lines else "（无输出）"
+        self._check_view.setPlainText(f"== {title} ==\n{body}")
+        self.workspace.setCurrentWidget(self._check_view.parentWidget())
+
     def _warn_about_unimplemented(self) -> None:
         log.info("=" * 60)
         log.info("控制台：选软件 -> 选游戏 -> 选脚本 -> 开始 / 停止")
@@ -547,20 +624,14 @@ class MainWindow(QMainWindow):
     # 生命周期
     # ------------------------------------------------------------------ #
     def closeEvent(self, event: QCloseEvent) -> None:
-        """关窗前把工作线程和日志 handler 收干净。
+        """关窗前把引擎线程和日志 handler 收干净。
 
-        顺序很重要：先请求停止、等引擎真的退出，再收抓帧线程和日志 handler。
+        顺序很重要：先请求停止、等引擎真的退出，再摘日志 handler。
         反过来的话，工作线程可能还会往一个已经断开的桥上发日志。
         """
         log.info("界面关闭，正在收摊……")
         if self._engine_running:
             self._engine_stop_relay.triggered.emit()
-
-        QMetaObject.invokeMethod(
-            self._worker, "shutdown", Qt.ConnectionType.BlockingQueuedConnection
-        )
-        self._thread.quit()
-        self._thread.wait(3000)
 
         # 引擎线程：让它把当前这一轮跑完（ctx.sleep 会被停止请求立刻唤醒）
         self._engine_thread.quit()

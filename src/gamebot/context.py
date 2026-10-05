@@ -71,6 +71,12 @@ class RunContext:
         self.executor = executor
         self.pages = pages or PageTracker(tree)
         self.blackboard = blackboard or Blackboard()
+        self.recorder: Any = None
+        """识别记录器（``vision/recorder.py``）。装配期由 ``bootstrap`` 挂上。
+
+        界面从它拿"识图日志"和带框的图；引擎结束前调 ``recorder.flush()``
+        把最后一帧落盘。**没开记录时是 ``None``**，用它的地方都要判空。
+        """
         self._clock = clock or time.perf_counter
         self._frame: Frame | None = None
         self._frame_at: float = 0.0

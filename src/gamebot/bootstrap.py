@@ -36,6 +36,7 @@ from .flow.engine import FlowEngine, RunReport
 from .flow.loader import load_scenario
 from .flow.scenario import Scenario
 from .utils.logging import get_logger, setup_logging
+from .vision.recorder import RecognitionRecorder
 
 log = get_logger("bootstrap")
 
@@ -45,6 +46,7 @@ __all__ = [
     "build_engine",
     "build_matcher",
     "build_reader",
+    "build_recorder",
     "build_session_from_config",
     "check_config_paths",
     "check_templates",
@@ -55,11 +57,14 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # 视觉部件
 # --------------------------------------------------------------------------- #
-def build_matcher(config: AppConfig) -> Matcher:
+def build_matcher(config: AppConfig, recorder: Any = None) -> Matcher:
     """造模板匹配实现（OpenCV ``matchTemplate``）。
 
     ``preload=True``：启动时把模板目录整个读进内存。好处是第一次查询不会卡一下，
     坏处是模板路径写错时启动就炸 —— 这正是我们想要的（早炸早发现）。
+
+    :param recorder: 识别记录器。给了就把 Matcher **包一层**（记录每次匹配并
+        画框存图），原子层完全不知道这件事存在。见 ``vision/recorder.py``。
 
     :raises TemplateNotFoundError: 预加载时遇到损坏的模板文件。
     """
@@ -81,36 +86,40 @@ def build_matcher(config: AppConfig) -> Matcher:
         matcher.grayscale,
         matcher.use_pyramid,
     )
-    return matcher
+    return recorder.wrap_matcher(matcher) if recorder is not None else matcher
 
 
-def build_reader(config: AppConfig) -> TextReader:
+def build_reader(config: AppConfig, recorder: Any = None) -> TextReader:
     """造 OCR 实现。``ocr_engine == "none"`` 时返回退化实现（不报错）。
 
     这是刻意的：找图能撑起绝大多数游戏脚本，OCR 是加分项。
     没装 OCR 就整个跑不起来，是很糟糕的体验。
+
+    :param recorder: 识别记录器；给了就包一层（OCR 的框也画出来）。
     """
     engine = config.vision.ocr_engine.lower()
     if engine in ("none", "", "off"):
         log.info("未启用 OCR，find_text / read_text 将返回 not_found")
-        return UnavailableTextReader("config.vision.ocr_engine = none")
+        reader: TextReader = UnavailableTextReader("config.vision.ocr_engine = none")
+        return recorder.wrap_reader(reader) if recorder is not None else reader
 
     if engine == "rapid":
         from .vision.ocr import RapidOcrReader
 
-        reader = RapidOcrReader(lang=config.vision.ocr_lang)
+        rapid = RapidOcrReader(lang=config.vision.ocr_lang)
         if config.meta.get("ocr_warmup", True):
             # 第一次 OCR 要加载 onnx 模型（几秒），挪到启动阶段，别让流程误判超时
-            reader.warmup()
-        return reader
+            rapid.warmup()
+        return recorder.wrap_reader(rapid) if recorder is not None else rapid
 
     if engine == "tesseract":
         from .vision.ocr import TesseractReader
 
-        return TesseractReader(
+        tess = TesseractReader(
             tesseract_cmd=str(config.meta.get("tesseract_cmd", "")),
             lang="eng" if config.vision.ocr_lang == "en" else "eng+chi_sim",
         )
+        return recorder.wrap_reader(tess) if recorder is not None else tess
 
     raise ConfigError(
         f"未知 OCR 引擎: {config.vision.ocr_engine!r}（可选 none / rapid / tesseract）"
@@ -120,8 +129,38 @@ def build_reader(config: AppConfig) -> TextReader:
 # --------------------------------------------------------------------------- #
 # Session
 # --------------------------------------------------------------------------- #
-def build_session_from_config(config: AppConfig) -> Session:
-    """按配置装配 Session（含后端选择与坐标映射）。"""
+def build_recorder(
+    config: AppConfig,
+    *,
+    on_record: Any = None,
+) -> RecognitionRecorder | None:
+    """按配置造识别记录器（``vision.record`` 关了就是 ``None``）。
+
+    存图目录用 ``paths.screenshots``（和失败帧、手工截图同一个目录）——
+    清理时只删本框架写的 ``match_*.png``，不会碰到别的图。
+    """
+    if not config.vision.record:
+        log.info("未启用识图记录（config.vision.record = false）")
+        return None
+    recorder = RecognitionRecorder(
+        directory=config.paths.resolve(config.paths.screenshots),
+        keep=config.vision.record_keep,
+        on_record=on_record,
+    )
+    log.info("识图记录已启用: 最多留 %d 张带框的图 → %s", recorder.keep, recorder.directory)
+    return recorder
+
+
+def build_session_from_config(
+    config: AppConfig,
+    *,
+    recorder: RecognitionRecorder | None = None,
+) -> Session:
+    """按配置装配 Session（含后端选择与坐标映射）。
+
+    :param recorder: 识别记录器。给了就把 Matcher / Reader 各包一层，
+        于是**这个 Session 上的所有查询**都会被记下来（不用在每个调用点插桩）。
+    """
     screen = config.screen
     kwargs: dict[str, Any] = {}
     if screen.backend is BackendKind.WINDOWS:
@@ -142,8 +181,8 @@ def build_session_from_config(config: AppConfig) -> Session:
 
     session = build_session(
         screen.backend.value,
-        matcher=build_matcher(config),
-        reader=build_reader(config),
+        matcher=build_matcher(config, recorder),
+        reader=build_reader(config, recorder),
         logic_size=screen.logic_size,
         **kwargs,
     )
@@ -235,13 +274,20 @@ def build_context(
     session: Session | None = None,
     journal: Journal | None = None,
     hooks: ExecutorHooks | None = None,
+    recorder: RecognitionRecorder | None = None,
 ) -> RunContext:
     """装配 RunContext（含 Session 与 Executor）。
 
     ``scenario`` 用来构造状态跟踪器 —— 跟踪器需要状态树才能查
     ``min_stable_frames`` / ``timeout``。没给就是一棵空树（跟踪器退化，但仍可用）。
+
+    :param recorder: 识别记录器。不传时**按配置自动造一个**
+        （``vision.record`` 为假则是 ``None``）；界面会从 ``ctx.recorder`` 拿它
+        来显示"识图日志"和带框的图。
     """
-    session = session or build_session_from_config(config)
+    if recorder is None and config.vision.record:
+        recorder = build_recorder(config)
+    session = session or build_session_from_config(config, recorder=recorder)
     ctx = RunContext(
         session,
         config,
@@ -254,6 +300,7 @@ def build_context(
         journal=journal or NullJournal(),
         dry_run=config.dry_run,
     )
+    ctx.recorder = recorder
     return ctx
 
 

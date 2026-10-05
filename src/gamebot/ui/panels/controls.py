@@ -61,6 +61,7 @@ class ControlsBar(QWidget):
     selftestRequested = Signal()
     startRequested = Signal()
     stopRequested = Signal()
+    grabRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -114,6 +115,13 @@ class ControlsBar(QWidget):
         self.selftest_btn.setToolTip("跑脚本自带的自检（检查定义本身对不对）")
         self.selftest_btn.clicked.connect(self.selftestRequested.emit)
 
+        self.grab_btn = QPushButton("抓一张", self)
+        self.grab_btn.setToolTip(
+            "截一帧，按当前脚本把每个状态的查询跑一遍，并把命中的区域用红框画出来存下。\n"
+            "跑脚本之前用它确认「它到底认的是哪一块」—— 这是调 ROI 和阈值最快的办法。"
+        )
+        self.grab_btn.clicked.connect(self.grabRequested.emit)
+
         self.start_btn = QPushButton("▶ 开始", self)
         self.start_btn.clicked.connect(self.startRequested.emit)
         self.stop_btn = QPushButton("■ 停止", self)
@@ -146,6 +154,7 @@ class ControlsBar(QWidget):
         step2.addWidget(self.node, 1)
 
         actions = QHBoxLayout()
+        actions.addWidget(self.grab_btn)
         actions.addWidget(self.check_btn)
         actions.addWidget(self.selftest_btn)
         actions.addStretch(1)

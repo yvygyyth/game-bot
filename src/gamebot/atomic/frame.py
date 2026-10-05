@@ -52,6 +52,29 @@ def _unbound() -> ActionResult[Any]:
     return ActionResult.error("当前帧未绑定 Session，无法查询（请用 session.capture() 创建帧）")
 
 
+def _mark_frame(frame: Frame) -> None:
+    """把"当前帧的原点 + 帧号"写给记录层。
+
+    记录层（``vision/recorder.py`` 的 ``_MatcherTap`` / ``_ReaderTap``）包在
+    Matcher / TextReader 外面，它拿到的只有一个图像数组 —— 不知道这张图在
+    源分辨率里的位置，也不知道自己属于哪一帧。而：
+
+    * **框要画对地方**就必须加原点（ROI 裁剪过的帧原点是负的/非零的）；
+    * **同一帧的记录要攒成一张图**就必须知道帧号。
+
+    所以由帧自己在查询前声明。用 ``ContextVar`` 存（每线程独立），
+    抓帧线程和引擎线程各查各的不会互相串。
+
+    **失败一律吞掉**：这是个旁路记录，绝不能因为它让识图挂掉。
+    """
+    try:
+        from ..vision.recorder import set_frame_context
+
+        set_frame_context(frame.origin.x, frame.origin.y, frame.frame_id)
+    except Exception:  # pragma: no cover - 记录层的问题不该影响识图
+        return
+
+
 class Frame:
     """一张截图 + 它的查询接口。
 
@@ -163,6 +186,10 @@ class Frame:
                 f"搜索区域为空: {region!r}", elapsed=perf_counter() - started, template=template
             )
 
+        # 告诉记录层"这张图的原点在哪、是哪一帧"。它在 Matcher 外面那层包装里读，
+        # 用来把框换算回源坐标、以及把同一帧的多条记录攒成一张图。
+        _mark_frame(self)
+
         try:
             found: MatchResult | None = matcher.match(
                 self._image,
@@ -225,6 +252,7 @@ class Frame:
         matcher = self._matcher()
         if matcher is None:
             return _unbound()
+        _mark_frame(self)
 
         started = perf_counter()
         search = self._resolve_region(region)
@@ -293,6 +321,7 @@ class Frame:
         reader = self._reader()
         if reader is None:
             return _unbound()
+        _mark_frame(self)
 
         started = perf_counter()
         search = self._resolve_region(region)
@@ -352,6 +381,7 @@ class Frame:
         reader = self._reader()
         if reader is None:
             return _unbound()
+        _mark_frame(self)
 
         started = perf_counter()
         search = self._resolve_region(region)
@@ -394,6 +424,7 @@ class Frame:
         reader = self._reader()
         if reader is None:
             return _unbound()
+        _mark_frame(self)
 
         started = perf_counter()
         search = self._resolve_region(region)
@@ -479,6 +510,7 @@ class Frame:
         matcher = self._matcher()
         if matcher is None:
             return _unbound()
+        _mark_frame(self)
 
         started = perf_counter()
         search = self._resolve_region(region)
