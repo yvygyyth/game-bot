@@ -57,8 +57,10 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 执行层（10 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
 （`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与
 `run` / `check` / `selftest` / `probe`、
-**本地控制台（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程）**、
-真机探针。
+**本地控制台**（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程；
+状态树/流程图**真画成图**并点亮当前状态与节点；识图日志 = 每次匹配的带框图 + 表格）、
+**识图记录器**（`vision/recorder.py`：包住 Matcher/TextReader，
+红框=命中 / 橙框=未命中 / 蓝框=搜索范围，一帧一张图、最多留 20 张）、真机探针。
 
 **框架侧没有桩了。** 唯一显式的桩是 `PageTree.from_nested`，它是**刻意**不实现的
 （配置解析留在 `flow.loader.parse_pages`，这样状态层不必 import 流程层）。
@@ -68,7 +70,7 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 | 缺什么 | 影响 |
 |---|---|
 | `events.py` + 每次运行独立日志 | 现在只有一个总日志文件；回放 / 更细的执行轨迹也等它 |
-| 画面标注、单步执行、断点 | 调 ROI 时有用，属锦上添花 |
+| 单步执行、断点 | 调"这一轮为什么这么决策"时有用，属锦上添花 |
 | OCR 实测 | 两个实现已写，但没装依赖跑过 |
 | 真机端到端 | 假后端下整条链已经通了；真机上还要验"照着眼看走完一局" |
 
