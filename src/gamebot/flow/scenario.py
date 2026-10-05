@@ -95,6 +95,16 @@ class EngineOptions:
     save_frames_on_error: bool = False
     """失败时把当帧存盘，方便事后看"当时屏幕上到底有什么"。"""
 
+    dead_end_rounds: int = 3
+    """末梢节点上连续这么多轮 ``not_found`` 就认为**流程走到头了**（``no_more_work``）。
+
+    为什么需要它：流程干完活之后，末梢节点会一轮轮地"找不到可做的事"。
+    没有这个判定，脚本会一直空转到 ``max_runtime``（实测名将杀 3 秒里空转 193 轮）。
+
+    调大它：界面过渡慢的游戏（点了按钮要好几秒才出新页面）——那时"连着几轮没找到"
+    可能只是还没切过去。调成 0 就是关掉这个判定。
+    """
+
     def validate(self) -> list[str]:
         """返回问题列表（空 = 没问题）。装配期调一次。"""
         problems: list[str] = []
@@ -104,6 +114,8 @@ class EngineOptions:
             problems.append("max_runtime 必须 > 0 或留空")
         if self.max_ticks < 0:
             problems.append("max_ticks 不能为负")
+        if self.dead_end_rounds < 0:
+            problems.append("dead_end_rounds 不能为负（0 = 关掉'流程走完'判定）")
         if self.unknown_grace < 0:
             problems.append("unknown_grace 不能为负")
         return problems

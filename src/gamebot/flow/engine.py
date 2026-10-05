@@ -93,6 +93,23 @@ class StopReason(StrEnum):
     COMPLETED = "completed"
     """一次性流程自然跑完（没有可做的事且没有出边）。"""
 
+    NO_MORE_WORK = "no_more_work"
+    """末梢节点连续几轮没事可做 —— **流程走到头了**。
+
+    和 ``COMPLETED`` 的区别在"为什么停"：``COMPLETED`` 是引擎自己走到头
+    （比如起点就是终点），而这个是"节点没有出边、步骤又找不到活儿"。
+    分开是因为这两种情况要处理的事不一样：后者通常意味着
+    **业务的下一段还没写**（名将杀就卡在"匹配页还没定义"）。
+    """
+
+
+#: 末梢节点上连续这么多轮 ``not_found`` 就认为"流程走完了"。**默认值**，
+#: 实际取值看 ``EngineOptions.dead_end_rounds``（游戏过渡慢时调大，0 = 关掉）。
+#:
+#: 为什么是 3：一轮的 ``not_found`` 可能只是界面正在过渡（点了按钮之后的动画、
+#: 网络延迟）。连着三轮都找不到，才值得下"没活儿了"的结论。
+DEAD_END_STALL_ROUNDS = 3
+
 
 @dataclass(slots=True)
 class Recovery:
@@ -180,6 +197,7 @@ class RunReport:
             StopReason.STOP_PAGE,
             StopReason.TERMINAL_NODE,
             StopReason.COMPLETED,
+            StopReason.NO_MORE_WORK,
             StopReason.USER,
             StopReason.MAX_TICKS,
             StopReason.MAX_RUNTIME,
@@ -259,6 +277,8 @@ class FlowEngine:
         self._stop_reason: StopReason | None = None
         self._stop_message = ""
         self._unknown_since: float | None = None
+        #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _dead_end_stalled）
+        self._stall_rounds = 0
         self._entered_nodes: set[NodeId] = set()
         self._recovery_warned: set[tuple[NodeId, PageId]] = set()
 
@@ -709,15 +729,68 @@ class FlowEngine:
             self.report.errors.append(f"边条件异常: {message}")
 
     def _note_outcome(self, outcome: StepOutcome) -> None:
-        """记一个步骤结果。
+        """记一个步骤结果，并顺带判断**这个末梢节点是不是已经没活儿可干了**。
 
-        **存失败帧不在这里做** —— 它挪到执行器的 ``_record`` 里了，因为必须在
-        写 journal **之前**存：帧的路径要跟着那一条记录一起落盘，否则就成了
-        "日志里说第 3 步失败了，但记录里没有图，得自己去目录里按 tick 号翻"。
-        这里只把结果收进报告。
+        ## 为什么需要这个判断
+
+        ``StopReason.COMPLETED`` 的语义一直写着"一次性流程自然跑完（没有可做的事
+        且没有出边）"，但**从来没有代码触发它** —— 于是"干完活之后"的流程会一直
+        空转：每轮跑一遍步骤、每轮 ``not_found``，直到 ``max_runtime`` 才被掐停。
+        名将杀的竞技场正是这个形状（``jingji`` 没有出边，匹配页还没定义）。
+
+        判据刻意收得很窄，只有**同时**满足才算"干完了"：
+
+        * 当前节点**没有出边**（有出边说明它还有下一步可走，那不该停）；
+        * 连续 ``DEAD_END_STALL_ROUNDS`` 轮，每一步都是 ``not_found``。
+
+        第二条为什么限制成 ``not_found`` 而不是"任何失败"：``not_found`` 是
+        "我要找的东西现在不在画面上"，对一个没有出路的末梢节点来说就是
+        "没活儿了"。而 ``error`` 是识别/配置坏了 —— 那种情况该继续报错让人看见，
+        不该被"流程正常结束"掩盖掉。
+
+        停之前**先记一条 warning**：这是"流程走完了"和"脚本卡住了"的分界，
+        两者的画面一模一样（都是步骤一直 not_found），必须靠日志说清是哪种。
         """
         if self.executor is not None:
             self.executor.outcomes.append(outcome)
+
+        if not self._note_stall(outcome):
+            return
+
+        node = self.cursor.current
+        log.warning(
+            "节点 %r 没有出边，且连续 %d 轮找不到可做的事（%s）—— 按流程走完处理",
+            node,
+            self._stall_rounds,
+            outcome.message or outcome.step,
+        )
+        self.stop(
+            StopReason.NO_MORE_WORK,
+            f"节点 {node!r} 没有出边，且连续 {self._stall_rounds} 轮无事可做"
+            f"（最后一步: {outcome.step}）",
+        )
+
+    def _note_stall(self, outcome: StepOutcome) -> bool:
+        """累计/清零"末梢节点上没活儿干"的轮数；够轮数了返回 True。
+
+        ⚠️ **清零和累加必须在同一个函数里**。第一版把它们拆开了：
+        ``_dead_end_stalled`` 累加后返回"还不够"，而外层看到 False 就
+        ``_stall_rounds = 0`` —— 于是计数永远到不了阈值，"流程走完"永远不触发。
+        计数器的读改写别跨函数边界，这类错误还特别难看出来（代码看着挺对）。
+        """
+        node = self.scenario.graph.node(self.cursor.current)
+        stuck = (
+            not outcome.ok
+            and outcome.status == "not_found"
+            # 有出边说明它还有下一步可走 —— 那就不是"干完了"，别停
+            and node is not None
+            and not self.scenario.graph.out_edges(node.id)
+        )
+        self._stall_rounds = self._stall_rounds + 1 if stuck else 0
+        threshold = self.scenario.options.dead_end_rounds
+        if threshold <= 0:  # 0 = 关掉这个判定
+            return False
+        return self._stall_rounds >= threshold
 
     def to_dict(self) -> dict[str, Any]:
         return {
