@@ -15,16 +15,23 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any
 
-from ..types import ActionResult, Point, Region
-from .policy import StepPolicy
+from ..atomic import actions
+from ..atomic.combinators import wait_any_of, wait_disappear
+from ..exceptions import ConfigError
+from ..types import ActionResult, ActionStatus, Point, Region
+from .policy import ErrorMode, RetryPolicy, StepPolicy
 
 if TYPE_CHECKING:
     from ..atomic.frame import Frame
     from ..context import RunContext
+    from .executor import StepOutcome
 
 __all__ = [
     "CaptureStep",
@@ -38,13 +45,46 @@ __all__ = [
     "QueryStep",
     "Step",
     "WaitStep",
+    "step_from_dict",
 ]
+
+
+def _evaluate(condition: Any, ctx: RunContext) -> ActionResult[Any]:
+    """在**当前帧**上求一个条件：``Query``（有 ``run(frame)``）或 ``Callable``。
+
+    两条路径都走 ``ctx.frame()``：同一轮里"判断"和"动手"必须看同一张图，
+    否则会出现"判断时在、点击时已经消失"这种鬼故事 —— 而 ``ctx.frame()``
+    在 TTL 内复用同一帧，正是为了这个。
+
+    条件自己抛异常不往外炸：转成 ``error`` 结果交给调用方。
+    **调用方要把它和"不成立"分开处理**（``Executor._check_skip`` 就是
+    按"出错则不跳过"来的）。
+    """
+    try:
+        runner = getattr(condition, "run", None)
+        if callable(runner):
+            return runner(ctx.frame())
+        outcome = condition(ctx)
+        if isinstance(outcome, ActionResult):
+            return outcome
+        return ActionResult.success(outcome) if outcome else ActionResult.not_found("条件不成立")
+    except Exception as exc:
+        return ActionResult.error(f"条件求值异常: {exc}", exc=exc)
 
 
 class Step(ABC):
     """一个可执行的工作单元。
 
     实现者只需关心"做什么"，"失败了怎么办"交给 ``policy``。
+    """
+
+    performs_action: bool = True
+    """这一步会不会**真的操作游戏**（点 / 按 / 拖）。
+
+    只被 ``Executor(dry_run=True)`` 用：空跑时动作步骤不真的下发，只走一遍
+    决策流程。**默认 True 是刻意的** —— 自定义步骤忘了声明时，宁可被多拦一次，
+    也不能让"空跑"真的去点游戏。只读的步骤（``QueryStep`` / ``CaptureStep``）
+    显式覆写成 False。
     """
 
     def __init__(
@@ -127,6 +167,8 @@ class QueryStep(Step):
     例：读取当前体力值并存入 ``ctx.blackboard["stamina"]``。
     """
 
+    performs_action = False
+
     def __init__(
         self,
         query: Any,
@@ -140,7 +182,15 @@ class QueryStep(Step):
         self.save_as = save_as
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
-        raise NotImplementedError("待实现：ctx.frame() 上跑 query，成功且 save_as 非空时写黑板")
+        """在**当前帧**上跑查询。
+
+        没命中时**仍然写黑板**：那里存的是"这一轮看到的值"，
+        没看到也是一条信息（后续条件可能要判断"没看到就换策略"）。
+        """
+        result = _evaluate(self.query, ctx)
+        if self.save_as:
+            ctx.blackboard.set(self.save_as, result.value)
+        return result
 
 
 class CaptureStep(Step):
@@ -149,11 +199,19 @@ class CaptureStep(Step):
     需要"点完之后画面变了，后面几步必须看新图"时，在中间插一个它。
     """
 
+    performs_action = False
+
     def __init__(self, *, name: str = "刷新帧", policy: StepPolicy | None = None) -> None:
         super().__init__(name, policy=policy, needs_fresh_frame=True)
 
     def run(self, ctx: RunContext) -> ActionResult[Frame]:
-        raise NotImplementedError("待实现：ctx.capture() 并替换 ctx 的当前帧")
+        """截一张新帧并替换当前帧。
+
+        显式截（``ctx.capture()``）而不是 ``ctx.frame()``：后者的 TTL 命中时
+        会**返回旧帧**，那就违背了这一步存在的意义 —— "我确定现在要一张新的"。
+        """
+        frame = ctx.capture()
+        return ActionResult.success(frame, frame_id=frame.frame_id)
 
 
 class ClickStep(Step):
@@ -174,7 +232,15 @@ class ClickStep(Step):
         self.clicks = clicks
 
     def run(self, ctx: RunContext) -> ActionResult[Point]:
-        raise NotImplementedError("待实现：调 atomic.actions.click_point")
+        """点击一个**逻辑坐标**。
+
+        走 ``click_logic_point``（内部 ``session.to_screen()``），
+        和识图得到的源坐标是两个入口 —— 见
+        :func:`gamebot.atomic.actions.click_source_point` 里的坐标基准说明。
+        """
+        return actions.click_logic_point(
+            ctx.session, self.point, button=self.button, clicks=self.clicks
+        )
 
 
 class ClickImageStep(Step):
@@ -197,7 +263,44 @@ class ClickImageStep(Step):
         self.offset = offset
 
     def run(self, ctx: RunContext) -> ActionResult[Point]:
-        raise NotImplementedError("待实现：在 ctx 当前帧上 find_image，再 click")
+        """在当前帧上找图并点击。
+
+        两个安全边界，别改：
+
+        * **找不到就绝不点**。返回 ``not_found`` 让重试策略去决定，而不是
+          "就近点一下试试" —— 那是识图脚本最危险的失败模式；
+        * **点是源坐标**（``click_source_point``）。命中点来自截图，
+          再走一次 ``to_screen`` 会二次换算点偏。
+        """
+        frame = ctx.frame()
+        # confidence=None 时由 Frame 回落到 Session 的默认阈值，
+        # 这里不要把默认值写死 —— 阈值应该只有一个出处（配置）。
+        found = frame.find_image(self.template, region=self.region, confidence=self.confidence)
+        if not found.ok:
+            return ActionResult(
+                found.status,
+                None,
+                f"{self.template} 未命中，取消点击",
+                found.elapsed,
+                found.meta,
+            )
+
+        hit = found.value
+        if hit is None:
+            return ActionResult.error(f"{self.template} 命中但没有坐标")
+
+        source = hit.offset(self.offset[0], self.offset[1])
+        clicked = actions.click_source_point(ctx.session, source)
+        # 点完画面就变了 —— 显式作废当前帧，让后续步骤（和下一轮）看新图。
+        # 不在这里重截：截图的时机由流程层决定（CaptureStep / needs_fresh_frame）。
+        if clicked.ok:
+            ctx.invalidate_frame()
+        return clicked.with_meta(
+            template=self.template,
+            hit_point=hit,
+            offset=self.offset,
+            score=found.meta.get("score"),
+        )
 
     def used_templates(self) -> tuple[str, ...]:
         return (self.template,)
@@ -223,7 +326,33 @@ class ClickTextStep(Step):
         self.confidence = confidence
 
     def run(self, ctx: RunContext) -> ActionResult[Point]:
-        raise NotImplementedError("待实现")
+        """在当前帧上查文本并点击。
+
+        同样"找不到就绝不点"，同样点源坐标（命中点来自截图）。
+        OCR 没装时 ``find_text`` 返回 ``error``（不是 not_found），
+        这里原样透传 —— "OCR 没装"和"文字不在屏幕上"是两件事。
+        """
+        frame = ctx.frame()
+        found = frame.find_text(
+            self.text, region=self.region, lang=self.lang, confidence=self.confidence
+        )
+        if not found.ok:
+            return ActionResult(
+                found.status,
+                None,
+                f"文本 {self.text!r} 未命中，取消点击",
+                found.elapsed,
+                found.meta,
+            )
+
+        hit = found.value
+        if hit is None:
+            return ActionResult.error(f"文本 {self.text!r} 命中但没有坐标")
+
+        clicked = actions.click_source_point(ctx.session, hit)
+        if clicked.ok:
+            ctx.invalidate_frame()
+        return clicked.with_meta(text=self.text, hit_point=hit, score=found.meta.get("score"))
 
 
 class KeyStep(Step):
@@ -245,7 +374,15 @@ class KeyStep(Step):
         self.interval = interval
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
-        raise NotImplementedError("待实现：单键走 press_key，多键走 hotkey")
+        """单键走 ``press_key``，多键走 ``hotkey``（组合键要求同时按下）。"""
+        if len(self.keys) == 1:
+            return actions.press_key(
+                ctx.session, self.keys[0], presses=self.presses, interval=self.interval
+            )
+        result = actions.hotkey(ctx.session, self.keys)
+        if not result.ok:
+            return result
+        return ActionResult.success(self.keys, elapsed=result.elapsed, keys=list(self.keys))
 
 
 class WaitStep(Step):
@@ -280,9 +417,29 @@ class WaitStep(Step):
         self.interval = interval
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
-        raise NotImplementedError(
-            "待实现：seconds 走 actions.sleep，否则走 wait_any_of / wait_disappear"
-        )
+        """固定秒数走 ``actions.sleep``；条件等待走跨帧组合子。
+
+        条件等待的轮询**自己截图**（等的是"画面变过来"，不能复用同一张旧图），
+        所以成功之后要把当前帧作废，让后续步骤看新图 —— 组合子抓到的那一帧
+        在结果里（``meta["frame"]``），但流程层的帧缓存并不知道它。
+
+        ``timeout``（等不到就超时）和 ``policy.timeout``（这一步的总预算）
+        是两回事：前者是这个等待自己的上界，后者含重试。
+        """
+        if self.seconds is not None:
+            return actions.sleep(self.seconds, ctx.session)
+
+        if self.disappear:
+            result = wait_disappear(
+                ctx.session, self.query, timeout=self.timeout, interval=self.interval
+            )
+        else:
+            result = wait_any_of(
+                ctx.session, [self.query], timeout=self.timeout, interval=self.interval
+            )
+        if result.ok:
+            ctx.invalidate_frame()
+        return result
 
 
 class CompositeStep(Step):
@@ -303,9 +460,64 @@ class CompositeStep(Step):
         super().__init__(name or f"复合步骤 x{len(steps)}", policy=policy)
         self.steps = list(steps)
         self.abort_on_failure = abort_on_failure
+        self._children: list[StepOutcome] = []
 
     def run(self, ctx: RunContext) -> ActionResult[list[Any]]:
-        raise NotImplementedError("待实现：交给 ctx.executor 逐步执行并汇总")
+        """交给 ``ctx.executor`` 逐步执行并汇总。
+
+        **走 executor 而不是自己循环 ``step.run(ctx)``**：子步骤也要吃到
+        各自的 ``policy``（重试 / 跳过 / 失败处理）和 journal 记账 ——
+        自己循环就等于把这层能力绕过去了，表现是"复合步骤里的重试不生效"。
+
+        内部的 skip **不算失败**（``StepOutcome.ok`` 对 skipped 是 True）：
+        "条件不满足所以没做"不是错误。
+        """
+        outcomes = self._run_children(ctx)
+        failures = [o for o in outcomes if not o.ok]
+        if failures:
+            break_label = "（已中止后续子步骤）" if self.abort_on_failure else ""
+            return ActionResult.not_found(
+                f"复合步骤 {len(failures)}/{len(outcomes)} 个子步骤失败{break_label}",
+                results=[o.to_dict() for o in outcomes],
+            )
+        return ActionResult.success(
+            [o.result.value for o in outcomes],
+            results=[o.to_dict() for o in outcomes],
+        )
+
+    def child_outcomes(self) -> list[StepOutcome]:
+        """最近一次执行里子步骤的结果。
+
+        协议方法：**执行层**和**流程层**约定用它把子步骤结果挂到父 outcome 上
+        （引擎只用鸭子类型调它，不去 import 具体的步骤类型）。
+        """
+        return list(self._children)
+
+    def _run_children(self, ctx: RunContext) -> list[StepOutcome]:
+        self._children = []
+        for step in self.steps:
+            outcome = self._run_one(step, ctx)
+            self._children.append(outcome)
+            if self.abort_on_failure and not outcome.ok:
+                break
+        return list(self._children)
+
+    def _run_one(self, step: Step, ctx: RunContext) -> StepOutcome:
+        """单个子步骤：优先交给 executor（带策略与记账），没有就退回裸执行。
+
+        裸执行**只应该出现在临时脚本里**（``ctx.executor`` 为空）。
+        这时给它包一个最小 outcome，至少让报告里能看到这一步跑了。
+        """
+        from .executor import StepOutcome
+
+        executor = getattr(ctx, "executor", None)
+        if executor is not None:
+            return executor.run(step)
+        try:
+            result = step.run(ctx)
+        except Exception as exc:  # 裸路径下把异常转成结果，别炸掉整轮
+            result = ActionResult.error(f"子步骤 {step.describe()} 异常: {exc}", exc=exc)
+        return StepOutcome(step.name, result)
 
     def used_templates(self) -> tuple[str, ...]:
         return tuple(t for step in self.steps for t in step.used_templates())
@@ -332,9 +544,53 @@ class ConditionalStep(Step):
         self.when = when
         self.then_steps = list(then_steps)
         self.else_steps = list(else_steps)
+        self._children: list[StepOutcome] = []
 
     def run(self, ctx: RunContext) -> ActionResult[Any]:
-        raise NotImplementedError("待实现：在当前帧上求 when，选择分支")
+        """在当前帧上求 ``when``，选一支执行。
+
+        条件求值**出错**时走 else 分支并把错误写进 message：
+        这一步本身不该因为"条件坏了"而变成失败（配置问题该在
+        ``_check_skip`` / 边条件那里暴露），但也不能静默 —— message 里带上原因。
+        """
+        condition = _evaluate(self.when, ctx)
+        branch, label = (self.then_steps, "then") if condition.ok else (self.else_steps, "else")
+        if not branch:
+            return ActionResult.success(
+                None,
+                message=f"条件{'成立' if condition.ok else '不成立'}，{label} 分支为空",
+                branch=label,
+                condition=condition.message,
+            )
+
+        outcomes: list[StepOutcome] = []
+        executor = getattr(ctx, "executor", None)
+        for step in branch:
+            if executor is not None:
+                outcomes.append(executor.run(step))
+            else:
+                from .executor import StepOutcome
+
+                outcomes.append(StepOutcome(step.name, step.run(ctx)))
+        self._children = outcomes
+
+        failures = [o for o in outcomes if not o.ok]
+        if failures:
+            return ActionResult.not_found(
+                f"{label} 分支 {len(failures)}/{len(outcomes)} 个子步骤失败",
+                results=[o.to_dict() for o in outcomes],
+                branch=label,
+            )
+        return ActionResult.success(
+            [o.result.value for o in outcomes],
+            results=[o.to_dict() for o in outcomes],
+            branch=label,
+            condition=condition.message,
+        )
+
+    def child_outcomes(self) -> list[StepOutcome]:
+        """最近一次执行里被选中的那一支的子步骤结果。"""
+        return list(self._children)
 
     def used_templates(self) -> tuple[str, ...]:
         nested = [*self.then_steps, *self.else_steps]
@@ -365,3 +621,190 @@ def step_registry() -> dict[str, type]:
     """
     return dict(_STEP_REGISTRY)
 
+
+# --------------------------------------------------------------------------- #
+# 反序列化（YAML -> Step）
+# --------------------------------------------------------------------------- #
+def step_from_dict(data: Any) -> Step:
+    """把配置里的一个步骤还原成 :class:`Step` 对象。
+
+    :raises ConfigError: 类型没登记、字段拼错、嵌套结构不对。
+        **一律抛错而不是跳过**：静默忽略拼错一个键，表现是"这一步跑起来
+        什么都没做"，那种 bug 要跑上十分钟才撞得到一次。
+    """
+    if isinstance(data, Step):
+        return data
+    if not isinstance(data, dict):
+        raise ConfigError(f"步骤定义必须是映射(mapping)，收到: {type(data).__name__}")
+
+    payload = dict(data)
+    type_name = str(payload.pop("type", "")).strip()
+    if not type_name:
+        raise ConfigError(f"步骤定义缺少 type: {data!r}")
+
+    cls = _STEP_REGISTRY.get(type_name)
+    if cls is None:
+        known = ", ".join(sorted(_STEP_REGISTRY))
+        raise ConfigError(f"未登记的步骤类型 {type_name!r}。可用的有: {known}")
+
+    if "policy" in payload:
+        payload["policy"] = _policy_from_dict(payload["policy"])
+
+    if cls is CompositeStep and isinstance(payload.get("steps"), (list, tuple)):
+        payload["steps"] = [step_from_dict(item) for item in payload["steps"]]
+    if cls is ConditionalStep:
+        if isinstance(payload.get("when"), (dict, str)):
+            payload["when"] = query_from_config(payload["when"])
+        for key in ("then_steps", "else_steps"):
+            if isinstance(payload.get(key), (list, tuple)):
+                payload[key] = [step_from_dict(item) for item in payload[key]]
+    if cls is FunctionStep:
+        payload["func"] = _resolve_function(payload.get("func"))
+    for key in ("query",):
+        if isinstance(payload.get(key), (dict, str)):
+            payload[key] = query_from_config(payload[key])
+
+    if "point" in payload and not isinstance(payload["point"], Point):
+        payload["point"] = _point_from_config(payload["point"])
+    if payload.get("region") is not None and not isinstance(payload["region"], Region):
+        payload["region"] = _region_from_config(payload["region"])
+    if "offset" in payload and isinstance(payload["offset"], (list, tuple)):
+        payload["offset"] = tuple(payload["offset"])
+
+    allowed = set(inspect.signature(cls.__init__).parameters) - {"self"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(
+            f"{type_name} 有未知字段: {', '.join(unknown)}（可用: {sorted(allowed)}）"
+        )
+
+    try:
+        return cls(**payload)
+    except TypeError as exc:
+        raise ConfigError(f"{type_name} 的参数不对: {exc}") from exc
+
+
+def query_from_config(value: Any) -> Any:
+    """委托给原子层的 ``query_from_dict``（延迟 import，避免循环依赖）。"""
+    from ..atomic.query import query_from_dict
+
+    try:
+        return query_from_dict(value)
+    except ValueError as exc:
+        raise ConfigError(f"查询解析失败: {exc}") from exc
+
+
+def _policy_from_dict(data: Any) -> StepPolicy:
+    """``policy`` 子字典 -> :class:`StepPolicy`（含 ``retry`` 子字典）。"""
+    if isinstance(data, StepPolicy):
+        return data
+    if not isinstance(data, dict):
+        raise ConfigError(f"policy 必须是映射(mapping)，收到: {type(data).__name__}")
+
+    payload = dict(data)
+    if isinstance(payload.get("retry"), dict):
+        payload["retry"] = _retry_from_dict(payload["retry"])
+    if isinstance(payload.get("on_error"), str):
+        payload["on_error"] = _coerce_enum(ErrorMode, payload["on_error"], "policy.on_error")
+    for key in ("precondition", "skip_if"):
+        if isinstance(payload.get(key), (dict, str)):
+            payload[key] = query_from_config(payload[key])
+
+    allowed = {f.name for f in fields(StepPolicy)}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(f"policy 里有未知字段: {', '.join(unknown)}（可用: {sorted(allowed)}）")
+    return StepPolicy(**payload)
+
+
+def _retry_from_dict(data: dict[str, Any]) -> RetryPolicy:
+    """``retry`` 子字典 -> :class:`RetryPolicy`。
+
+    ``retry_on`` 接受字符串列表（``["not_found", "timeout"]``）：
+    配置里写枚举值名（``NOT_FOUND``）不自然，写 ``.value``（``not_found``）
+    才对得上日志里看到的东西。
+    """
+    payload = dict(data)
+    raw_statuses = payload.get("retry_on")
+    if isinstance(raw_statuses, (list, tuple)):
+        payload["retry_on"] = tuple(
+            _coerce_enum(ActionStatus, item, "retry.retry_on") for item in raw_statuses
+        )
+    elif isinstance(raw_statuses, str):
+        payload["retry_on"] = (_coerce_enum(ActionStatus, raw_statuses, "retry.retry_on"),)
+
+    allowed = {f.name for f in fields(RetryPolicy)}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(f"retry 里有未知字段: {', '.join(unknown)}（可用: {sorted(allowed)}）")
+    return RetryPolicy(**payload)
+
+
+def _coerce_enum(enum_cls: type, value: Any, where: str) -> Any:
+    """把配置里的字符串转成枚举；大小写和下划线都容忍一点。"""
+    if isinstance(value, enum_cls):
+        return value
+    text = str(value).strip().lower()
+    try:
+        return enum_cls(text)
+    except ValueError:
+        pass
+    try:
+        return enum_cls(text.upper())
+    except ValueError as exc:
+        choices = ", ".join(m.value for m in enum_cls)  # type: ignore[attr-defined]
+        raise ConfigError(f"{where} 的值 {value!r} 不认识（可用: {choices}）") from exc
+
+
+def _region_from_config(value: Any) -> Region:
+    """``region`` 三种写法都收：``[x,y,w,h]`` / ``{x,y,w,h}`` / ``Region``。"""
+    if isinstance(value, Region):
+        return value
+    if isinstance(value, dict):
+        return Region.from_dict(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 4:
+            raise ConfigError(f"region 需要 4 个数字 [x,y,w,h]，收到: {value!r}")
+        return Region.from_tuple(tuple(int(v) for v in value))  # type: ignore[arg-type]
+    raise ConfigError(f"region 的写法不认识: {value!r}（用 [x,y,w,h] 或 {{x,y,w,h}}）")
+
+
+def _point_from_config(value: Any) -> Point:
+    """``point`` 三种写法：``[x,y]`` / ``{x,y}`` / ``Point``。"""
+    if isinstance(value, Point):
+        return value
+    if isinstance(value, dict):
+        return Point.from_dict(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ConfigError(f"point 需要 2 个数字 [x,y]，收到: {value!r}")
+        return Point.from_tuple(tuple(int(v) for v in value))  # type: ignore[arg-type]
+    raise ConfigError(f"point 的写法不认识: {value!r}（用 [x,y] 或 {{x,y}}）")
+
+
+def _resolve_function(path: Any) -> Callable[..., Any]:
+    """``"包.模块.函数"`` -> 可调用对象。
+
+    逃生舱：配置里写不出复杂逻辑时，指向一个 Python 函数。
+    **必须在装配期解析失败**（找不到模块/属性就报错），
+    否则会拖到运行期变成"跑到这一步才炸"。
+    """
+    if callable(path):
+        return path
+    if not isinstance(path, str) or not path.strip():
+        raise ConfigError(f"FunctionStep 的 func 必须是 '模块.函数' 形式，收到: {path!r}")
+
+    target = path.strip()
+    if "." not in target:
+        raise ConfigError(f"FunctionStep 的 func 需要完整路径（'模块.函数'），收到: {target!r}")
+
+    module_path, _, attr = target.rpartition(".")
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ConfigError(f"FunctionStep 找不到模块 {module_path!r}: {exc}") from exc
+
+    func = getattr(module, attr, None)
+    if not callable(func):
+        raise ConfigError(f"FunctionStep 的 {module_path!r} 里没有可调用的 {attr!r}")
+    return func

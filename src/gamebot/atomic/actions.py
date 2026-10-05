@@ -48,6 +48,7 @@ log = get_logger("atomic.actions")
 
 __all__ = [
     "click_image",
+    "click_logic_point",
     "click_point",
     "click_source_point",
     "click_text",
@@ -225,6 +226,37 @@ def click_image(
         offset=offset,
         score=found.meta.get("score"),
     )
+
+
+def click_logic_point(
+    session: Session,
+    point: Point,
+    button: str = "left",
+    clicks: int = 1,
+    interval: float = 0.1,
+) -> ActionResult[Point]:
+    """按**逻辑坐标**点击 —— 给"坐标来自配置"的调用方用。
+
+    和 :func:`click_source_point` 的分工，就是这个项目最容易搞错的地方，
+    所以两个入口刻意分开、名字里带坐标基准：
+
+    * 坐标**来自配置 / 脚本里写死的相对坐标**（``ClickStep(Point(960, 540))``）
+      -> 用本函数，内部 ``session.to_screen()`` 换算成源坐标；
+    * 坐标**来自 ``find_image`` / ``find_all_images``**（截图上的真实像素）
+      -> 用 :func:`click_source_point`，**绝不能再换算一次**：
+      ``CoordinateMapper`` 不是幂等的，缩放过一次再缩一次就会点偏。
+
+    :return: ``success(value=换算后的源坐标, logic_point=传入的逻辑坐标)``。
+    """
+    started = perf_counter()
+    source, failure = _to_source(session, point, started)
+    if failure is not None:
+        return failure
+    assert source is not None
+    result = _click_source(
+        session, source, button=button, clicks=clicks, interval=interval, started=started
+    )
+    return result.with_meta(logic_point=point)
 
 
 def click_source_point(

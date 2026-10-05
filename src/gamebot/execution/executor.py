@@ -17,12 +17,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import StepFailed
-from ..types import ActionResult
+from ..types import ActionResult, ActionStatus
 from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch
 from .journal import Journal, NullJournal
 from .policy import ErrorMode
-from .step import Step
+from .step import Step, _evaluate
 
 if TYPE_CHECKING:
     from ..context import RunContext
@@ -43,6 +43,16 @@ class StepOutcome:
     skipped: bool = False
     skip_reason: str = ""
     children: list[StepOutcome] = field(default_factory=list)
+    action: dict[str, Any] = field(default_factory=dict)
+    """这次生效的动作描述（``{"kind": "click", "point": [960, 540]}``）。
+
+    从 ``result.meta`` 里拾取常见的几个键填上，给 journal 用 ——
+    journal 的格式约定里 ``action`` 是独立字段（方便以后当训练数据的锚点），
+    所以不能只丢在 meta 里。
+    """
+
+    frame_path: str = ""
+    """这次执行时的帧存盘路径（存了才有）。帧**不内联**进 journal。"""
 
     @property
     def ok(self) -> bool:
@@ -59,8 +69,30 @@ class StepOutcome:
     def message(self) -> str:
         return self.skip_reason if self.skipped else self.result.message
 
+    @classmethod
+    def of(cls, step: Any, result: ActionResult[Any], **kwargs: Any) -> StepOutcome:
+        """造一个 outcome 并把 ``result.meta`` 里的动作信息拾进 ``action``。
+
+        journal 的契约里 ``action`` 是独立字段，所以这里做一次拾取：
+        ``{"kind": ..., "point": ...}`` 是回放和以后做训练数据要用的锚点。
+        **只认已知的键**，别的留在 meta 里 —— 不做"把 meta 整个搬过来"，
+        那样 action 会变成一个什么都往里塞的垃圾桶。
+        """
+        action: dict[str, Any] = {}
+        meta = result.meta or {}
+        # **不搬 "action" 这个键本身**：meta 里可能已经有一个 {"point": ...}
+        # 形状的子字典，把它整个塞进 action 会得到 action={"action": {...}}，
+        # journal 里就变成了两层嵌套 —— 那是没人想读的格式。
+        for key in ("kind", "point", "logic_point", "template", "text", "key", "keys"):
+            if key in meta:
+                action[key] = meta[key]
+        kind = kwargs.pop("action_kind", "")
+        if kind:
+            action.setdefault("kind", kind)
+        return cls(step, result, action=action, **kwargs)
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "step": self.step,
             "status": self.status,
             "attempts": self.attempts,
@@ -68,6 +100,11 @@ class StepOutcome:
             "message": self.message,
             "children": [c.to_dict() for c in self.children],
         }
+        if self.action:
+            payload["action"] = self.action
+        if self.frame_path:
+            payload["frame"] = self.frame_path
+        return payload
 
     def __repr__(self) -> str:
         return (
@@ -124,14 +161,94 @@ class Executor:
     # 对外接口
     # ------------------------------------------------------------------ #
     def run(self, step: Step) -> StepOutcome:
-        """执行一个步骤（含重试与失败处理），返回结果记录。"""
-        raise NotImplementedError(
-            "待实现流程: "
-            "1) 求 precondition / skip_if -> 跳过则返回 skipped 的 StepOutcome; "
-            "2) 循环 attempts，每次调用 step.run(self.ctx) 并计时; "
-            "3) 超预算或不再重试时跳出; "
-            "4) 按 policy.on_error 处理并触发 hooks / journal; "
-            "5) 复合步骤把 children 填上。"
+        """执行一个步骤（含重试与失败处理），返回结果记录。
+
+        五件事，顺序不能变：
+
+        1. **跳过判断在最前** —— ``precondition`` / ``skip_if`` 不满足就跳过，
+           而**跳过不算失败**（``StepOutcome.ok`` 对 skipped 返回 True）；
+        2. **重试在超时预算内** —— ``RetryPolicy`` 决定还能不能试、等多久，
+           ``StepPolicy.timeout`` 是这一整步（含所有重试与等待）的总预算；
+        3. **等待一律走 ``ctx.sleep``** —— 它可被中止立刻唤醒。中止是
+           ``Cancelled`` 异常、直接穿透：``RetryPolicy.retry_on`` 是枚举而不是
+           "非成功即可重试"，所以中止永远不会被当成可重试
+           （写成后者的话表现就是"点了停止但脚本继续转"）；
+        4. **失败才交给 ``on_error``** —— 抛异常 / 停流程 / 继续 / 放弃本轮
+           是业务决策，执行器只按声明的做；
+        5. **每次都记账** —— journal + hooks，**包括跳过的那次**。
+
+        ``dry_run`` 时动作步骤不真的下发，但仍然走完这套流程并标记 ``dry_run``
+        —— 这样"空跑一遍看流程走不走得通"得到的是一条真实的决策序列。
+        """
+        policy = step.policy
+        watch = Stopwatch()
+
+        skip_reason = self._check_skip(step)
+        if skip_reason:
+            outcome = StepOutcome(
+                step.name,
+                ActionResult.success(None),
+                attempts=0,
+                skipped=True,
+                skip_reason=skip_reason,
+            )
+            self._record(step, outcome)
+            return outcome
+
+        retry = policy.retry
+        attempts = 0
+        result: ActionResult[Any] = ActionResult.error("步骤没有执行")
+
+        while True:
+            attempts += 1
+            started = watch.elapsed
+            result = self._dry_run_result(step) or step.run(self.ctx)
+            result = result.with_elapsed(watch.elapsed - started)
+
+            if result.ok:
+                break
+
+            if policy.timeout is not None and watch.elapsed >= policy.timeout:
+                result = result.with_meta(timeout_budget=policy.timeout)
+                break
+
+            if not retry.should_retry(attempts, result.status):
+                break
+
+            delay = retry.delay_for(attempts)
+            if policy.timeout is not None:
+                delay = min(delay, max(0.0, policy.timeout - watch.elapsed))
+            if delay > 0:
+                self.ctx.sleep(delay)  # 可被中止立刻唤醒
+            if self.hooks.on_retry:
+                self.hooks.on_retry(self.ctx, step, attempts, result)
+
+        outcome = StepOutcome.of(step.name, result, attempts=attempts, elapsed=watch.elapsed)
+        # 复合 / 条件步骤把子步骤结果挂到父 outcome 上。**在这里做而不是让
+        # 引擎做**：子步骤的记账本来就归执行层，而且这样"直接调 executor.run"
+        # （测试、临时脚本）也能拿到完整的步骤树。
+        children_of = getattr(step, "child_outcomes", None)
+        if callable(children_of) and not outcome.children:
+            outcome.children = list(children_of())
+        self._record(step, outcome)
+
+        if not outcome.ok and (policy.require_success or policy.on_error is not ErrorMode.CONTINUE):
+            self._handle_failure(step, outcome)
+        return outcome
+
+    def _dry_run_result(self, step: Step) -> ActionResult[Any] | None:
+        """空跑时给动作类步骤造一个"假装成功"的结果；查询类步骤照常跑。
+
+        判断标准是 :meth:`Step.performs_action`，**不是步骤类型名** ——
+        自定义步骤只要声明了就会被拦下；忘声明的（业务层那些）由基类默认
+        返回 True 兜住：**宁可多拦一个，也不能空跑时真去点游戏**。
+        """
+        if not self.dry_run or not step.performs_action:
+            return None
+        return ActionResult.success(
+            None,
+            message=f"空跑，未执行动作: {step.describe()}",
+            dry_run=True,
         )
 
     def run_many(self, steps: list[Step]) -> list[StepOutcome]:
@@ -143,8 +260,50 @@ class Executor:
     # 策略判断（供 run 使用）
     # ------------------------------------------------------------------ #
     def _check_skip(self, step: Step) -> str:
-        """返回跳过原因；空串表示不跳过。"""
-        raise NotImplementedError("待实现：在当前帧上求 skip_if / precondition")
+        """返回跳过原因；空串表示不跳过。
+
+        * ``precondition``：**不满足则跳过**（"先确认弹窗出现了，才点确认"）；
+        * ``skip_if``：**满足则跳过**（"体力已经满了就不用吃体力药"）。
+
+        求值出错**不跳过**：配置坏了应该让步骤按正常路径失败并留下痕迹，
+        而不是静默跳过 —— 跳过在报告里长得像"本来就不需要做"。
+        """
+        cond = step.policy.precondition
+        if cond is not None:
+            result = _evaluate(cond, self.ctx)
+            if result.status is ActionStatus.ERROR:
+                log.warning(
+                    "步骤 %r 的 precondition 求值出错，按不跳过处理: %s",
+                    step.name,
+                    result.message,
+                )
+            elif not result.ok:
+                return f"precondition 不满足: {result.message or cond!r}"
+
+        skip_if = step.policy.skip_if
+        if skip_if is not None:
+            result = _evaluate(skip_if, self.ctx)
+            if result.status is ActionStatus.ERROR:
+                log.warning(
+                    "步骤 %r 的 skip_if 求值出错，按不跳过处理: %s", step.name, result.message
+                )
+            elif result.ok:
+                return f"skip_if 满足: {result.message or skip_if!r}"
+        return ""
+
+    def _record(self, step: Step, outcome: StepOutcome) -> None:
+        """落 journal + 触发 hooks。
+
+        **一个步骤只记一条**（含跳过的）：排查时"它跑没跑"和"它成没成"同样重要，
+        报告里看不到某一步时，第一个要回答的问题就是它到底有没有被执行。
+        """
+        self.journal.record_outcome(outcome, tick=getattr(self.ctx.pages, "tick", 0))
+        if self.hooks.before_step:
+            self.hooks.before_step(self.ctx, step)
+        if self.hooks.after_step:
+            self.hooks.after_step(self.ctx, outcome)
+        if not outcome.ok and self.hooks.on_failure:
+            self.hooks.on_failure(self.ctx, step, outcome)
 
     def _handle_failure(self, step: Step, outcome: StepOutcome) -> None:
         """按 ``policy.on_error`` 决定抛异常还是继续。"""
