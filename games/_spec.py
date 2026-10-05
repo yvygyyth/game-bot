@@ -7,10 +7,7 @@
 * 导入失败的包不会静默消失，而是进 :func:`discovery_errors` ——
   一个写坏的脚本必须能被看见，否则"新脚本没出现在列表里"会变成谜题。
 
-**布局只有这一种**：游戏目录下面必须有功能目录。曾经支持过"游戏目录自己就是脚本"
-（单脚本游戏），但两种布局并存只有坏处 —— 加第二个脚本时要挪目录，
-而且"这个 __init__.py 到底是容器还是脚本"永远说不清。所以去掉了，
-发现旧写法会明确报错（见 :func:`iter_script_dirs`）。
+**布局只有一种：``games/<游戏>/<功能>/``。** 游戏目录是容器，脚本永远在功能目录里。
 """
 
 from __future__ import annotations
@@ -111,10 +108,6 @@ def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
 
     游戏目录下**没有**功能子目录时不会产出脚本 —— 那种游戏只是还没写脚本，
     不是错误（新建一个游戏目录、页面和模板先放好，是正常的中间状态）。
-
-    但这个游戏目录自己带了 ``build_scenario`` 时，说明有人在用**旧的单脚本布局**。
-    这时什么都不产出的话，表现是"脚本没出现在列表里"，很难查 ——
-    所以 :func:`list_scripts` 会专门为它报一条错，把话说清楚。
     """
     for game_dir in _game_dirs():
         for feature_dir in _feature_dirs(game_dir):
@@ -126,28 +119,30 @@ def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
             )
 
 
-def _legacy_single_script_games() -> list[tuple[str, str]]:
-    """找出还在用"游戏目录自己就是脚本"这种旧布局的游戏，返回 ``[(游戏, 提示)]``。"""
+def _misplaced_scripts() -> list[tuple[str, str]]:
+    """找出把脚本函数直接写在游戏目录 ``__init__.py`` 里的地方。
+
+    那是**位置错了**，不是另一种布局 —— 游戏目录是容器，脚本必须有自己的功能目录。
+    这种写法不会被 :func:`iter_script_dirs` 扫到，于是表现为"脚本没出现在列表里"，
+    很难查；所以这里专门报一条，把该放哪儿说清楚。
+    """
     found: list[tuple[str, str]] = []
-    feature_names = set()
     for game_dir in _game_dirs():
         if _feature_dirs(game_dir):
-            feature_names.add(game_dir.name)
-    for game_dir in _game_dirs():
-        if game_dir.name in feature_names:
+            # 有功能目录就说明这是个正常的容器，跳过（不 import，避免副作用）
             continue
         init = game_dir / "__init__.py"
         if not init.is_file():
             continue
-        # 用文本粗判就够了：这里只为了给一句人话提示，不值得为它 import 一个坏模块
+        # 文本粗判就够了：这里只为了给一句人话提示，不值得为它 import 一个坏模块
         text = init.read_text(encoding="utf-8", errors="replace")
         if "def build_scenario" in text or "def build_config" in text:
             found.append(
                 (
                     game_dir.name,
-                    f"{game_dir.name}/ 自己带了 build_config/build_scenario —— "
-                    f"单脚本布局已经不支持了。把它挪进一个功能目录："
-                    f"games/{game_dir.name}/<功能>/，key 会变成 "
+                    f"games/{game_dir.name}/__init__.py 里有 build_config/build_scenario —— "
+                    f"脚本不能直接放在游戏目录下。给它建一个功能目录："
+                    f"games/{game_dir.name}/<功能>/，key 就是 "
                     f"'{game_dir.name}/<功能>'",
                 )
             )
@@ -167,7 +162,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
         return sorted(_SCRIPTS.values(), key=lambda s: s.key)
 
     found: dict[str, ScriptSpec] = {}
-    errors: list[tuple[str, str]] = _legacy_single_script_games()
+    errors: list[tuple[str, str]] = _misplaced_scripts()
 
     for key, game, slug, _path in iter_script_dirs():
         module_name = f"games.{game}.{slug}"
@@ -206,7 +201,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
 
 
 def get_script(key: str) -> ScriptSpec:
-    """按 key 取脚本。``"testgame/sandbox"`` 和 ``"testgame.sandbox"`` 两种写法都认。
+    """按 key 取脚本。``"mingjiangsha/jingji"`` 和 ``"mingjiangsha.jingji"`` 两种写法都认。
 
     :raises KeyError: 不存在，message 里会列出可用的 key。
     """

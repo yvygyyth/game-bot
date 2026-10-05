@@ -208,10 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
         ("probe", "真机探针：现在屏幕上认不认得出来"),
     ):
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("script", help="脚本 key，如 testgame/sandbox")
+        p.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
 
     p_setup = sub.add_parser("setup", help="生成 / 下载脚本需要的资源")
-    p_setup.add_argument("script", help="脚本 key，如 testgame/sandbox")
+    p_setup.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
     p_setup.add_argument("--force", action="store_true", help="已存在的也重新生成")
 
     return parser

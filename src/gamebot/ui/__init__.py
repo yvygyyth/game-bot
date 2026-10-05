@@ -42,7 +42,7 @@ def run_ui(
 ) -> int:
     """打开界面并进入事件循环，返回进程退出码。
 
-    :param script_key: 预选的脚本 key（``"testgame"`` / ``"名将杀/千里单骑"``）。
+    :param script_key: 预选的脚本 key（``"mingjiangsha/jingji"``）。
     :param snapshot: 非空时**不开窗口**，渲染一张界面截图存到这个路径就退出。
         用途：无头环境下自检、给文档配图。需要 ``QT_QPA_PLATFORM=offscreen``。
     """

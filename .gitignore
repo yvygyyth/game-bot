@@ -27,9 +27,6 @@ debug/**
 !debug/.gitkeep
 
 # ---- 业务层的生成物 ----
-# 沙盒测试游戏的模板是用代码合成出来的（见 games/testgame/scene.py），
-# 属于产物不是素材 —— 跑 `python -m games setup testgame` 重新生成。
-games/testgame/templates/
 # 名将杀的"参考画面"（自检用它验证认得准不准）和候选模板，都是本地生成物
 games/mingjiangsha/fixtures/
 games/mingjiangsha/_candidates/
