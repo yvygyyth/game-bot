@@ -3,9 +3,14 @@
 按目录约定自动发现，**不维护手写清单**：
 
 * ``games/<游戏>/<功能>/__init__.py`` 里有 ``build_config`` 和 ``build_scenario``
-  -> 就是一个脚本；
+  -> 就是一个脚本，key 是 ``"<游戏>/<功能>"``；
 * 导入失败的包不会静默消失，而是进 :func:`discovery_errors` ——
   一个写坏的脚本必须能被看见，否则"新脚本没出现在列表里"会变成谜题。
+
+**布局只有这一种**：游戏目录下面必须有功能目录。曾经支持过"游戏目录自己就是脚本"
+（单脚本游戏），但两种布局并存只有坏处 —— 加第二个脚本时要挪目录，
+而且"这个 __init__.py 到底是容器还是脚本"永远说不清。所以去掉了，
+发现旧写法会明确报错（见 :func:`iter_script_dirs`）。
 """
 
 from __future__ import annotations
@@ -100,32 +105,53 @@ def _feature_dirs(game_dir: Path) -> list[Path]:
 
 
 def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
-    """遍历所有 ``(key, 游戏, 模块路径尾段, 目录)``。纯目录扫描，不导入。
+    """遍历所有 ``(key, 游戏, 功能, 目录)``。纯目录扫描，不导入。
 
-    两种布局都支持：
+    布局只有一种：``games/<游戏>/<功能>/``，key 是 ``"<游戏>/<功能>"``。
 
-    * **多脚本游戏**：``games/<游戏>/<功能>/`` —— 每个功能一个脚本，
-      key 是 ``"<游戏>/<功能>"``；
-    * **单脚本游戏**：``games/<游戏>/`` 自己就是一个脚本（没有功能子目录），
-      key 就是 ``"<游戏>"``。测试游戏、小工具属于这种，不该为了凑格式
-      硬套一层目录。
+    游戏目录下**没有**功能子目录时不会产出脚本 —— 那种游戏只是还没写脚本，
+    不是错误（新建一个游戏目录、页面和模板先放好，是正常的中间状态）。
 
-    一个游戏目录**同时**有功能子目录和自己的 ``build_scenario`` 时，
-    以功能子目录为准（游戏目录只当容器）—— 避免"这个 __init__.py 到底是
-    容器还是脚本"的二义性。
+    但这个游戏目录自己带了 ``build_scenario`` 时，说明有人在用**旧的单脚本布局**。
+    这时什么都不产出的话，表现是"脚本没出现在列表里"，很难查 ——
+    所以 :func:`list_scripts` 会专门为它报一条错，把话说清楚。
     """
     for game_dir in _game_dirs():
-        features = _feature_dirs(game_dir)
-        if features:
-            for feature_dir in features:
-                yield (
-                    f"{game_dir.name}/{feature_dir.name}",
+        for feature_dir in _feature_dirs(game_dir):
+            yield (
+                f"{game_dir.name}/{feature_dir.name}",
+                game_dir.name,
+                feature_dir.name,
+                feature_dir,
+            )
+
+
+def _legacy_single_script_games() -> list[tuple[str, str]]:
+    """找出还在用"游戏目录自己就是脚本"这种旧布局的游戏，返回 ``[(游戏, 提示)]``。"""
+    found: list[tuple[str, str]] = []
+    feature_names = set()
+    for game_dir in _game_dirs():
+        if _feature_dirs(game_dir):
+            feature_names.add(game_dir.name)
+    for game_dir in _game_dirs():
+        if game_dir.name in feature_names:
+            continue
+        init = game_dir / "__init__.py"
+        if not init.is_file():
+            continue
+        # 用文本粗判就够了：这里只为了给一句人话提示，不值得为它 import 一个坏模块
+        text = init.read_text(encoding="utf-8", errors="replace")
+        if "def build_scenario" in text or "def build_config" in text:
+            found.append(
+                (
                     game_dir.name,
-                    feature_dir.name,
-                    feature_dir,
+                    f"{game_dir.name}/ 自己带了 build_config/build_scenario —— "
+                    f"单脚本布局已经不支持了。把它挪进一个功能目录："
+                    f"games/{game_dir.name}/<功能>/，key 会变成 "
+                    f"'{game_dir.name}/<功能>'",
                 )
-        elif (game_dir / "__init__.py").is_file():
-            yield game_dir.name, game_dir.name, game_dir.name, game_dir
+            )
+    return found
 
 
 def discovery_errors() -> list[tuple[str, str]]:
@@ -141,10 +167,10 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
         return sorted(_SCRIPTS.values(), key=lambda s: s.key)
 
     found: dict[str, ScriptSpec] = {}
-    errors: list[tuple[str, str]] = []
+    errors: list[tuple[str, str]] = _legacy_single_script_games()
 
     for key, game, slug, _path in iter_script_dirs():
-        module_name = f"games.{game}" if key == game else f"games.{game}.{slug}"
+        module_name = f"games.{game}.{slug}"
         try:
             module = importlib.import_module(module_name)
         except Exception as exc:
@@ -180,7 +206,7 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
 
 
 def get_script(key: str) -> ScriptSpec:
-    """按 key 取脚本。``"testgame"`` 和 ``"testgame.daily"`` 两种写法都认。
+    """按 key 取脚本。``"testgame/sandbox"`` 和 ``"testgame.sandbox"`` 两种写法都认。
 
     :raises KeyError: 不存在，message 里会列出可用的 key。
     """

@@ -33,7 +33,7 @@ from __future__ import annotations
 from gamebot.atomic.query import ImageQuery
 from gamebot.state import Page, PageKind, PageTree
 
-from . import scene
+from .. import scene
 
 
 def build_tree() -> PageTree:

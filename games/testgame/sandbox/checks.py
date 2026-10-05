@@ -33,7 +33,8 @@ from gamebot.config.schema import AppConfig
 from gamebot.state import PageKind
 from gamebot.vision.opencv_matcher import OpenCvMatcher
 
-from . import build_scenario, scene
+from .. import scene
+from . import build_scenario
 from .pages import build_tree
 
 

@@ -97,16 +97,16 @@ python main.py capture -o a.png
 
 ```bash
 python -m games list              # 有哪些脚本
-python -m games describe testgame # 页面树 + 流程图长什么样（不连游戏）
-python -m games check    testgame # 定义对不对、缺哪些图
-python -m games selftest testgame # 跑脚本自带的自检（八项）
+python -m games describe testgame/sandbox # 页面树 + 流程图长什么样（不连游戏）
+python -m games check    testgame/sandbox # 定义对不对、缺哪些图
+python -m games selftest testgame/sandbox # 跑脚本自带的自检（八项）
 ```
 
 `games/testgame/` 是一个完整可跑的样板，而且**不需要真实游戏窗口** ——
 它的屏幕是用代码合成的（确定性噪声画出来的假界面），
 所以模板匹配、ROI 累加、坐标换算都能在没有游戏的情况下验证。
 约定见 [games/README.md](games/README.md)，
-沙盒的说明见 [games/testgame/README.md](games/testgame/README.md)。
+沙盒的说明见 [games/testgame/sandbox/README.md](games/testgame/sandbox/README.md)。
 
 ### 图形界面
 
@@ -215,7 +215,7 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 | 流程层 | 🟡 部分 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）决策与校验、`Scenario` 跨树图校验全部实现；`FlowEngine.tick`、YAML 加载待实现 |
 | 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；9 个 Step 的 `run()`、`Executor.run`、journal 落盘待实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
-| 业务层 | 🟡 部分 | ★ 按游戏/功能两级、注册表自动发现、`check`/`setup`/`selftest` 已实现；`games/testgame` 是完整样板（合成屏幕 + 八项自检） |
+| 业务层 | 🟡 部分 | ★ 按游戏/功能两级、注册表自动发现、`check`/`setup`/`selftest` 已实现；`games/testgame/sandbox` 是完整样板（合成屏幕 + 八项自检） |
 | 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥已实现；每次运行独立日志、结构化事件流待实现 |
 | UI | 🟡 阶段 1 完成 | PySide6 本地控制台：选游戏/脚本/起始节点、实时画面预览、日志大框、检查/自检。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
 | 测试 | ✅ 355 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
@@ -231,7 +231,7 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 业务层骨架、测试游戏、界面阶段 1 也齐了。按依赖顺序还剩：
 
 1. **`PageTree.locate()`** —— 状态层闭环（算法已写进它的 docstring）；
-   有了 `games/testgame` 的合成屏幕，它是**第一个能端到端验证**的方法：
+   有了 `games/testgame/sandbox` 的合成屏幕，它是**第一个能端到端验证**的方法：
    渲染一页 → 定位 → 断言得到的就是那一页
 2. `FlowEngine.tick()` —— 把定位、守卫、执行、转移串起来
 3. `Executor.run` + 9 个 Step 的 `run()` —— 动作真正能下发

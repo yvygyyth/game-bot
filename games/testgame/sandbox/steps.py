@@ -18,7 +18,7 @@ from gamebot.atomic import actions
 from gamebot.execution.step import Step
 from gamebot.types import ActionResult
 
-from . import scene
+from .. import scene
 from .shortcuts import note
 
 if TYPE_CHECKING:

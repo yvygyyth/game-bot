@@ -1,20 +1,44 @@
-# 沙盒测试游戏
+# 沙盒测试游戏 / 沙盒脚本
+
+这是 `testgame` 这个游戏唯一的脚本（key 是 `testgame/sandbox`）。
 
 它不是"某个真实游戏的脚本"，而是**用这个框架写出来的一个最小但完整的脚本**，
 外加一块用代码画出来的合成屏幕。三个用途：
 
 1. **验证视觉链路** —— 模板匹配、ROI 累加、坐标换算有没有错；
 2. **当写脚本的参考样板** —— 页面树、边、自己的步骤怎么写，这里都有一份能跑的；
-3. **当回归测试** —— 框架改完跑一遍 `python -m games selftest testgame`。
+3. **当回归测试** —— 框架改完跑一遍 `python -m games selftest testgame/sandbox`。
 
 ```bash
-python -m games setup    testgame    # 生成合成模板（幂等，会写进 templates/）
-python -m games check    testgame    # 校验定义 + 查模板
-python -m games describe testgame    # 看页面树和流程图
-python -m games selftest testgame    # 跑八项自检
+python -m games setup    testgame/sandbox    # 生成合成模板（幂等，会写进 templates/）
+python -m games check    testgame/sandbox    # 校验定义 + 查模板
+python -m games describe testgame/sandbox    # 看页面树和流程图
+python -m games selftest testgame/sandbox    # 跑八项自检
 ```
 
 后端是 `fake`：即使引擎跑起来也不会真的动鼠标。
+
+## 文件怎么分的
+
+```
+testgame/                    游戏级（这个游戏的所有脚本共用）
+├── scene.py                 ★ 那块合成屏幕 —— 这个游戏的"事实来源"
+├── game.py                  窗口、分辨率、配置（假后端）
+├── templates/               合成模板（scene 生成，不入库）
+└── sandbox/                 这个脚本
+    ├── __init__.py          ★ build_config() + build_scenario() + prepare/selftest
+    ├── pages.py             页面树（结构和 ROI 全从 scene 读）
+    ├── graph.py             流程图
+    ├── steps.py             三种步骤，覆盖"要不要声明模板"
+    ├── shortcuts.py         沙盒版"动作"（只写黑板，不点鼠标）
+    ├── checks.py            八项自检
+    └── README.md            本文件
+```
+
+游戏级**没有** `pages.py` / `shortcuts.py` —— 那些东西的前提是"多个脚本共用同一批页面"，
+而沙盒只有这一个脚本。不要为了看起来对称硬造一个出来。
+（对照 `games/mingjiangsha/`：它就有游戏级 `pages.py`，因为公共首页是多个脚本共用的。）
+
 
 ## 为什么不录真截图
 

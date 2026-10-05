@@ -2,34 +2,32 @@
 
 `src/gamebot/` 是**框架**，它不认识任何具体游戏。这里才是认识游戏的地方。
 
-## 两种布局都支持
+## 布局：一级游戏、二级功能
 
 ```
 games/
-├── <单脚本游戏>/                  这个游戏只有一个脚本 —— 目录本身就是脚本
-│   ├── __init__.py                ★ build_config() + build_scenario()
-│   ├── scene.py / pages.py        页面与屏幕
-│   ├── graph.py / steps.py        流程与步骤
-│   └── templates/                 图片资源
-│
-└── <多脚本游戏>/                   一级：一个游戏一个目录
-    ├── game.py                    游戏级定义：窗口、锁定分辨率、公共配置
-    ├── pages.py                   游戏级公共页面（首页、各类弹窗）
-    ├── shortcuts.py               游戏级快捷方法（关弹窗、回主界面）
-    ├── templates/                 游戏级公共模板
+└── <游戏>/                        一级：一个游戏一个目录
+    ├── __init__.py               游戏级导出（可空）
+    ├── game.py                   游戏级定义：窗口、锁定分辨率、公共配置
+    ├── scene.py                  游戏级"事实来源"（沙盒那种合成屏幕；真游戏不用）
+    ├── pages.py                  游戏级公共页面（首页、各类弹窗）—— 有多个脚本共用才需要
+    ├── shortcuts.py              游戏级快捷方法（关弹窗、回主界面）—— 同上
+    ├── templates/                游戏级公共模板
     └── <功能>/                    二级：一个脚本功能一个目录
         ├── __init__.py            ★ build_config() + build_scenario()
         ├── pages.py               这个功能的页面（状态对象）
         ├── graph.py               这个功能的流程（节点 + 边）
         ├── steps.py               这个功能专用的步骤
         ├── shortcuts.py           这个功能专用的快捷方法
+        ├── checks.py              自检 / 真机探针实现
         ├── templates/             这个功能的图片资源
         └── README.md              这个脚本怎么调
 ```
 
-**不要为了凑格式硬套一层目录**：只有一个脚本的游戏（测试游戏、小工具）
-直接把 `__init__.py` 放在游戏目录下就行，key 就是游戏名（`testgame`）。
-一个游戏目录既有功能子目录、自己又有 `build_scenario` 时，以功能子目录为准。
+**只有这一种布局**：游戏目录下面必须有功能目录。曾经支持过"游戏目录自己就是脚本"
+（单脚本游戏），去掉了 —— 两种布局并存只有坏处：加第二个脚本时要挪目录，
+而且"这个 `__init__.py` 到底是容器还是脚本"永远说不清。
+现在在游戏目录下直接放 `build_scenario` 会**明确报错**并告诉你怎么挪。
 
 一级按游戏、二级按功能的理由：
 
@@ -37,6 +35,10 @@ games/
   改一次全体受益，不用在每个脚本里重复；
 * **功能级**放"只跟这个玩法有关"的东西 —— 页面、流程、专用图、专用步骤。
   一个功能改坏了不影响别的。
+
+**游戏级也不必凑齐所有文件。** 沙盒只有一个脚本，所以它没有游戏级 `pages.py` /
+`shortcuts.py` —— 那些东西没有"多个脚本共用"的前提就不该存在。
+要不要建，取决于这个游戏是不是真有共享内容，不取决于格式看起来对不对称。
 
 ## 唯一需要记住的规则
 
@@ -59,14 +61,15 @@ def selftest() -> list[str]: ...  # 自检，返回失败说明（空 = 全过�
 
 不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。
 
-## 四个命令（都不用连游戏）
+## 命令
 
 ```bash
-python -m games list                # 有哪些脚本
-python -m games describe testgame   # 页面树 + 流程图长什么样
-python -m games check    testgame   # 定义对不对、缺哪些图
-python -m games setup    testgame   # 生成 / 下载资源（幂等）
-python -m games selftest testgame   # 跑脚本自带的自检
+python -m games list                      # 有哪些脚本
+python -m games describe testgame/sandbox # 页面树 + 流程图长什么样
+python -m games check    testgame/sandbox # 定义对不对、缺哪些图
+python -m games setup    testgame/sandbox # 生成 / 下载资源（幂等）
+python -m games selftest testgame/sandbox # 跑脚本自带的自检（静态）
+python -m games probe    testgame/sandbox # 真机探针：现在屏幕上认不认得出来
 ```
 
 `check` 是写脚本时最该反复跑的一条。它挡掉的是这几类问题：
@@ -80,14 +83,17 @@ python -m games selftest testgame   # 跑脚本自带的自检
 | 子页面的 roi 伸出父页面 | 那一页**永远定位不到** |
 | 叠加层带了子页面 | 定位结果无法解释 |
 
-## 参考实现：`testgame`
+## 两个参考实现，覆盖两种情形
 
-**先看 [`testgame/`](testgame/README.md)** —— 它是一份能跑、能自检的完整样板，
-而且把"合成屏幕"的做法也包含了：不依赖真实窗口就能验证模板匹配、
-ROI 累加、坐标换算。它还是框架的回归测试：
+| | 看它 |
+|---|---|
+| **不依赖真机**（合成屏幕、八项自检、ROI 累加怎么验） | [`testgame/sandbox`](testgame/sandbox/README.md) |
+| **真机识图**（悬浮态怎么处理、阈值怎么定、真机探针怎么用） | [`mingjiangsha/jingji`](mingjiangsha/jingji/README.md) |
+
+沙盒那套的价值在于"断网也能验"：
 
 ```bash
-python -m games selftest testgame
+python -m games selftest testgame/sandbox
 ```
 
 ## 图片资源怎么放
@@ -141,5 +147,10 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 
 ## 加一个游戏 / 加一个功能
 
-复制 `testgame/`（单脚本）或按上面的多脚本布局建目录，改三样：
+**加一个功能**：在 `games/<游戏>/` 下建一个新目录，复制 `testgame/sandbox/`
+或 `mingjiangsha/jingji/` 的骨架（`__init__.py` + `pages.py` + `graph.py` + `steps.py`）。
+
+**加一个游戏**：按上面的布局建 `games/<游戏>/`，改三样 ——
 `SLUG` / `WINDOW_TITLE` / `SOURCE_SIZE`，然后是页面、模板、流程。
+游戏级要放什么，取决于有没有多个脚本要共用（见前面那段）。
+
