@@ -293,7 +293,12 @@ class MainWindow(QMainWindow):
             return None
 
     def _request_source(self, title: str = "") -> None:
-        """让工作线程重建抓屏会话。"""
+        """让工作线程重建抓屏会话。
+
+        ``title`` 为空表示"没有明确选软件" —— 这时**不要**用下拉框里那一项
+        （它可能只是枚举出来的第一个），而是让配置里的 ``window_title`` 生效。
+        否则界面会一启动就去抓某个恰好排在第一的窗口，而你想要的是整屏。
+        """
         config = self._current_config()
         if config is None:
             self.preview.show_error("没有可用的配置")

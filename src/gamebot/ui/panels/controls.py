@@ -47,8 +47,8 @@ _NO_SCRIPT = "（不选脚本 —— 只用配置文件看画面）"
 #: 下拉框里标题和尺寸之间的分隔符（只用于显示，传出去之前会剥掉）
 _SIZE_SUFFIX = "  @ "
 
-#: 软件没选时坐标栏的占位文字
-_NO_WINDOW = "（先选软件）"
+#: 软件没选时坐标栏的占位文字（说清"现在按什么抓"，别让人以为坏了）
+_NO_WINDOW = "（没选软件 —— 按配置文件抓）"
 
 
 class ControlsBar(QWidget):
@@ -221,6 +221,10 @@ class ControlsBar(QWidget):
         ``WindowInfo.region`` **已经是客户区坐标**（后端用 ``GetClientRect`` +
         ``ClientToScreen`` 算的），所以这里拿到的不只是"窗口有多大"，
         而是"它在屏幕上的哪一块" —— 那正是后面所有坐标换算的原点。
+
+        **填完不自动选中第一项**：自动选中会被下游当成"用户选了它"，
+        于是预览立刻切去抓那个窗口 —— 而你刚要看的可能恰恰是整屏。
+        留空，等用户真的点一下。
         """
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -247,16 +251,14 @@ class ControlsBar(QWidget):
         """把当前选中窗口的客户区坐标显示出来。
 
         显示的是 ``x=… y=… w=… h=…``，也就是 ``Frame`` 收的**源坐标**原点的来源。
-        窗口没选中 / 枚举不到时显示占位文字 —— 不显示"猜"的值。
+        没选或枚举不到时说明"现在按配置抓"，而不是显示一个猜的值。
         """
         info = self.current_window_info
         if info is None:
             self.coords.setText(_NO_WINDOW)
             return
         region = info.region
-        self.coords.setText(
-            f"客户区 x={region.x} y={region.y}  {region.w}x{region.h}"
-        )
+        self.coords.setText(f"客户区 x={region.x} y={region.y}  {region.w}x{region.h}")
 
     @property
     def current_window_info(self):
