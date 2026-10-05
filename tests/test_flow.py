@@ -522,14 +522,37 @@ class TestScenario:
         scenario.tree.add(Page("nobody", queries=(ImageQuery("n.png"),)))
         assert scenario.unclaimed_pages() == ("nobody",)
 
-    def test_unclaimed_pages_skips_overlays_and_terminal(self) -> None:
-        """叠加层不是一个"能待着的位置"，终态页面进了就结束 —— 都不需要节点。"""
+    def test_unclaimed_pages_skips_overlays_and_groups(self) -> None:
+        """叠加层不是一个"能待着的位置"，分类节点自己不记录信息 —— 都不需要节点。
+
+        **终态状态不一样**：它照样需要一个节点认领（见下一个用例）。
+        """
         scenario = build_scenario()
         scenario.tree.add(
             Page("popup", kind=PageKind.OVERLAY, queries=(ImageQuery("p.png"),))
         )
-        del scenario.graph.nodes["closed"]  # closed 是终态页面
+        scenario.tree.add(Page("folder", kind=PageKind.GROUP))
+        scenario.tree.add(
+            Page("folder/kid", queries=(ImageQuery("k.png"),)), parent="folder"
+        )
+        scenario.graph.add_node(Node("kid", page="folder/kid"))
         assert scenario.unclaimed_pages() == ()
+
+    def test_terminal_state_still_needs_a_node(self) -> None:
+        """终态也必须有节点认领 —— "进了就结束"不等于"不需要节点"。
+
+        少了这条，重定位到终态就无处可去；而 ``validate_binding``
+        只豁免分类节点和叠加层，所以这里会报错。
+        """
+        scenario = build_scenario()
+        # 连边一起摘掉：只删节点会先被 Graph.validate 报"边的 target 不存在"，
+        # 那就测不到本条了。
+        del scenario.graph.nodes["closed"]
+        scenario.graph.edges = [e for e in scenario.graph.edges if e.target != "closed"]
+        assert "closed" in scenario.unclaimed_pages()
+        with pytest.raises(ConfigError) as excinfo:
+            scenario.validate()
+        assert "closed" in str(excinfo.value)
 
     def test_describe_and_to_dict(self) -> None:
         scenario = build_scenario()

@@ -198,26 +198,27 @@ class Scenario:
     def unclaimed_pages(self) -> tuple[PageId, ...]:
         """没有任何节点声明认领的状态。
 
-        三类状态**不算数**，因为它们本来就不该有节点：
+        两类状态**不算数**，因为它们本来就不该有节点：
 
         * **分类节点**（``kind=GROUP``）—— 自己不参与匹配，定位结果里
           永远不会出现它；
         * **叠加层**（``kind=OVERLAY``）—— 它不是"能待着的位置"，
-          而是"主状态之上多了一层"，由主状态的节点负责；
-        * **终态状态**（``terminal=True``）进了就结束，也不需要动作。
+          而是"主状态之上多了一层"，由主状态的节点负责。
 
-        剩下的未认领状态**不是错误**：它由 :func:`validate_binding` 在
-        启动期拦下（"记录信息的状态必须能被重定位到"）。
-        这个方法留给 ``gamebot check`` 做"把整棵树摊开看一眼"的展示。
+        **终态状态（``terminal=True``）要算数**：它进了就结束流程，但仍然需要
+        一个节点认领（通常配一条 ``kind: terminal`` 的边指向它）—— 否则重定位
+        到它就无处可去，``validate_binding`` 会因此报错。这一点容易写反：
+        "终态不需要动作"不等于"不需要节点"。
+
+        剩下的未认领状态**不是警告而是错误**（由 :func:`validate_binding`
+        在启动期拦下）。这个方法留给 ``gamebot check`` 做
+        "把整棵树摊开看一眼"的展示。
         """
         claimed = {n.page for n in self.graph.nodes.values() if n.page}
         return tuple(
             p.id
             for p in self.tree.walk()
-            if p.id not in claimed
-            and not p.is_overlay
-            and not p.is_group
-            and not p.terminal
+            if p.id not in claimed and not p.is_overlay and not p.is_group
         )
 
     def describe(self) -> str:

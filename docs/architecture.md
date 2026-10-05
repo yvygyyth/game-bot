@@ -38,17 +38,20 @@ while True:
 │ 流程层 flow/            "接下来做什么"                            │
 │   Scenario = PageTree + Graph + EngineOptions                     │
 │   Node / Edge / Graph（蓝图）/ GraphCursor（运行游标）/ Engine     │
+│   StateBinding = 状态 ↔ 节点 的关联表（两层唯一的桥）              │
 │   · 有向图 + 主循环 + 节奏与预算控制                              │
 │   · 不认图、不点鼠标                                              │
 └───────────────────────────┬──────────────────────────────────────┘
                             │ 依赖
 ┌───────────────────────────▼──────────────────────────────────────┐
-│ 状态层 state/           "我现在在哪个页面"                        │
+│ 状态层 state/           "我现在在哪个状态"                        │
 │   page.py    Page / PageTree / PageMatch（单帧的纯匹配）          │
 │   tracker.py PageTracker / PageState / PageChange（跨帧持续性）    │
 │   store.py   Blackboard（业务共享数据）                           │
-│   · 页面按模块组成树，子页面继承父页面的 ROI                       │
-│   · 叠加层（弹窗）和主页面**同时成立**                            │
+│   · 状态按模块组成树，子状态继承父节点的 ROI                       │
+│   · 分类节点（kind: group）不记录信息、不参与匹配，只做组织与 ROI  │
+│   · 叠加层（弹窗）和主状态**同时成立**                            │
+│   · 定位两条路径：locate（快，只探预期）/ recover（慢，扩散）      │
 │   · 认不出来是常态，有显式策略                                    │
 │   · 不做决定                                                      │
 └───────────────────────────┬──────────────────────────────────────┘
@@ -86,7 +89,7 @@ while True:
 
 ### 1. 失败用返回值表达，不用异常
 
-原子层的 49 个方法全部返回 `ActionResult`，四种状态：`SUCCESS` / `NOT_FOUND` /
+原子层的 50 个方法全部返回 `ActionResult`，四种状态：`SUCCESS` / `NOT_FOUND` /
 `TIMEOUT` / `ERROR`。
 
 理由：识图脚本里"没找到"是**正常情况**（平均每帧要找 5 次，其中 4 次找不到），
@@ -111,7 +114,7 @@ while True:
 
 ### 4. "认不出来"是一等公民
 
-认不出页面不是异常，是最常见的情况（过场动画、加载、切场景）。所以：
+认不出状态不是异常，是最常见的情况（过场动画、加载、切场景）。所以：
 
 - `PageTree.locate()` 即使什么都没认出来也返回 `success`，
   value 是 `PageMatch(id=UNKNOWN_PAGE)`；
@@ -120,15 +123,19 @@ while True:
 
 没有这套东西，脚本会在每次场景切换时误判并开始乱点。
 
-### 4b. 页面是树，流程是图 —— 两者不能合并
+### 4b. 状态是树，流程是图 —— 两者不能合并
 
 游戏界面分模块，所以"我在哪"是棵树；但"接下来做什么"是带环的有向图
 （`结算 → 首页` 这种跨分支跳回，树里没有这条边）。反过来，图的层级剪枝
 和 ROI 继承也是树独有的。
 
-**树管空间、图管时间**，唯一的接口是 `Node.page`：节点声明"我该在哪个页面上"，
-实测不符就**一步动作都不做**。详见
-[state-and-flow.md](state-and-flow.md)。
+**树管空间、图管时间**，唯一的接口是 `Node.page`（以及同状态多节点时用来
+挑主节点的 `Node.priority`），查表在 `flow/binding.py` 的关联表里。三件事
+都走它：动前校验、重定位去向、动后预期。
+
+实测状态和节点声明不符时，引擎**不会硬着头皮执行**，但也**不是原地干等**：
+它用慢路径找回真实状态，再问关联表该落到哪个节点，本轮不执行、下一轮执行，
+并记一条 `Recovery`。详见 [state-and-flow.md](state-and-flow.md)。
 
 ### 5. 平台差异收敛在后端
 
@@ -146,9 +153,10 @@ Windows（mss + pydirectinput）和 Android（adb）的差异被压到
 
 新增一种 Query / Step 时，在注册表里登记一行即可参与配置化。
 
-### 7. 现在就把 journal 的口子留出来
+### 7. 每步都记账（journal 已实现）
 
-`execution/journal.py` 定义了落盘格式，虽然实现待写。原因：
+`execution/journal.py` 定义了落盘格式，`JsonlJournal` 已经按 JSONL 写盘
+（`gamebot run` 默认落在 `paths.journals/run.jsonl`）。原因：
 **每步记录"看到什么 + 做了什么 + 结果如何"，攒够了就是模仿学习的样本。**
 第一天就让格式带上帧路径、坐标、置信度，比事后补要便宜得多。
 
@@ -222,37 +230,43 @@ FlowEngine.tick()
   │
   ├─① ctx.frame()                    # 拿帧（TTL 内复用，否则重截）
   │
-  ├─② PageTree.locate(frame, hint)   # 状态层：单帧、纯匹配
-  │     ├─ 沿 hint 的路径逐层确认，不成立就退回最近的祖先
-  │     │  （hint 只影响尝试顺序，不影响正确性）
+  ├─② expected = binding.expects(游标当前节点)
+  │   PageTree.locate(frame, expected=...)   # ★ 快路径：只探预期那一页
+  │     ├─ 先精确验 expected，命中就返回（再扫一遍叠加层）
+  │     ├─ 不成才自顶向下逐层下探，hint 只影响尝试顺序、不影响正确性
+  │     ├─ GROUP 分类节点不匹配、直接下探它的子节点
   │     ├─ 每层在 effective_roi 算出的区域里跑 queries（默认 AND）
   │     ├─ 同级按 priority 降序试
-  │     ├─ 走到走不动为止，最深命中者 = 当前页面
   │     └─ 再扫叠加层（OVERLAY 子节点 + 全局弹窗）
-  │     -> PageMatch（一个主页面 + 若干叠加层）
+  │     -> PageMatch（一个主状态 + 若干叠加层）
   │
   ├─③ PageTracker.update(match)      # 跟踪层：连续几帧 / 从何时起
   │     -> PageChange | None（含"只换了叠加层"的情况）
   │
   ├─④ 终态判断（stop_pages / Page.terminal）
   │
-  ├─⑤ 未知页面处理（宽容期内只等）
+  ├─⑤ 状态自检：锚点 == 我以为我在的地方？
+  │     是 -> 走正常路径
+  │     否 -> ★ 重定位（不是干等，也不是硬着头皮执行）：
+  │           a. PageTree.recover(frame, near=expected)  慢路径：末梢优先 + 扩散
+  │           b. binding.node_for(真锚点) 问出"这归哪个节点管"
+  │           c. 游标落到那个节点，本轮不执行（先把位置摆正）
+  │           d. 记一条 Recovery（expected / actual / to_node / 试过谁）
   │
-  ├─⑥ 位置对齐                       # ★ 安全闸
-  │     实测页面 == 当前节点声明的 page?
-  │       否 -> graph.node_for_page(实测页面) 跳过去
-  │             没人认领 -> 什么都不做
-  │
-  ├─⑦ GraphCursor.should_run(ctx)    # 确认进入 + 位置对 + 未超次数 + 冷却过
-  │     └─ Executor.run_many(node.steps)   # 执行层
+  ├─⑥ GraphCursor.should_run(ctx)    # 未超 max_visits + cooldown 已过
+  │     （"状态确认进入"由引擎在它之前查：require_confirmed + tracker.confirmed）
+  │     └─ Executor.run(step) 逐个跑   # 执行层
   │          每个 Step：precondition/skip_if -> 重试 -> on_error -> journal
   │
-  ├─⑧ GraphCursor.step(ctx)          # 流程层：条件满足就换目标
+  ├─⑦ GraphCursor.step(ctx)          # 流程层：条件满足就换目标
   │     -> Decision（含"为什么没走这条边"的痕迹）
   │     没挑到 -> 原地不动（正常分支，不是失败）
   │
-  └─⑨ 检查预算（max_runtime / max_ticks）-> ctx.sleep(tick_interval)
+  └─⑧ 检查预算（max_runtime / max_ticks）-> ctx.sleep(tick_interval)
 ```
+
+认不出来（`unknown`）不算"走错了"——那是"看不清"，由 `unknown_grace` 宽容期
+和 `on_unknown` 策略处理，宽容期内**只等不动作**。
 
 ## 五、调试方法论（重要）
 
@@ -272,8 +286,13 @@ gamebot check                   # 模板文件齐不齐、配置有没有拼错
 
 见根目录 README 的进度表。一句话总结：
 
-> **类型层（L0）完整实现；其余各层是"接口 + 契约 + 已实现的无风险部分"；
-> 视觉算法（模板匹配 / OCR）和三层里真正的业务逻辑待写。**
+> **四层都实现了。** `grep -rn NotImplementedError src/` 还能搜到几处，但除了
+> 一个之外全是**抽象方法的占位**（`Session` 的截图方法与两个属性、`Step.run`），
+> 以及 CLI 里的异常处理。真正的桩只剩 `PageTree.from_nested` ——
+> 配置解析故意留在流程层的 `flow/loader.py`：状态层不许 import 流程层，
+> 所以它自己不能解析配置（那条依赖方向由 `tests/test_structure.py` 的 AST 检查盯着）。
+> 还差的是 `events.py`（结构化事件流）、UI 阶段 2 接线、OCR 实测，
+> 以及一轮真机端到端验证。
 
 这是刻意的顺序：先把**接口**和**分层**钉死，再填实现。
 接口一旦定了，实现可以一点点长，而且每长一块都有测试兜着。

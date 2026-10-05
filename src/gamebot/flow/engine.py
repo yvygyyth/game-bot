@@ -5,18 +5,19 @@
 ```
 (1) frame = ctx.frame()                       拿帧（TTL 内复用，否则重截）
 (2) expected = binding.expects(cursor.current) 流程层自己的预期 = 当前节点声明的状态
-(3) match = tree.locate(frame, expected=...)   快路径：先验预期，只探这一页
-(4) tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
-(5) 终态判断（stop_pages / 状态的 terminal）
-(6) 锚点 == expected ？
+    match = tree.locate(frame, hint=tracker.current_id, expected=expected)
+            快路径：先精确验 expected（只探那一页），不成再按 hint 少试几支
+(3) tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
+(4) 终态判断（stop_pages / 状态的 terminal）
+(5) 锚点 == expected ？
       是 -> 校验通过，执行节点步骤；状态没能确认前不动手
       否 -> 意外：
            a. 慢路径 tree.recover(frame, near=expected) 从最近的末梢逐步扩散
            b. binding.node_for(真锚点) 问出"这归哪个节点管"
            c. 游标落到那个节点（重定位），本轮不执行 —— 先把位置摆正
            d. 留一条 Recovery 记录：从哪个状态到哪个状态、试过谁
-(7) cursor.step()                              时间：条件满足就换目标
-(8) 检查预算（时长 / 轮数），sleep(tick_interval)
+(6) cursor.step()                              时间：条件满足就换目标
+(7) 检查预算（时长 / 轮数），sleep(tick_interval)
 ```
 
 ## 三个关键语义
@@ -380,8 +381,16 @@ class FlowEngine:
             return None
 
         # (2) 流程层自己的预期 + 快路径验证
+        #
+        # hint 和 expected 是两回事，别合并：
+        #   hint     = 上一帧**实际看到**的状态（跟踪器的当前值），只影响尝试顺序
+        #   expected = 流程层**以为应该**在的状态（当前节点声明的），先精确验它
+        # 大多数时候两者相等，但"刚换完屏"那一轮不同 —— 而正是那一轮
+        # 最需要 hint 少试几个分支。
         expected = self.binding.expects(node)
-        found = self.scenario.tree.locate(frame, expected, expected=expected, now=now)
+        found = self.scenario.tree.locate(
+            frame, self.tracker.current_id, expected=expected, now=now
+        )
         if not found.ok:
             # 定位**出错**不等于"认不出来"：模板缺失、Matcher 抛异常都属于
             # 配置/环境问题，当成未知状态会让脚本带着坏掉的识别规则一直空转。

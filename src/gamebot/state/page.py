@@ -400,22 +400,21 @@ class PageTree:
 
         期望结构（``id`` 由嵌套位置自动推导成路径形式）::
 
-            pages:
+            states:
               home:                              # id = "home"
                 name: 首页
-                queries:
-                  - {type: ImageQuery, template: home/logo.png}
+                kind: group                      # 父节点是纯分类，不写 queries
                 children:
-                  qianli:                        # id = "home/qianli"
+                  lobby:                         # id = "home/lobby"
+                    queries:
+                      - {type: ImageQuery, template: home/logo.png}
+                  jingji:
                     queries: [...]
                     children:
-                      battle:                    # id = "home/qianli/battle"
-                        roi: [600, 400, 680, 500]   # 相对父页面
-                        queries: [...]
-                        children:
-                          result: {queries: [...]}
+                      battle:                    # id = "home/jingji/battle"
+                        roi: [600, 400, 680, 500]   # 相对父节点
 
-              # 全局叠加层：不属于任何父页面
+              # 全局叠加层：不属于任何父节点
               network_error:
                 kind: overlay
                 priority: 100

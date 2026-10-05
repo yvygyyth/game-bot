@@ -9,11 +9,15 @@
 > **新会话 / 新协作者先读 [AGENTS.md](AGENTS.md)** —— 它是入口文件：
 > 命令、该读哪几份文档、现在卡在哪、以及几条容易违反的规矩。
 >
-> 当前状态：**"看图"这条链是通的，"看图之后做决定、动手"还是桩**。
+> 当前状态：**框架里已经没有"忘了实现"的桩了**。唯一一个**显式**的桩是
+> `PageTree.from_nested`（理由写在它的 docstring 里，见下），"看图"到"动手"
+> 整条链的代码都在。
 > 原子层 L0~L5 + 视觉 + 平台后端全部实现并在真机验证过；
+> 状态层（`locate` 快路径 / `recover` 慢路径）、流程层（`tick` 的重定位语义）、
+> 执行层（`Executor.run` + 10 个 `Step.run()`）、YAML 加载与 journal 落盘都已实现；
 > 业务层已有 `mingjiangsha/jingji`（名将杀 · 竞技场）跑通识别；
-> 缺的是 `PageTree.locate()` / `FlowEngine.tick()` / `Executor.run`。
-> 详见下方[进度](#进度)。
+> 还差的只有**结构化事件流、UI 阶段 2 接线、OCR 实测，以及一轮真机端到端**。
+> 详见下方[进度](#进度)与[下一步](#下一步)。
 
 ---
 
@@ -24,17 +28,17 @@ game-bot/
 ├── config/                      # 框架级配置样板（app.yaml / regions.yaml）
 │   ├── app.yaml                 #   主配置：后端 / 视觉 / 节奏 / 路径
 │   ├── regions.yaml             #   命名区域：把坐标从代码里挪出来
-│   └── flows/example_flow.yaml   #   脚本定义样板（页面树 + 流程图）
+│   └── flows/example_flow.yaml   #   脚本定义样板（状态树 + 流程图）
 ├── assets/templates/            # 框架自带模板目录（业务层的图在自己的目录里）
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
 │   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
-│   ├── state-and-flow.md        #   ★ 页面树与流程图怎么结合（三种模式）
+│   ├── state-and-flow.md        #   ★ 状态树与流程图怎么结合（关联表 / 两条定位路径）
 │   └── ui.md                    #   ★ 本地控制台 UI 的设计（布局 / 线程 / 分阶段）
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
 │   └── mingjiangsha/            #   名将杀：游戏级定义 + 各功能脚本
 │       ├── templates/           #     游戏级公共模板
-│       └── jingji/              #     竞技场脚本：页面 / 流程 / 步骤 / 自检
+│       └── jingji/              #     竞技场脚本：状态 / 流程 / 步骤 / 自检
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）
@@ -55,19 +59,20 @@ game-bot/
 │   │   ├── policy.py            #   RetryPolicy / StepPolicy / ErrorMode
 │   │   ├── executor.py          #   Executor
 │   │   └── journal.py           #   落盘记录（JSONL 契约）
-│   ├── state/                   # ★ 状态层：我在哪个页面
-│   │   ├── page.py              #   Page / PageTree / PageMatch（单帧纯匹配）
+│   ├── state/                   # ★ 状态层：我在哪个状态
+│   │   ├── page.py              #   状态树 Page / PageTree / PageMatch + 定位两条路径
 │   │   ├── tracker.py           #   PageTracker / PageState / PageChange（跨帧）
 │   │   └── store.py             #   Blackboard（业务共享数据）
 │   ├── flow/                    # ★ 流程层：做什么、何时换
-│   │   ├── scenario.py          #   Scenario（页面树+流程图+参数）/ EngineOptions
+│   │   ├── scenario.py          #   Scenario（状态树+流程图+参数）/ EngineOptions
 │   │   ├── graph.py             #   Node / Edge / Graph / GraphCursor
-│   │   ├── engine.py            #   FlowEngine 主循环 + RunReport
+│   │   ├── binding.py           #   ★ 关联表 StateBinding：两层唯一的桥
+│   │   ├── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）
 │   │   └── loader.py            #   YAML -> Scenario
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
 │   ├── config/                  # 配置模型与加载
 │   └── utils/                   # 日志、计时
-├── tests/                       # 框架的结构测试 + 已实现部分的单元测试
+├── tests/                       # 框架的结构测试 + 单元测试
 └── main.py                      # 不安装也能跑：python main.py run
 ```
 
@@ -77,7 +82,7 @@ game-bot/
 
 `tests/` 放的是**框架自己**的单元测试（层级依赖、类型契约、决策逻辑）；
 `games/` 里的脚本各自带 `selftest()`，检查的是"这份定义本身对不对"
-（图齐不齐、ROI 框得对不对、页面之间有没有区分度）。两边职责不同。
+（图齐不齐、ROI 框得对不对、状态之间有没有区分度）。两边职责不同。
 
 ## 快速开始
 
@@ -105,7 +110,7 @@ python main.py capture -o a.png
 
 ```bash
 python -m games list                          # 有哪些脚本
-python -m games describe mingjiangsha/jingji  # 页面树 + 流程图（不连游戏）
+python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 python -m games selftest mingjiangsha/jingji  # 静态自检
 python -m games probe    mingjiangsha/jingji  # 真机探针：现在认不认得出目标
@@ -114,7 +119,7 @@ python -m games probe    mingjiangsha/jingji  # 真机探针：现在认不认�
 业务层按**一级游戏、二级功能**组织，脚本永远在功能目录里
 （`games/<游戏>/<功能>/`）。约定见 [games/README.md](games/README.md)；
 `mingjiangsha/jingji`（名将杀 · 竞技场）是一份完整的真机样板，
-里面记着几个**用数据定下来**的结论：悬浮态怎么处理、页面标识该选什么、
+里面记着几个**用数据定下来**的结论：悬浮态怎么处理、状态标识该选什么、
 阈值怎么定 —— 见 [games/mingjiangsha/jingji/README.md](games/mingjiangsha/jingji/README.md)。
 
 ### 图形界面
@@ -125,11 +130,13 @@ gamebot ui                 # 打开本地控制台
 gamebot ui --script none   # 不选脚本，只用 config/app.yaml 看画面
 ```
 
-现在的界面（阶段 1）能：**选游戏 / 选脚本 / 选起始节点**、看页面树与流程图、
+现在的界面（阶段 1）能：**选游戏 / 选脚本 / 选起始节点**、看状态树与流程图、
 跑检查与自检、**实时画面预览**（抓帧在工作线程，不卡界面）、日志大框。
 
-「开始 / 停止」是**置灰**的 —— 它们要等 `PageTree.locate()` 与
-`FlowEngine.tick()`。灰按钮带 tooltip 说明原因，不是点了没反应。
+「开始 / 停止」是**置灰**的。**引擎侧已经就绪了** —— `PageTree.locate()`、
+`FlowEngine.tick()`、`Executor.run` 都已实现，界面代码**还没接线**（窗口里
+那两句"尚未实现"的 tooltip 也已经过期，属于待改的界面文案）。灰按钮带
+tooltip 说明原因，不是点了没反应。
 设计、线程模型、以及做完之后回填的六条坑见 [docs/ui.md](docs/ui.md)。
 
 ### CLI 子命令
@@ -180,7 +187,7 @@ result = find_any_of(frame, [
 from gamebot.bootstrap import run_scenario
 
 report = run_scenario("config/app.yaml")
-print(report.summary())          # 脚本/停止原因/轮数/耗时/页面与节点轨迹
+print(report.summary())          # 脚本/停止原因/轮数/耗时/状态与节点轨迹
 print(report.to_dict())          # 可直接 JSON 化落盘
 ```
 
@@ -189,7 +196,7 @@ print(report.to_dict())          # 可直接 JSON 化落盘
 ```
 flow (流程层)  ──  做什么、何时换  有向图 + 主循环 + 节奏与预算
   ↑
-state (状态层) ──  我在哪个页面    页面树（单帧定位）+ 跟踪层（跨帧）+ 黑板
+state (状态层) ──  我在哪个状态    状态树（单帧定位）+ 跟踪层（跨帧）+ 黑板
   ↑
 execution (执行层) ── 可靠地做一次  步骤 + 重试 + 失败代价 + 记账
   ↑
@@ -198,14 +205,19 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 
 **依赖只能向下**，由 `tests/test_structure.py` 用 AST 静态检查强制。
 
-四条容易踩的边界（详见 [docs/architecture.md](docs/architecture.md)
+六条容易踩的边界（详见 [docs/architecture.md](docs/architecture.md)
 和 [docs/state-and-flow.md](docs/state-and-flow.md)）：
 
 1. 状态层**只回答"是什么"**，认不出来也要如实说，不猜、不做决定；
 2. 流程层**只回答"去哪儿"**，不直接碰键鼠；
-3. 页面是**树**、流程是**图**，两者不能合并 —— 树管空间，图管时间；
-4. 节点声明的 `page` 和实测页面不符时，**一个动作都不做**（防在错误页面上乱点）；
-5. 执行层**只回答"怎么可靠地做一次"**，不决定做不做。
+3. 状态是**树**、流程是**图**，两者不能合并 —— 树管空间，图管时间；
+4. 节点声明的 `page` 和实测状态不符时，**本轮一个动作都不做**，而是走重定位
+   （慢路径找回真实状态 → 关联表查出该去哪个节点 → 游标落过去，下一轮才执行），
+   并且**每次都记进 `RunReport.recoveries`** —— 自动跳可以，隐形不行
+   （这条推翻了早期的"只拦不跳"，见 [docs/state-and-flow.md](docs/state-and-flow.md)）；
+5. 不写 `page` 的节点**不校验状态**（"流程图只写正常流程"），但状态侧反过来是硬的：
+   每个记录信息的状态都必须有节点认领，否则启动期就 `ConfigError`；
+6. 执行层**只回答"怎么可靠地做一次"**，不决定做不做。
 
 ## 进度
 
@@ -214,38 +226,42 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 | L0 类型层 | ✅ 完整 | `ActionResult` / `Point` / `Region`，含全部便捷方法 |
 | L1 Session | ✅ 完整 | 截图编排、坐标换算、生命周期、平台分发 |
 | L2 Frame | ✅ 完整 | 12 个查询方法全部实现，含帧内缓存与子帧坐标换算 |
-| L3 Query | ✅ 完整 | 11 个描述符 + 注册表（`query_from_dict` 归流程层，未写） |
+| L3 Query | ✅ 完整 | 11 个描述符 + 注册表；`query_from_dict` 已实现（在 `atomic/query.py`，由流程层 loader 调用） |
 | L4 组合子 | ✅ 完整 | 5 个帧内 + 5 个跨帧，统一 error 透传语义 |
-| L5 动作 | ✅ 完整 | 14 个动作，逻辑坐标自动换算，`click_image` 找不到不点 |
+| L5 动作 | ✅ 完整 | 14 个动作（含 `click_source_point`），逻辑坐标自动换算，`click_image` 找不到不点 |
 | 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现已写但未装依赖验证 |
 | 平台后端 | ✅ 完整 | windows（mss + pydirectinput/pyautogui）、android（adb） |
 | fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
-| 状态层 | 🟡 部分 | ★ 页面树（`Page`/`PageTree`/`PageMatch`）结构、ROI 继承、跟踪层（`PageTracker`/`PageChange`）、校验全部实现；`PageTree.locate` 待实现 |
-| 流程层 | 🟡 部分 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）决策与校验、`Scenario` 跨树图校验全部实现；`FlowEngine.tick`、YAML 加载待实现 |
-| 执行层 | 🟡 部分 | 策略对象/步骤构造/结果记录已实现；9 个 Step 的 `run()`、`Executor.run`、journal 落盘待实现 |
+| 状态层 | ✅ 完整 | ★ 状态树（`Page`/`PageTree`/`PageMatch`）、分类节点（`PageKind.GROUP`）、ROI 继承、两条定位路径（`locate` 快 / `recover` 慢）、跟踪层、校验全部实现 |
+| 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位、YAML 加载全部实现 |
+| 执行层 | ✅ 完整 | 策略对象/步骤构造（`step_from_dict`）/结果记录/`Executor.run`/10 个 Step 的 `run()`/journal JSONL 落盘全部实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
 | 业务层 | 🟡 部分 | ★ 一级游戏 / 二级功能，注册表自动发现，`check`/`setup`/`selftest`/`probe` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
 | 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥已实现；每次运行独立日志、结构化事件流待实现 |
-| UI | 🟡 阶段 1 完成 | PySide6 本地控制台：选游戏/脚本/起始节点、实时画面预览、日志大框、检查/自检。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
-| 测试 | ✅ 363 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
+| UI | 🟡 阶段 1 完成 | PySide6 本地控制台：选游戏/脚本/起始节点、实时画面预览、日志大框、检查/自检。**引擎侧已就绪，界面还没接线**（开始/停止仍置灰）。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
+| 测试 | ✅ 475 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
-> **"看图"这条链是通的；"看图之后做决定、动手"这条链（`locate` / `tick` /
-> `Executor.run` / 步骤本体）还是桩。**
+> **整条链现在都通了**：状态层两条定位路径、流程层的重定位语义、执行层的
+> `Executor.run` 与 10 个 `Step.run()`、YAML 加载、journal 落盘都已实现，
+> 并且在 fake 后端上端到端跑通过（`verify_new_model.py` + `tests/test_flow.py`）。
+> 真机上验过的仍然只有识别与输入这条链 —— 端到端一轮真机运行还没做过。
+>
+> **唯一剩下的显式桩是 `PageTree.from_nested`**：配置怎么解析故意留在流程层的
+> `flow.loader.parse_pages` —— 状态层不许 import 流程层，所以它自己不能解析配置。
+> 桩里写了这条理由，不是忘了实现。
 
 ### 下一步
 
-原子层已封板，业务层和界面阶段 1 也齐了。按依赖顺序还剩：
+原子层已封板，业务层、状态层/流程层/执行层的实现也齐了。按依赖顺序还剩：
 
-1. **`PageTree.locate()`** —— 状态层闭环（算法已写进它的 docstring）；
-   拿 `mingjiangsha` 的真实页面和模板就能端到端验：抓一帧 → 定位 → 断言得到的是那一页
-2. `FlowEngine.tick()` —— 把定位、守卫、执行、转移串起来
-3. `Executor.run` + 9 个 Step 的 `run()` —— 动作真正能下发
-4. `events.py`（结构化事件流）+ 每次运行独立日志 —— UI 阶段 2 与 journal 的数据源
-5. UI 阶段 2 —— 开始/停止、状态面板（预览要改成复用引擎那一帧）
-6. `query_from_dict` + `step_from_dict` —— 让 YAML 真正驱动脚本
-7. OCR 实测（装 `--extra ocr-rapid` 后跑一遍 `find_text`）
+1. **`events.py`（结构化事件流）+ 每次运行独立日志** —— UI 阶段 2 与 journal 的数据源
+2. **UI 阶段 2 接线** —— 开始/停止、状态面板（预览要改成复用引擎那一帧），
+   顺手把窗口里那几句"尚未实现"的 tooltip 改成事实
+3. **OCR 实测** —— 装 `--extra ocr-rapid` 后跑一遍 `find_text`
+4. **真机端到端** —— 现在只验到识别；拿 `mingjiangsha/jingji` 真跑一轮，
+   看 `RunReport` 的轨迹（含 `recoveries`）是不是符合预期
 
 ## 开发约定
 
@@ -261,6 +277,9 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 - **不要绕过 `ctx.frame()` 直接截图**。同一 tick 内的步骤必须看同一张图。
 - **坐标一律源分辨率**，逻辑分辨率只在写脚本时用，由 `CoordinateMapper` 换算。
 - **新增 Query / Step 类型必须登记注册表**，否则 YAML 里写不出来。
+- **状态树里父节点一律 `kind: group`（分类节点），只有末梢状态节点写 `queries`** ——
+  分类节点自己不记录信息、不参与匹配；给它写 `queries` 或让它空着，校验都会报出来。
+- **YAML 里那一节叫 `states:`**（旧键 `pages:` 仍兼容，但新配置别再写）。
 - 提交前跑：`uv run ruff check . && uv run pytest`
 
 ## 依赖

@@ -107,13 +107,15 @@ def cmd_check(args: argparse.Namespace) -> int:
     print(f"✓ 配置 OK: {args.config}")
     print(
         f"✓ 脚本 OK: {scenario.name} "
-        f"({len(scenario.tree)} 页面 / {len(scenario.graph)} 节点 / "
+        f"({len(scenario.tree)} 状态 / {len(scenario.graph)} 节点 / "
         f"{len(scenario.graph.edges)} 边)"
     )
 
+    # 未认领的状态**本该**是启动期错误（Scenario.validate 里由 validate_binding
+    # 拦下），走到这里说明它被豁免了（分类节点 / 叠加层）—— 所以只是提示。
     unclaimed = scenario.unclaimed_pages()
     if unclaimed:
-        print(f"· 以下页面没有节点认领（只观察不动作）: {', '.join(unclaimed)}")
+        print(f"· 以下状态没有节点认领（不会出现在定位结果里）: {', '.join(unclaimed)}")
 
     missing = check_templates(config, scenario)
     if missing:

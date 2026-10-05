@@ -189,7 +189,7 @@ def check_templates(config: AppConfig, scenario: Scenario) -> list[str]:
 
 
 def _collect_templates(scenario: Scenario) -> set[str]:
-    """提取整份脚本会用到的模板名：页面查询 + 步骤。"""
+    """提取整份脚本会用到的模板名：状态查询 + 步骤。"""
     found: set[str] = set()
 
     def walk_query(obj: Any, depth: int = 0) -> None:
@@ -238,7 +238,7 @@ def build_context(
 ) -> RunContext:
     """装配 RunContext（含 Session 与 Executor）。
 
-    ``scenario`` 用来构造页面跟踪器 —— 跟踪器需要状态树才能查
+    ``scenario`` 用来构造状态跟踪器 —— 跟踪器需要状态树才能查
     ``min_stable_frames`` / ``timeout``。没给就是一棵空树（跟踪器退化，但仍可用）。
     """
     session = session or build_session_from_config(config)
@@ -299,7 +299,7 @@ def bootstrap(
     ctx = build_context(config, scenario=scenario, journal=journal)
     engine = build_engine(config, ctx, scenario)
     log.info(
-        "装配完成: %r, %d 页面 / %d 节点 / %d 边",
+        "装配完成: %r, %d 状态 / %d 节点 / %d 边",
         scenario.name,
         len(scenario.tree),
         len(scenario.graph),
@@ -307,7 +307,7 @@ def bootstrap(
     )
     unclaimed = scenario.unclaimed_pages()
     if unclaimed:
-        log.info("以下页面没有节点认领（只观察不动作）: %s", ", ".join(unclaimed))
+        log.info("以下状态没有节点认领（不会出现在定位结果里）: %s", ", ".join(unclaimed))
     return ctx, engine
 
 

@@ -224,10 +224,12 @@ edges:
 
 ## 七、还没定的两件事
 
-1. **`hint` 与 `expected` 是否可以合并**。现在 `tick()` 两个都传
-   （`hint=tracker.current_id`、`expected=binding.expects(node)`），
-   它们语义不同（"上一帧在哪" vs "我以为我该在哪"），但多数时候相等。
-   合并成一个参数会让调用点更短，代价是丢掉一种优化可能。
+1. **`hint` 与 `expected` 是不是该合并**。`tick()` 现在两个都传：
+   `hint=tracker.current_id`（上一帧**实际看到**的）与
+   `expected=binding.expects(node)`（流程层**以为应该**在的）。
+   语义不同，但大多数时候相等 —— 合并成一个参数会让调用点更短，
+   代价是丢掉"刚换完屏那一轮"少试几支的机会。
 2. **UI 阶段 2 的状态面板**。引擎侧数据已经齐了
    （`tracker.current` / `RunReport.recoveries` / `PageMatch.attempts`），
-   但界面还没接 —— 界面里的「开始」按钮目前仍然是灰的。
+   但界面还没接 —— 界面里的「开始」按钮目前仍然是灰的，
+   而且那几处 tooltip 还写着"等待 locate/tick 实现"的过期理由。

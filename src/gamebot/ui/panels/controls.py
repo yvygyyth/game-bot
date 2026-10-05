@@ -9,7 +9,11 @@
 
 点了没反应会让人怀疑自己操作错了 —— 那是比"功能没做"更糟的体验。
 所以「开始」在阶段 2 之前一直是灰的，鼠标悬停能看到
-"需要 FlowEngine.tick()，尚未实现"。
+"界面还没接到 FlowEngine.run()（阶段 2：引擎侧已就绪）"。
+
+注意**置灰的理由已经变了**：早期是"`locate()` / `tick()` 还没实现"，
+现在引擎侧（状态定位、主循环、执行器）都通了，缺的只剩"把这个按钮接到
+`FlowEngine.run()` 上"这一段界面工作。
 """
 
 from __future__ import annotations
@@ -97,7 +101,7 @@ class ControlsBar(QWidget):
         self.stop_btn.setEnabled(False)
 
         self._build_layout()
-        self.set_runnable(False, "需要 FlowEngine.tick()，尚未实现")
+        self.set_runnable(False, "界面还没接到 FlowEngine.run()（阶段 2）")
         self.set_stoppable(False)
 
     # ------------------------------------------------------------------ #
@@ -187,7 +191,7 @@ class ControlsBar(QWidget):
         self.node.blockSignals(False)
         self.node.setEnabled(enabled and bool(nodes))
         if not enabled:
-            self.node.setToolTip("需要 FlowEngine 支持起始节点，尚未实现")
+            self.node.setToolTip("从哪个节点开始跑（FlowEngine(start_node=...) 已支持）")
         self._on_node_changed()
 
     def refresh_windows(self, keyword: str = "") -> list[str]:

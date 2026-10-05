@@ -132,7 +132,8 @@ class MainWindow(QMainWindow):
         """
         label = QLabel(
             "阶段 1：选脚本 / 看画面 / 看日志已可用；"
-            "「开始」需要 PageTree.locate() + FlowEngine.tick()，尚未实现。",
+            "「开始」还没接线 —— 引擎侧（状态定位 + 主循环 + 执行器）已经就绪，"
+            "但界面还没把「开始」接到 FlowEngine.run() 上（阶段 2）。",
             self,
         )
         label.setWordWrap(True)
@@ -226,7 +227,7 @@ class MainWindow(QMainWindow):
             details.node_list,
             enabled=bool(details.node_list),
         )
-        self.controls.set_runnable(False, "需要 FlowEngine.tick()，尚未实现")
+        self.controls.set_runnable(False, "界面还没接到 FlowEngine.run()（阶段 2）")
         if details.problems:
             self._status.setText(f"{entry.key}: 定义有问题（见「检查输出」）")
             log.warning("脚本 %s 的定义有问题: %s", entry.key, details.problems)
@@ -348,7 +349,7 @@ class MainWindow(QMainWindow):
     # 开始 / 停止（阶段 2）
     # ------------------------------------------------------------------ #
     def _on_start(self) -> None:
-        reason = "需要 PageTree.locate() + FlowEngine.tick()，尚未实现"
+        reason = "界面还没接到 FlowEngine.run()（阶段 2）"
         QMessageBox.information(self, "还没实现", reason)
         log.info("「开始」被点了，但%s", reason)
 
@@ -360,7 +361,7 @@ class MainWindow(QMainWindow):
     def _warn_about_unimplemented(self) -> None:
         log.info("=" * 60)
         log.info("阶段 1：选脚本、看画面、看日志、检查、自检 都能用")
-        log.info("「开始」/「停止」要等 PageTree.locate() 与 FlowEngine.tick()")
+        log.info("「开始」/「停止」还没接到引擎（阶段 2：引擎侧已就绪）")
         log.info("=" * 60)
 
     # ------------------------------------------------------------------ #
