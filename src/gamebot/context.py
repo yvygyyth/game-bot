@@ -45,7 +45,7 @@ class RunContext:
 
     :param session: L1 截图层实例。
     :param config: 应用配置。
-    :param tree: 页面树。跟踪器需要它来查 ``min_stable_frames`` / ``timeout``。
+    :param tree: 状态树。跟踪器需要它来查 ``min_stable_frames`` / ``timeout``。
     :param frame_ttl: 帧的新鲜度上限（秒）。超过就自动重截。
 
     **中止的单一事实源是 ``session``**，不是这里。本类只做转发 ——

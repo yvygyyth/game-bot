@@ -1,4 +1,7 @@
-# 页面树 与 流程图：怎么结合
+# 状态树 与 流程图：怎么结合
+
+> 这份文档记录的是**当前**的设计。它推翻过一次早期决定（"只拦不跳"），
+> 推翻的理由写在第五节里 —— 那一节比结论重要。
 
 ## 一、为什么是两个对象，不是一个
 
@@ -12,175 +15,219 @@
 
 反过来，图也拿不到树的收益：
 
-* **逐层剪枝**：树能只试"当前路径上的兄弟"，图没有"层级"概念，每帧都得把所有
-  页面的识别条件跑一遍；
-* **ROI 继承**：「战斗」的 8 个子状态只需要看右下角技能栏那 680×500 就能区分，
+* **逐层剪枝**：稳定状态下只需要试"当前这一支"的几个候选，不用把所有状态的
+  识别条件跑一遍；
+* **ROI 继承**：「战斗」的子状态只需要看右下角技能栏那 680×500 就能区分，
   这个"只需要看一块"的来源是父节点，图里无处安放；
-* **消歧**：同一个"确认"图标在"战斗中"和"设置页"下含义不同，
-  得靠父节点上下文才能区分。
+* **消歧**：同一个"确认"图标在不同分支下含义不同，得靠父节点上下文才能区分。
 
 所以：**树管空间，图管时间。** 合并成一个对象一定会丢掉其中一边的能力。
 
-## 二、唯一的接口：`Node.page`
+## 二、状态树长什么样：只有末梢记录信息
+
+```
+home                [group]         ← 纯分类：自己不记录信息
+├── lobby           queries: logo.png
+├── jingji          queries: jingji/title.png
+│   └── battle      roi: [1180,620,680,500]   queries: skillbar.png
+└── result          queries: OrQuery(victory.png, defeat.png)
+
+network_error       [overlay]       ← 顶层叠加层，哪一页都可能出现
+```
+
+三条规则：
+
+1. **只有末梢（记录信息的状态）才写 `queries`**；父节点一律 `kind: group`。
+   给它写 `queries` 是配置错误，`PageTree.validate()` 会报出来。
+2. **分类节点自己不参与匹配**。定位时**直接下探它的子节点**，不要求它自己成立。
+   这一点很关键：要求"父页面成立"会让「首页 → 竞技场 → 战斗」这种链条
+   一进下一层就全部失效 —— 上一层的特征已经不在屏幕上了。
+   父子关系在树里表达的是 **ROI 与消歧**，不是"祖先必须一直成立"。
+3. **全局叠加层挂在顶层**（不属于任何父节点），因为它出现在哪一页都可能。
+   叠加层和主状态**同时成立**，所以定位结果不是一个 id，而是
+   `PageMatch(id=主状态, overlays=(...))`。
+
+> **踩过的坑**：早期允许父节点写 `queries`，于是把
+> `home → home/battle → home/battle/result` 这么建树时，进了战斗页反而
+> **认不出任何状态** —— 因为"首页成立"被当成了下探的前置条件。
+> 分类节点就是为这个坑立的规矩。
+
+## 三、唯一的接口：关联表 `StateBinding`
+
+状态层和流程层必须解耦，但有三件事天然需要"某个状态"和"某个流程节点"对上号：
+
+1. **动手之前校验**：节点说"我要在 `home/jingji` 上点这个按钮"，得先确认真在那儿；
+2. **重定位之后去哪**：状态层说"真实在 `home/jingji`"，流程图得回答"那归谁管"；
+3. **动完手之后我在哪**：节点跑完，当前"预期状态"要跟着变。
+
+三件事收在一个对象上：`gamebot.flow.binding.StateBinding`。
+它是**启动期算出来的纯数据**，不是新的配置文件 —— 数据来源就是节点的 `page` 字段：
 
 ```python
-@dataclass(slots=True)
-class Node:
-    id: NodeId
-    steps: list[Step] = ...        # 这个节点做什么
-    page: PageId | None = None     # ★ 我该在哪个页面上
+node = graph.node("jingji")          # page="home/jingji"
+binding.state_of(node)               # -> "home/jingji"    我负责哪个状态
+binding.node_for("home/jingji")      # -> node("jingji")   这个状态归谁管
+binding.check(node, actual)          # -> (True/False, 说明)  动手前校验
 ```
 
-这是两个对象之间**唯一**的耦合点。有了它，引擎每一轮可以这样走：
+### 一个方向是"一定"，另一个方向是"最多一个"
 
 ```
-① frame = ctx.frame()
-② match = tree.locate(frame, hint=上一轮的页面)     # 空间：我在哪
-③ if match.id != cursor.current_node.page:          # 时间：对得上吗
-       ⚠ 记一条警告，本轮一个动作都不做             #   **只拦不跳**
-④ if cursor.should_run(ctx):                        # 位置对 + 未确认 + 冷却已过
-       executor.run_many(node.steps)                #   干活
-⑤ cursor.step(ctx)                                  # 时间：条件满足就换目标
+流程节点  不一定  需要一个状态        （纯等待 / 纯逻辑的节点，不写 page）
+状态      一定    需要一个流程节点    （否则重定位到它就无处可去）
 ```
 
-第 ③ 步是这套设计**最重要的安全属性**：**实际页面 ≠ 节点期望的页面时，
-一步动作都不做。** 识图脚本最危险的失败模式就是在错误页面上瞎点 ——
-点错一个"确认"可能就是消耗道具或者进错关卡。用一句比较就把这类事故挡掉了。
+* 前半句让"**业务层只写正常流程**"成为可能：不写 `page` 的节点完全不校验状态。
+  但注意：**不校验不等于没人认领**。如果那个节点负责的界面本身是个状态，
+  它还是得写 `page` —— 否则 `validate` 会报"状态没人认领"。
+  真正"不需要状态"的是纯逻辑节点（空转等待、条件循环）；
+* 后半句是重定位能落地的前提，而且是**启动期硬校验**的
+  （`Scenario.validate()` → `validate_binding()`）：有状态没节点认领，
+  直接 `ConfigError`，不让它拖到运行期才暴露。
 
-### 为什么"只拦不跳"（这个岔路已经定了）
+同状态多节点是合法的（"第一次进领奖，之后直接开打"），但重定位必须落到
+**唯一**一个节点上，所以用 `Node.priority` 选出主节点（并列时取先声明的）。
 
-早期版本的第 ③ 步还有一个动作：不一致时**自动跳到**认领该页面的节点
-（`graph.node_for_page(match.id)`）。现在去掉了，跳转必须由图里的边显式表达。
+### 两条纪律，保证两侧不互相渗透
 
-| | 自动跳 | **只拦不跳（现在的选择）** |
-|---|---|---|
-| 忘写边 | 也能跑（靠隐式规则） | 原地不动 + 一条警告 |
-| "为什么它动了" | 在引擎的隐式规则里 | **永远能在图里找到答案** |
-| 那次移动进 `RunReport.decisions` 吗 | 不进（隐形） | **进** |
+* **流程层不许出现 `if ctx.page.id == "..."`**。想表达"状态变了"就写进图里
+  （边条件）；想表达"这一页归谁管"就写 `page`。状态知识永远不渗进流程层；
+* **状态层不许知道"节点 / 边 / 去哪"**。它只回答"这一帧像谁"，
+  `recover()` 拿到的输入也只是"从谁附近开始找"，不是"该去哪个节点"。
 
-代价是忘写边就跑不动 —— 但"不动"是**有解释的**：引擎会记一条警告，
-而且同一组（节点，页面）只记一次，不会刷屏。相比之下，自动跳的代价更隐蔽：
-它让一次控制流转移在报告里隐形，排查"它怎么跑那儿去了"时只能靠猜。
+跨层传递的只有两个**哑值**：`PageMatch`（观测）和锚点字符串。
+**树对象和游标对象都不跨层。**
 
-控制流只有一个出处，值这个代价。
+## 四、一轮 tick 的数据流
 
-> 想从中间某个节点开始调试时也一样：可以用 `FlowEngine(start_node=...)`
-> 指定起点，但那**不解除位置守卫** —— 起点声明的 `page` 和实测不符时，
-> 动作照样一个都不执行。起点决定"从哪开始试"，守卫决定"能不能动手"。
+```
+(1) frame = ctx.frame()                        拿帧（TTL 内复用，否则重截）
+(2) expected = binding.expects(cursor.current) 流程层自己的预期
+(3) match = tree.locate(frame, expected=...)   快路径：先验预期，只探这一页
+(4) tracker.update(match)                      跟踪层：连续几帧了 / 从何时起
+(5) 终态判断（stop_pages / 状态的 terminal 标记）
+(6) 锚点和"我以为我在的地方"一致吗？
+      是 -> 执行节点步骤（状态没确认前不动手）
+      否 -> 意外：
+           a. tree.recover(frame, near=expected)   慢路径：末梢优先 + 逐步扩散
+           b. binding.node_for(真锚点)             问出"这归哪个节点管"
+           c. 游标落到那个节点（重定位），本轮不执行
+           d. 记一条 Recovery：从哪到哪、试过谁
+(7) cursor.step()                              时间：条件满足就换目标
+(8) 检查预算（时长 / 轮数），sleep(tick_interval)
+```
 
-## 三、三种结合模式
+### 两条路径，别混用
 
-| | 谁做主 | 适用 | 代价 |
+| | 什么时候用 | 顺序 | 代价 |
 |---|---|---|---|
-| **模式 1（推荐）** | 两边分工：树定位、图决定 | 绝大多数情况 | 需要给每个 `Node` 填 `page` |
-| **模式 2** | 树做主，图是附属 | 每个页面只做一件事的简单游戏 | 表达不了"同页面多阶段" |
-| **模式 3** | 图做主，树只喂数据 | 逻辑高度自定义 | 退化成大片 `if ctx.page.id == ...` |
+| **快路径** `locate(expected=)` | 正常每一轮 | 先精确验预期那一页；不成再按 hint 优化过的顺序自顶向下 | 一两次匹配 |
+| **慢路径** `recover(near=)` | 只在意外时 | 从最近的末梢开始，逐级往上扩大范围 | 高，但能把脚本救回来 |
 
-### 模式 1：树定位 + 图决定（推荐）
+每轮都跑慢路径等于每帧探测全树 —— 那和树存在的意义（剪枝）正好相反。
 
-节点声明自己属于哪个页面，边用 `Query` 当条件。**没有任何一处需要手写页面判断**。
+**`expected` 和 `hint` 都不影响正确性**：`expected` 只决定"先试谁"，
+`hint` 只决定"从哪一支开始试"。两者都错了，也只是多花几次匹配，结果和全量
+搜索一致。这是敢拿它们做优化的前提 —— 如果它们影响结果，一旦某帧定位错了，
+就永远回不来了。
 
-```python
-tree = PageTree()
-tree.add(Page("home", queries=(ImageQuery("home/logo.png"),)))
-tree.add(Page("home/qianli", queries=(ImageQuery("qianli/entry.png"),)), parent="home")
-tree.add(Page("home/qianli/battle", queries=(ImageQuery("battle/skillbar.png"),)), parent="home/qianli")
-tree.add(Page("home/qianli/battle/result", queries=(ImageQuery("result/victory.png"),)),
-         parent="home/qianli/battle")
+### `recover` 的扩散顺序（从近到远，也从"看得少"到"看得多"）
 
-g = Graph(initial="home")
-g.add_node(Node("home", page="home", steps=[ClickImageStep("qianli/entry.png")]))
-g.add_node(Node("battle", page="home/qianli/battle", steps=[ClickImageStep("battle/skill.png")]))
-g.add_node(Node("result", page="home/qianli/battle/result", steps=[ClickImageStep("result/confirm.png")]))
-
-g.connect("battle", "result", condition=ImageQuery("result/victory.png"), priority=30)
-g.connect("result", "home",   condition=ImageQuery("home/logo.png"),     priority=20)
-g.connect("home",   "battle", priority=10)
+```
+第 0 圈：near 自己
+第 1 圈：它所在分组里的兄弟末梢
+第 2 圈：上一层分组的全部末梢
+……      逐级往上，直到根
+最后一圈：叠加层 + 认不出来
 ```
 
-注意 `battle` 节点**没有任何边也是正常的** —— 打完之前它就该一直待在那里反复点技能，
-这就是 `next_node` 返回 `None` 的含义（原地不动，不是失败）。
+每一圈内部按 **ROI 面积升序**试。"看得少"既更快、也更不容易误判 ——
+这个理由和树剪枝的理由是同一个，所以扩散顺序也沿用它。
+每一圈试过谁、为什么没中，都进 `PageMatch.attempts`：
+"为什么最后认成了这个"必须能直接读出来。
 
-### 模式 2：页面驱动
+### 认不出来 ≠ 出错
 
-每页一个处理节点，`Graph.node_for_page()` 直接查表。
-适合"首页就点开始、战斗页就点技能"这种一对一的情况。
-一旦出现"同一个页面第一次要领奖励、之后直接开打"，就得给它加边 —— 那时它已经变成模式 1 了。
+* `success(PageMatch(id="unknown"))` —— 认不出来是**有效结果**。过场动画、
+  加载、切场景都会短暂认不出来，所以必须显式定义怎么应对
+  （`on_unknown: wait | reload_tick | recovery | stop` + `unknown_grace` 宽容期）。
+* `error` —— 只用于底层真出错（模板文件缺失、Matcher 抛异常）。
+  把它当成"认不出来"会把配置错误伪装成游戏行为，极难排查。
 
-### 模式 3：图做主
+## 五、为什么推翻了"只拦不跳"（这一节比结论重要）
 
-条件里直接读 `ctx.page.id`。最灵活，但页面知识散进条件里，
-`regions.yaml` 和模板路径也跟着散掉，`gamebot check` 就没法静态校验了。
-**只在前两种表达不了时才用。**
+早期版本定过一条硬规矩：**实测状态 ≠ 节点声明的状态时，只拦住不动，
+跳转必须由图里的边显式表达。** 理由是"控制流只有一个出处，那次移动不能隐形"。
 
-## 四、页面树该长什么样
+现在**推翻了它**。不是因为那条理由不成立，而是因为**跳的性质变了**：
+
+| | 早期的"自动跳" | 现在的重定位 |
+|---|---|---|
+| 依据 | 拿页面 id 去查表**猜**该去哪 | **先观测到真实状态**，再问关联表该去哪 |
+| 能不能落空 | 能（状态树和图各改各的） | 不能：有状态没节点认领是**启动期报错** |
+| 是否隐形 | 是（报告里看不到） | 不是：每次跳都进 `RunReport.recoveries` |
+
+所以现在的选择是：**允许自动重定位，但必须留痕**。一条 `Recovery` 记录带上
+
+```json
+{"tick": 12, "from_node": "lobby", "expected": "home/lobby",
+ "actual": "battle/fight", "to_node": "fight",
+ "attempts": [{"id": "home/lobby", "matched": false, "reason": "..."}]}
+```
+
+"它怎么跑那儿去了"永远有答案。而早期那条规矩的代价（忘写边就原地不动）
+现在也不必付了。
+
+### 一个容易误会的现象：画面一变就会有重定位
+
+正常流程里，**每次点击换屏都会产生一次重定位**，这是对的，不是 bug：
+
+```
+tick N   : 执行"点竞技入口"，画面在 tick 结束后才变
+tick N+1 : 锚点已经变成 home/jingji，但游标还在 lobby（图里的边这一轮才评估）
+           -> 快路径验 lobby 不成立 -> recover 找到 home/jingji
+           -> 游标落到 jingji 节点，本轮不执行
+tick N+2 : 校验通过，执行 jingji 的步骤
+```
+
+也就是说：**图负责"该去哪"，状态树负责"现在到底在哪"**，而屏幕的变化
+总是比游标早一轮到达。重定位把这一轮的空档补上。真正需要状态树救命的场景是
+"图的边完全没写对路"（比如被弹窗打断、跑到了图上没有边的分支）。
+
+验证脚本 `verify_new_model.py` 里第 1 条和第 1b 条就把这两种情况分开断言了：
+画面变 -> 重定位都落在正确节点上；**画面不变 -> 零重定位**。
+
+## 六、加一个状态 / 节点时要动的地方
 
 ```yaml
-pages:
+states:                          # id 由嵌套位置推导：home/jingji/battle
   home:
-    name: 首页
-    queries:
-      - {type: ImageQuery, template: home/logo.png}
+    kind: group                  # 父节点一律 group
     children:
-      qianli:
-        name: 千里单骑
-        queries:
-          - {type: ImageQuery, template: qianli/entry.png}
-        children:
-          battle:
-            name: 战斗
-            roi: [1180, 620, 680, 500]    # 相对父页面：只看右下角
-            queries: [...]
-            children:
-              ready:  {name: 开始战斗, queries: [...]}
-              result: {name: 战斗结算, queries: [...]}
+      jingji:
+        queries: [{type: ImageQuery, template: jingji/title.png}]
 
-  # 全局叠加层：不属于任何父页面，出现在哪都能被识别到
-  network_error:
-    kind: overlay
-    priority: 100
-    queries:
-      - {type: ImageQuery, template: common/network_error.png}
+nodes:
+  jingji:
+    page: home/jingji            # 不写也行：不写就不校验、也不参与重定位
+    priority: 10                 # 同状态多节点时谁是主节点
+    steps: [{type: ClickImageStep, template: jingji/entry.png}]
+
+edges:
+  - {source: jingji, target: battle, condition: {type: ImageQuery, template: skillbar.png}}
 ```
 
-三点值得注意：
+**状态 id 是路径形式**，所以改父节点的 key 会连带改掉所有子节点的 id ——
+那时 `nodes[].page` 也得跟着改。`Scenario.validate()` 会检查这件事，
+而且 `flow/loader.py` 会额外给一句人话提示（"同名的状态还有 `home/lobby`，
+多半是某个父节点的 key 改过"）。
 
-1. **`id` 由嵌套位置推导**成路径形式（`home/qianli/battle`），
-   所以重命名一个父节点会自动改掉所有子节点的 id —— 改配置时留意。
-2. **`kind: overlay` 才能和父页面共存**。默认是替换式：
-   进了「结算」就不再是「战斗」。搞混会导致"结算画面出来了，但脚本还认为在战斗中"。
-3. **全局叠加层挂在顶层**（`network_error` 不写在 `children` 里），
-   因为它不属于任何页面。
+## 七、还没定的两件事
 
-## 五、还没定的两件事
-
-1. **`query_from_dict` / `step_from_dict`** —— 让 YAML 真正驱动流程的那两块拼图。
-   查询注册表（`query_registry()`）和步骤注册表（`step_registry()`）都已经就绪，
-   实现是"查表 + 递归构造 + 处理 policy 子字典"。补上之后 `gamebot check`
-   就能真正校验配置了。
-2. **`PageTree.locate()` 的定位算法**。算法已经写进它的 docstring（6 步），
-   要拍板的是细节：hint 只影响尝试顺序这一点是否照做、叠加层扫到几层。
-
-## 六、已经定下来的事
-
-* **搭桥层放在 `FlowEngine.tick()` 里**（暂时）。上面 ③④⑤ 步就是 `tick()` 的骨架，
-  已经写成了带完整注释的桩。以后如果它长到难以阅读，再抽 `flow/runner.py`。
-* **`RunContext.page` 已经有了**（属性，返回 `PageMatch | None`，从跟踪器读）。
-  所以 `Node.page` 的位置守卫是**生效**的，不是可选项：
-  `GraphCursor.should_run()` 会拿实测页面和节点声明的页面比，不一致就拒绝执行。
-* **旧的扁平实现已经删干净了**：`state/definition.py`、`state/detector.py`、
-  `state/snapshot.py`、`flow/node.py`、`flow/transition.py`、`flow/machine.py`、
-  `flow/definition.py` 全部移除，不向后兼容。现在的状态层是
-  `page.py`（单帧定位）+ `tracker.py`（跨帧持续性）+ `store.py`（黑板），
-  流程层是 `graph.py`（图）+ `scenario.py`（蓝图）+ `engine.py`（主循环）。
-
-## 七、加一个页面时要动的地方
-
-1. `config/flows/*.yaml` 的 `pages:` 里加节点（嵌套位置就是 id）；
-2. 如果这个页面需要动作，在 `nodes:` 里加一个节点并写上 `page:`；
-3. 加边决定什么时候进、什么时候走。
-
-**页面的 id 是路径形式**（`home/qianli/battle`），所以改父节点的 key
-会连带改掉所有子节点的 id —— 那时 `nodes[].page` 也得跟着改。
-`Scenario.validate()` 会检查这件事，写错会在启动时报错而不是静默不动作。
-
+1. **`hint` 与 `expected` 是否可以合并**。现在 `tick()` 两个都传
+   （`hint=tracker.current_id`、`expected=binding.expects(node)`），
+   它们语义不同（"上一帧在哪" vs "我以为我该在哪"），但多数时候相等。
+   合并成一个参数会让调用点更短，代价是丢掉一种优化可能。
+2. **UI 阶段 2 的状态面板**。引擎侧数据已经齐了
+   （`tracker.current` / `RunReport.recoveries` / `PageMatch.attempts`），
+   但界面还没接 —— 界面里的「开始」按钮目前仍然是灰的。

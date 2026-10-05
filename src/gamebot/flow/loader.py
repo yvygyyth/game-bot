@@ -1,4 +1,4 @@
-"""把 YAML 解析成 :class:`Scenario`（页面树 + 流程图 + 参数）。
+"""把 YAML 解析成 :class:`Scenario`（状态树 + 流程图 + 参数）。
 
 目标还是那一句：**改流程不用改 Python**。
 

@@ -1,4 +1,4 @@
-"""状态层的页面树 —— 游戏界面是分模块的，所以"我在哪"天然是棵树。
+"""状态层的状态树 —— 游戏界面是分模块的，所以"我在哪"天然是棵树。
 
 ```
 首页
@@ -135,7 +135,7 @@ class PageKind(StrEnum):
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True, slots=True, eq=False)
 class Page:
-    """页面树的一个节点。**只有识别规则，没有行为。**
+    """状态树的一个节点。**只有识别规则，没有行为。**
 
     只有 :attr:`kind` 是 ``PAGE`` 的节点才记录信息（末梢状态）；
     ``GROUP`` 是纯分类节点（自己不匹配，直接下探子节点），
@@ -344,7 +344,7 @@ class PageMatch:
 # 树
 # --------------------------------------------------------------------------- #
 class PageTree:
-    """页面树 + 单帧定位。
+    """状态树 + 单帧定位。
 
     刻意设计成**构造期可变、运行期只读**：结构在装配阶段定好，
     跑起来之后没人改它。这样它可以被多个运行共享，也能安全地序列化对比。
@@ -423,11 +423,21 @@ class PageTree:
                   - {type: ImageQuery, template: common/network_error.png}
 
         ``queries`` 里的字典由 ``query_from_dict`` 还原成 Query 对象
-        （那一步在流程层的 loader 里，还没实现）。
+        （在 ``gamebot.atomic.query`` 里）。
+
+        ## 为什么这个方法留在状态层是桩
+
+        配置驱动的解析入口是 ``gamebot.flow.loader.parse_pages``。
+        树是由**上面那层**（流程层的 loader）按配置搭出来的，状态层只提供
+        :meth:`add` / :meth:`add_many` 这些原语 —— 这样状态层不需要知道
+        "配置长什么样"，也就不会为了解析配置去 import 流程层
+        （``tests/test_structure.py`` 的 AST 检查盯着这条依赖方向）。
+
+        所以这里**显式地不实现**，而不是留个 ``pass`` 让人以为它坏了。
         """
         raise NotImplementedError(
-            "待实现：递归遍历 pages -> 用 query_from_dict 构造 queries -> "
-            "按嵌套位置推导 id 路径 -> 逐层调 add(page, parent)"
+            "配置驱动的状态树解析在 gamebot.flow.loader.parse_pages；"
+            "状态层只提供 add/add_many 这些原语（见类 docstring）"
         )
 
     # ------------------------------------------------------------------ #
@@ -1029,7 +1039,7 @@ class PageTree:
         problems: list[str] = []
 
         if not self._pages:
-            problems.append("页面树是空的")
+            problems.append("状态树是空的")
         if not self._roots:
             problems.append("没有任何顶层页面")
 
@@ -1094,7 +1104,7 @@ class PageTree:
                 )
 
         if problems:
-            raise StateError("页面树校验失败:\n  - " + "\n  - ".join(problems))
+            raise StateError("状态树校验失败:\n  - " + "\n  - ".join(problems))
 
     # ------------------------------------------------------------------ #
     def describe(self) -> str:

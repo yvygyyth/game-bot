@@ -12,6 +12,8 @@
 4. 按 ocr_engine 选 OCR 实现（没有就退化成 ``UnavailableTextReader``）；
 5. 造 Match 实现（OpenCV 模板匹配）；
 6. 加载流程定义、加载区域表、造 Context 与 Engine。
+   ``load_scenario`` 内部会跑 ``Scenario.validate()`` —— 状态 id 写错、有状态
+   没有任何流程节点认领，都在这一步就炸，而不是跑到一半才"什么都不做"。
 
 **关于 Matcher / OCR 的实现**：它们依赖 opencv / rapidocr，属于"可选重依赖"，
 所以放在 ``gamebot.vision`` 包里，按需 import。本文件只负责挑和接。
@@ -167,12 +169,12 @@ def check_templates(config: AppConfig, scenario: Scenario) -> list[str]:
 
     查两个来源：
 
-    1. **页面树**里所有 Query 的 ``template``（含嵌套组合查询）——
+    1. **状态树**里所有 Query 的 ``template``（含嵌套组合查询）——
        决定"能不能认出来是哪一页"；
     2. **流程图**里所有 Step 的 :meth:`Step.used_templates` ——
        决定"点不点得动"。
 
-    第 2 条容易漏：页面条件用的图往往就那几张，真正多的是各种按钮。
+    第 2 条容易漏：状态条件用的图往往就那几张，真正多的是各种按钮。
     只查第 1 条会让检查给出"模板齐全"的假安全感。
     自定义步骤请覆写 ``used_templates()``，否则查不到（漏报，不误伤）。
     """
@@ -236,7 +238,7 @@ def build_context(
 ) -> RunContext:
     """装配 RunContext（含 Session 与 Executor）。
 
-    ``scenario`` 用来构造页面跟踪器 —— 跟踪器需要页面树才能查
+    ``scenario`` 用来构造页面跟踪器 —— 跟踪器需要状态树才能查
     ``min_stable_frames`` / ``timeout``。没给就是一棵空树（跟踪器退化，但仍可用）。
     """
     session = session or build_session_from_config(config)
@@ -290,7 +292,7 @@ def bootstrap(
     missing = check_templates(config, scenario)
     if missing:
         raise TemplateNotFoundError(
-            "以下模板图不存在（检查 assets/templates 与页面树里的路径）:\n  - "
+            "以下模板图不存在（检查 assets/templates 与状态树里的路径）:\n  - "
             + "\n  - ".join(missing)
         )
 

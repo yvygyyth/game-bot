@@ -67,12 +67,12 @@ class InfoPanel(QWidget):
         node_layout = QVBoxLayout(node_box)
         node_layout.addLayout(node_form)
 
-        # ---- 页面树 / 流程图 / 检查输出 ----
+        # ---- 状态树 / 流程图 / 检查输出 ----
         self._tree = self._readonly()
         self._graph = self._readonly()
         self._report = self._readonly()
         tabs = QTabWidget(self)
-        tabs.addTab(self._tree, "页面树")
+        tabs.addTab(self._tree, "状态树")
         tabs.addTab(self._graph, "流程图")
         tabs.addTab(self._report, "检查输出")
 

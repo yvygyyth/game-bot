@@ -321,7 +321,7 @@ def query_from_dict(data: Any) -> Query:
         "这个条件永远成立或永远不成立"，属于最难查的一类配置 bug。
 
     放在**原子层**（而不是 ``flow.loader``）是有原因的：查询注册表本来就在
-    这里，而且 `PageTree` 的使用者（业务层手写页面树时）也要用它 ——
+    这里，而且 `PageTree` 的使用者（业务层手写状态树时）也要用它 ——
     状态层不许 import 流程层（``tests/test_structure.py`` 用 AST 盯着）。
     """
     if isinstance(data, str):

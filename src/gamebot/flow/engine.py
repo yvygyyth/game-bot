@@ -205,7 +205,7 @@ class RunReport:
 class FlowEngine:
     """流程主循环。
 
-    :param scenario: 蓝图（页面树 + 流程图 + 参数）。
+    :param scenario: 蓝图（状态树 + 流程图 + 参数）。
     :param ctx: 运行时上下文（提供 session / 帧 / 黑板 / 中止）。
     :param executor: 执行器；None 时用 ``ctx.executor``。
     :param tracker: 页面跟踪器；None 时用 ``ctx.pages``。

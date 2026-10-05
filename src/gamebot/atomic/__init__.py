@@ -1,4 +1,4 @@
-"""原子化方法层（L0 ~ L5）—— 47 个原子方法。
+"""原子化方法层（L0 ~ L5）—— 50 个原子方法。
 
 层次与依赖（**只能向下依赖，不能反向**）::
 
@@ -21,13 +21,18 @@
     L4 组合子     10  find_all_of / find_any_of / find_first_of / find_none_of /
                       count_hits / wait_any_of / wait_all_of / wait_until /
                       wait_stable / wait_disappear
-    L5 动作       13  click_point / click_image / click_text / double_click /
-                      right_click / move_to / drag / drag_image / scroll /
-                      type_text / press_key / hotkey / sleep
+    L5 动作       14  click_point / click_image / click_text / double_click /
+                      right_click / click_source_point / move_to / drag /
+                      drag_image / scroll / type_text / press_key / hotkey / sleep
 
-注：设计稿里 L3 是 9 个（没有 AllTextsQuery / VisibleQuery）。这里补了两个，
-因为 ``find_all_texts``（L2 有）没有对应的 Query 描述符会很难配置化，
-而"不可见即有效答案"和"找不到即失败"是两种语义，混用会写出 bug。
+计数以 ``docs/atomic-inventory.md`` 为准：50 = 设计稿 47 + 这里补的 3 个。
+补的前两个是 L3 的 ``AllTextsQuery`` / ``VisibleQuery`` —— ``find_all_texts``
+（L2 有）没有对应的 Query 描述符会很难配置化，而"不可见即有效答案"和
+"找不到即失败"是两种语义，混用会写出 bug；第三个是 L5 的
+``click_source_point`` —— ``CoordinateMapper`` **不是幂等的**，把截图上的源坐标
+再换算一次就会点偏，所以源坐标入口单独占一个名字。
+（``click_logic_point`` 是 ``click_point`` 的"名字里写清坐标基准"版本，
+行为相同，不另计一个方法。）
 """
 
 from __future__ import annotations
