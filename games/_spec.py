@@ -64,15 +64,6 @@ class ScriptSpec:
     """脚本声明了 ``AUTO_PREPARE = True`` 时，``check`` 发现资源缺失会自动跑
     ``prepare()``。**真实游戏别开**：下载几百张图这种事不该藏在 check 里。"""
 
-    selftest: Callable[[], list[str]] | None = None
-    """可选的 ``selftest()`` —— 返回失败说明列表（空 = 全过）。"""
-
-    probe: Callable[[], list[str]] | None = None
-    """可选的 ``probe()`` —— **真机**探针：现在屏幕上认不认得出来。
-
-    和 ``selftest()`` 是两件事：那个查"这份定义成不成立"（静态、不需要游戏），
-    这个查"此刻屏幕上认不认得出来"（要游戏开着、并在预期的页面上）。
-    """
 
     def __repr__(self) -> str:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
@@ -191,8 +182,6 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             build_scenario=build_scenario,
             prepare=getattr(module, "prepare", None),
             auto_prepare=bool(getattr(module, "AUTO_PREPARE", False)),
-            selftest=getattr(module, "selftest", None),
-            probe=getattr(module, "probe", None),
         )
 
     _SCRIPTS = found

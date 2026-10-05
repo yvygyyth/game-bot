@@ -68,7 +68,6 @@ SHORTCUTS: tuple[Shortcut, ...] = (
     Shortcut("stop", "Esc", "停止（毫秒级）", button="stop"),
     Shortcut("grab", "F8", "抓一张：截一帧并画出识别到的框", button="grab"),
     Shortcut("check", "F6", "检查定义与模板文件", button="check"),
-    Shortcut("selftest", "Shift+F6", "跑脚本自带的自检", button="selftest"),
     Shortcut("detect", "F7", "重新检测可见软件窗口", button="detect"),
     Shortcut("page_diagram", "Ctrl+1", "切到「状态 / 流程」"),
     Shortcut("page_recognition", "Ctrl+2", "切到「识图日志」"),

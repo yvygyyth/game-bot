@@ -38,7 +38,7 @@ class TestTable:
 
     def test_button_names_are_known(self):
         """``button`` 只能是控件栏里真有的那几种，否则 tooltip 会静默贴不上。"""
-        known = {"start", "stop", "grab", "check", "selftest", "detect"}
+        known = {"start", "stop", "grab", "check", "detect"}
         for spec in SHORTCUTS:
             assert spec.button in known | {""}, spec
 

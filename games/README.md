@@ -18,10 +18,12 @@ games/
         ├── graph.py               这个功能的流程（节点 + 边）
         ├── steps.py               这个功能专用的步骤
         ├── shortcuts.py           这个功能专用的快捷方法
-        ├── checks.py              ★ 只声明 ChecksSpec（检查逻辑在框架里）
         ├── templates/             这个功能的图片资源
         └── README.md              这个脚本怎么调
 ```
+
+（**没有 `checks.py` 了** —— 早先每个脚本要抄一份自检代码，已经删掉，
+见下面"查错"那一节。）
 
 **脚本永远在功能目录里。** 游戏目录是容器，不直接放脚本 ——
 放进去的话注册表扫不到，表现是"脚本没出现在列表里"，很难查。
@@ -54,7 +56,6 @@ TITLE = "千里单骑刷本"          # list 里显示的名字
 DESCRIPTION = "自动刷本……"      # 一句话说明
 def prepare() -> int: ...       # 生成/下载资源（图片），返回处理了几个文件
 AUTO_PREPARE = True             # 允许 check 在资源缺失时自动跑 prepare()
-def selftest() -> list[str]: ...  # 自检，返回失败说明（空 = 全过）
 ```
 
 不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。
@@ -66,8 +67,6 @@ python -m games list                          # 有哪些脚本
 python -m games describe mingjiangsha/jingji  # 页面树 + 流程图长什么样
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 python -m games setup    mingjiangsha/jingji  # 生成 / 下载资源（幂等）
-python -m games selftest mingjiangsha/jingji  # 跑脚本自带的自检（静态）
-python -m games probe    mingjiangsha/jingji  # 真机探针：现在屏幕上认不认得出来
 ```
 
 `check` 是写脚本时最该反复跑的一条。它挡掉的是这几类问题：
@@ -81,83 +80,16 @@ python -m games probe    mingjiangsha/jingji  # 真机探针：现在屏幕上�
 | 子页面的 roi 伸出父页面 | 那一页**永远定位不到** |
 | 叠加层带了子页面 | 定位结果无法解释 |
 
-`selftest` 和 `probe` 查的是两件不同的事，别混：
+`selftest` / `probe` 这两样**已经删掉了**（连同框架里那套检查代码）。
+现在查错只有一条路：
 
-* **`selftest`** —— 静态：这份定义成不成立？模板裁得对不对？页面之间分得开吗？
-  不需要游戏在跑。**"认得出但认错了地方"只有它能查出来。**
-* **`probe`** —— 真机：此刻屏幕上认不认得出来？要游戏开着、并在预期的页面上。
+* **`games check`** —— 定义自不自洽、模板文件在不在。所有脚本共用同一份实现；
+* **`games describe`** —— 状态树和流程图长什么样，人眼看。
 
-### `checks.py` 只写数据，逻辑在框架里
-
-**不要**在 `checks.py` 里实现检查逻辑。框架提供
-[`gamebot.vision.checks`](../../src/gamebot/vision/checks.py)，你只声明
-一个 `ChecksSpec`：
-
-```python
-from gamebot.types import Point, Region
-from gamebot.vision.checks import ChecksSpec, EntryGroup, EntrySpec, SequenceSpec
-
-CHECKS = ChecksSpec(
-    title="竞技场",
-    # 每个"要认出来的东西"：模板 + 它该命中的位置 + 搜索范围
-    entries=(
-        EntrySpec(
-            template=T_ENTRY,
-            point=ENTRY_CENTER,          # 期望命中点
-            confidence=0.85,
-            tolerance=15,                # 允许偏多少像素
-            roi=ENTRY_ROI,
-            hover=Point(27, -41),        # 悬停会位移多少 → 自动查范围余量够不够
-            label="竞技入口",
-        ),
-    ),
-    # 真机探针按"组"报：一组 = 一个界面的标识
-    groups=(
-        EntryGroup(name="首页", entries=(...)),
-        EntryGroup(name="队伍", required=False, entries=(...)),  # 只报告，不判成败
-    ),
-    # 顺序探测：按顺序找，第一个过阈值的必须正好是该点的那个
-    sequences=(
-        SequenceSpec(
-            templates=(T_CREATE_TEAM, T_ADD_PET, T_START_MATCH),
-            names=("创建队伍", "添加伙伴", "开始匹配"),
-            roi=TEAM_ROI,
-            confidence=0.85,
-        ),
-    ),
-    fixture_path=PROJECT_ROOT / FIXTURES_DIR / "home.png",
-    fixture_group="首页",        # 参考图抓的是首页，只要求认出这一组
-)
-
-
-def run(config) -> list[str]:        # ← __init__.py 的 selftest() 接这个
-    return run_checks(CHECKS, config)
-
-
-def probe_live(config) -> list[str]:  # ← __init__.py 的 probe() 接这个
-    return run_probe(CHECKS, config)
-```
-
-**为什么不让每个脚本自己写检查逻辑**：那样每个脚本都会把同一套算法重写一遍，
-而且**语义会漂**——A 脚本把 `tolerance` 当半径、B 脚本当边长，两边还都"能跑"。
-现在算法只有一份，修一次所有脚本受益。
-
-几个字段值得单独记住：
-
-| 字段 | 它防的是什么 |
-|---|---|
-| `hover` | 元素**悬停时会位移**（名将杀首页卡片弹 `(+27,-41)`）。搜索范围留小了，鼠标一划过就滑出去、匹配不到 —— **静态看代码完全看不出来** |
-| `required=False` | 那一组**只报告不判成败**（队伍那三个按钮是用来诊断走到哪一步的） |
-| `fixture_group` | 参考图是**一张特定界面**的截图，只要求那一组必须认出来；位置偏差照样全查 |
-
-**自检不做"图像回归"。** 早先有过一项：拿几张真机截图当样本，验"模板裁歪没有"。
-去掉了 —— 样本不入库也没人维护，而它"没有样本就算过"，**打绿勾**：
-加新脚本时你会看到一个勾，以为验过了，其实一张样本都没有。
-真要做图像回归，写成 `tests/` 里的测试、样本随测试入库。
-
-**别在 `checks.py` 里重复通用的检查。** "模板文件在不在""定义自不自洽"归
-`games check`（框架的一份实现，所有脚本共用）。在脚本里再写一遍等于同一件事
-两个出处：改了框架那边这边不会跟着变，两边还会给出不一样的说法。
+早先每写一个脚本都要再抄一份"自检"（算 ROI 余量、跑顺序探测、验位置偏差），
+后来发现那套逻辑每个脚本都一样、只有数值不同，而且**语义会漂** ——
+所以连"让业务层声明数值"的中间方案也去掉了。真机识别准不准，
+现在是靠界面上的「抓一张」（带红框的图）当场看。
 
 ## 参考实现
 
@@ -182,6 +114,15 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 * 功能代码里写 `"battle/skill.png"` → 落到本功能目录；
 * 写 `"common/network_error.png"` → 本功能目录没有，落到游戏级；
 * 同名时会**覆盖**公共模板 —— 某个功能需要不一样的样式时不用把公共的挪走。
+
+**放哪一层按"谁用"定，不是按"看起来属于哪"。** 只有这个玩法用得到的图放
+本功能目录；**多个脚本都要用**的（网络错误弹窗、通用按钮）才放游戏级。
+判断错了不会报错 —— 只是以后加第二个脚本时会发现"这张图怎么找不到了"，
+或者游戏级目录里堆了一堆其实只有一个脚本用的图。
+
+**目录层级要跟着模板名走。** 模板名是相对模板根的路径，所以
+`"battle/skill.png"` 会落到 `<根>/battle/skill.png`。名字里带层级、
+磁盘上却没建那个子目录，报的是"找不到图"而不是"目录不存在"。
 
 ## 写脚本时值得遵守的几条
 
@@ -213,9 +154,9 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 **只用界面上稳定的元素做模板。** 别用带数字的（血量、倒计时）、
 带特效的（高亮、动画中间帧）—— 它们每天都长得不一样。
 
-**给每个脚本写 `selftest()`。** 检查的应该是"这份定义本身对不对"
-（图齐不齐、ROI 框得对不对、页面之间有没有区分度），
-这些是 `check` 查不出来的，而它们恰好是最常见的失效原因。
+**"认得出但认错地方"要靠界面上的「抓一张」发现。** 它会把每一次匹配的框画在
+真机上（红=命中、橙=未命中、蓝=搜索范围），位置偏没偏一眼就看出来 ——
+这种问题静态代码查不出来，早先那套 `selftest` 想查但没人维护。
 
 ## 加一个游戏 / 加一个功能
 

@@ -29,8 +29,6 @@ uv run gamebot ui                     # 打开本地控制台
 
 python -m games list                          # 有哪些脚本
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
-python -m games selftest mingjiangsha/jingji  # 静态自检
-python -m games probe    mingjiangsha/jingji  # 真机探针（要游戏开着）
 
 # 真的跑起来（业务层脚本；gamebot run 跑的是 config/app.yaml 那个示例流程）
 python -m games run mingjiangsha/jingji --dry-run --max-ticks 20
@@ -56,11 +54,11 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 流程图（图 / 游标 / 决策 / 校验）、**关联表**、`FlowEngine.tick` 的重定位语义、
 执行层（10 个步骤 + 重试/跳过/超时 + journal JSONL）、YAML 驱动
 （`query_from_dict` / `step_from_dict` / `parse_*`）、业务层注册表与
-`run` / `check` / `selftest` / `probe`、
+`run` / `check` / `setup`、
 **本地控制台**（选软件 → 选游戏 → 选脚本 → 开始/停止，引擎跑在工作线程；
 状态树/流程图**真画成图**并点亮当前状态与节点；识图日志 = 每次匹配的带框图 + 表格）、
 **识图记录器**（`vision/recorder.py`：包住 Matcher/TextReader，
-红框=命中 / 橙框=未命中 / 蓝框=搜索范围，一帧一张图、最多留 20 张）、真机探针。
+红框=命中 / 橙框=未命中 / 蓝框=搜索范围，一帧一张图、最多留 20 张）。
 
 **框架侧没有桩了。** 唯一显式的桩是 `PageTree.from_nested`，它是**刻意**不实现的
 （配置解析留在 `flow.loader.parse_pages`，这样状态层不必 import 流程层）。
@@ -103,7 +101,7 @@ python -m games run mingjiangsha/jingji --max-runtime 300
 9. **桩要显式。** 未实现的方法用 `raise NotImplementedError("待实现：<算法>")`，
    把算法写进 docstring，而不是留个 `pass`。
 10. **测试放在该放的地方。** 框架的单元测试在 `tests/`；
-    业务层脚本的自检在自己的 `checks.py`（跑 `python -m games selftest <key>`）。
+    业务层脚本没有自己的检查代码 —— 定义和模板由 `games check` 统一查。
 
 ## 真机相关的注意事项
 
@@ -111,8 +109,9 @@ python -m games run mingjiangsha/jingji --max-runtime 300
   换分辨率所有模板和坐标全部失效。
 * 模板要选**不会变**的元素：别用带数字的（金币数）、带特效的、
   随状态变的面板、活的背景（名将杀的背景一直在飘）。
-* 资产图（`games/mingjiangsha/jingji/assets/`，14MB）不入库；
-  自检在没有它们时会跳过"资产图回归"那一项。
+* 模板放哪一层按**谁用**定：只有这个玩法用得到的放
+  `games/<游戏>/<功能>/templates/`（优先级更高），多个脚本共用的才放
+  `games/<游戏>/templates/`。分错了不会报错，只是以后加脚本时找不到图。
 * **某些执行环境会拦掉鼠标注入**（连 `SetCursorPos` 都返回 0 且无错误码）。
-  遇到就别怀疑代码，先用 `python -m games probe` 确认截屏是否正常 ——
+  遇到就别怀疑代码：先 `gamebot capture -o a.png` 看截屏是否正常 ——
   截屏通、输入被拦，就是环境问题。

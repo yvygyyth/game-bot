@@ -80,9 +80,6 @@ class _Spec:
     def build_scenario(self) -> Scenario:
         return _scenario(max_ticks=self._max_ticks, interval=self._interval)
 
-    def selftest(self) -> list[str]:
-        return []
-
 
 def _entry(max_ticks: int = 3, interval: float = 0.01):
     from gamebot.ui.registry import ScriptEntry

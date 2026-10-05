@@ -4,16 +4,14 @@
     python -m games describe <脚本>       打印状态树 + 流程图（不连游戏）
     python -m games check <脚本>          校验定义 + 检查模板文件是否齐全
     python -m games setup <脚本>          生成 / 下载这个脚本需要的资源
-    python -m games selftest <脚本>       跑脚本自带的自检
-    python -m games probe <脚本>          真机探针（要游戏开着）
     python -m games run <脚本>            **真的跑起来**（会操作游戏！）
 
-除 ``probe`` / ``run`` 外都不需要游戏在运行 —— 它们只做静态检查。
+除 ``run`` 外都不需要游戏在运行 —— 它们只做静态检查。
 写脚本时最花时间的就是"图还没截、流程还没跑"，先靠它们把能查的错查掉。
 
 ## ``run`` 的顺序建议
 
-1. ``python -m games probe <脚本>`` —— 先确认"现在认不认得出"
+1. ``python -m games check <脚本>`` —— 先确认定义和模板都没问题
 2. ``python -m games run <脚本> --dry-run`` —— 空跑：只识别、只决策，不碰键鼠
 3. ``python -m games run <脚本>`` —— 真跑
 """
@@ -48,8 +46,6 @@ def cmd_list(args: argparse.Namespace) -> int:
         width = max(len(s.key) for s in scripts)
         for spec in scripts:
             marks = []
-            if spec.selftest is not None:
-                marks.append("有自检")
             if spec.prepare is not None:
                 marks.append("有资源脚本")
             suffix = f"  [{' / '.join(marks)}]" if marks else ""
@@ -146,52 +142,6 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 0
     written = spec.prepare(force=args.force) if args.force else spec.prepare()
     print(f"✓ {spec.key}: 生成/更新了 {written} 个文件")
-    return 0
-
-
-def cmd_selftest(args: argparse.Namespace) -> int:
-    """跑脚本自带的自检（检查的是"这份定义本身对不对"）。"""
-    spec = get_script(args.script)
-    if spec.selftest is None:
-        print(f"· {spec.key} 没有 selftest()")
-        return 0
-
-    # 自检通常要读模板文件，先确保资源在
-    if spec.prepare is not None:
-        spec.prepare()
-
-    print(f"自检 {spec.key}（{spec.title}）")
-    failures = spec.selftest()
-    print()
-    if failures:
-        print(f"✗ {len(failures)} 项失败")
-        return 1
-    print("✓ 全部通过")
-    return 0
-
-
-def cmd_probe(args: argparse.Namespace) -> int:
-    """**真机探针**：抓一张当前画面，看这个脚本现在认不认得出目标。
-
-    和 ``selftest`` 的区别：那个是静态自检（这份定义成不成立），
-    这个是"**现在**屏幕上认不认得出来" —— 要游戏开着、并在预期的页面上。
-    """
-    spec = get_script(args.script)
-    if spec.probe is None:
-        print(f"· {spec.key} 没有 probe()")
-        return 0
-
-    print(f"探针 {spec.key}（{spec.title}）")
-    try:
-        failures = spec.probe()
-    except Exception as exc:
-        print(f"✗ {type(exc).__name__}: {exc}")
-        return 1
-    print()
-    if failures:
-        print(f"✗ {len(failures)} 项失败")
-        return 1
-    print("✓ 认出来了")
     return 0
 
 
@@ -299,8 +249,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"    {outcome.step}: {outcome.message}")
 
     if report.stop_reason is StopReason.UNKNOWN:
-        print("\n提示: 长时间认不出状态。先跑 `python -m games probe` 确认")
-        print("      游戏现在停在脚本认识的那个界面上。")
+        print("\n提示: 长时间认不出状态 —— 游戏现在停在脚本认识的那个界面上吗？")
+        print("      窗口标题/分辨率对不对，用 `python -m games check` 看一下。")
 
     # 退出码要能反映"有没有真的做事"。
     # 一个步骤都没执行、而且从头到尾都是 unknown —— 那基本就是
@@ -310,7 +260,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if report.ok and did_nothing:
         print("\n⚠ 一轮都没做事（0 个步骤）—— 多半是没抓到画面或没认出状态：")
         print(f"    初始状态 {report.initial_page} / 最终状态 {report.final_page}")
-        print("  先跑 `python -m games probe <脚本>` 看现在屏幕上认不认得出。")
+        print("  先确认窗口标题和分辨率（`python -m games check <脚本>`），")
+        print("  再确认游戏确实停在脚本认识的那个界面上。")
         return 1
 
     return 0 if report.ok else 1
@@ -331,8 +282,6 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("describe", "打印状态树 + 流程图"),
         ("check", "校验定义并检查模板文件"),
-        ("selftest", "跑脚本自带的自检（静态）"),
-        ("probe", "真机探针：现在屏幕上认不认得出来"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
@@ -358,8 +307,6 @@ _HANDLERS = {
     "describe": cmd_describe,
     "check": cmd_check,
     "setup": cmd_setup,
-    "selftest": cmd_selftest,
-    "probe": cmd_probe,
     "run": cmd_run,
 }
 

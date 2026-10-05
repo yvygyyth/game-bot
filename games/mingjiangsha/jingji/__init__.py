@@ -34,7 +34,6 @@ OpenInputDesktop: 句柄有效       （同一个输入桌面）
 
 ```bash
 python -m games check  mingjiangsha/jingji    # 静态自检（不需要游戏）
-python -m games probe  mingjiangsha/jingji    # 真机探针：现在屏幕上能认出竞技入口吗
 ```
 """
 
@@ -117,28 +116,8 @@ def prepare(*, force: bool = False) -> int:
     return 1
 
 
-def selftest() -> list[str]:
-    """静态自检：不需要游戏在跑，但需要参考图（``prepare()`` 抓）。
-
-    还会拿 ``assets/`` 里那四张真实截图做回归（存在时）。
-    """
-    from .checks import run
-
-    return run(build_config())
-
-
-def probe() -> list[str]:
-    """**真机探针**：抓一张当前画面，看能不能认出竞技入口。
-
-    这是"找到竞技入口"最直接的验证方式 —— 需要游戏开着且在首页。
-    """
-    from .checks import probe_live
-
-    return probe_live(build_config())
-
-
 def _project_root() -> Path:
-    """项目根（checks 用它拼 fixtures 的路径）。"""
+    """项目根（``build_config`` 用它拼模板根和参考图的路径）。"""
     return _game.PROJECT_ROOT
 
 
@@ -153,6 +132,4 @@ __all__ = [
     "build_scenario",
     "build_tree",
     "prepare",
-    "probe",
-    "selftest",
 ]

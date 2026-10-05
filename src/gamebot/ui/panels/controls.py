@@ -58,7 +58,6 @@ class ControlsBar(QWidget):
     nodeChanged = Signal(object)  # NodeEntry | None
     windowChanged = Signal(str)
     checkRequested = Signal()
-    selftestRequested = Signal()
     startRequested = Signal()
     stopRequested = Signal()
     grabRequested = Signal()
@@ -110,9 +109,6 @@ class ControlsBar(QWidget):
         self.check_btn = QPushButton("检查", self)
         self.check_btn.clicked.connect(self.checkRequested.emit)
 
-        self.selftest_btn = QPushButton("自检", self)
-        self.selftest_btn.clicked.connect(self.selftestRequested.emit)
-
         self.grab_btn = QPushButton("抓一张", self)
         self.grab_btn.clicked.connect(self.grabRequested.emit)
 
@@ -153,7 +149,6 @@ class ControlsBar(QWidget):
         actions = QHBoxLayout()
         actions.addWidget(self.grab_btn)
         actions.addWidget(self.check_btn)
-        actions.addWidget(self.selftest_btn)
         actions.addStretch(1)
         actions.addWidget(self.start_btn)
         actions.addWidget(self.stop_btn)
@@ -303,9 +298,6 @@ class ControlsBar(QWidget):
         self.check_btn.setToolTip(
             self._tip("check", "校验这份定义：状态 id、边的端点、模板文件是否齐全")
         )
-        self.selftest_btn.setToolTip(
-            self._tip("selftest", "跑脚本自带的自检（检查定义本身对不对）")
-        )
         self.grab_btn.setToolTip(
             self._tip(
                 "grab",
@@ -342,7 +334,6 @@ class ControlsBar(QWidget):
         for widget in (self.game, self.script, self.node, self.window, self.detect):
             widget.setEnabled(not running)
         self.check_btn.setEnabled(not running)
-        self.selftest_btn.setEnabled(not running)
         self.start_btn.setEnabled(not running and self._runnable)
         self.stop_btn.setEnabled(running)
 

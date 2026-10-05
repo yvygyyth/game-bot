@@ -82,7 +82,6 @@ class ScriptDetails:
     graph_text: str = ""
     template_roots: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
-    has_selftest: bool = False
     has_prepare: bool = False
 
     @property
@@ -165,7 +164,6 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
     except Exception as exc:
         return ScriptDetails(
             problems=(f"构造 Scenario 失败: {type(exc).__name__}: {exc}",),
-            has_selftest=entry.spec.selftest is not None,
             has_prepare=entry.spec.prepare is not None,
         )
 
@@ -202,7 +200,6 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
         graph_text=scenario.graph.describe(),
         template_roots=roots,
         problems=tuple(problems),
-        has_selftest=entry.spec.selftest is not None,
         has_prepare=entry.spec.prepare is not None,
     )
 

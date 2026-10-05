@@ -214,7 +214,6 @@ class MainWindow(QMainWindow):
         self.controls.nodeChanged.connect(self._on_node_changed)
         self.controls.windowChanged.connect(self._on_window_changed)
         self.controls.checkRequested.connect(self._run_check)
-        self.controls.selftestRequested.connect(self._run_selftest)
         self.controls.startRequested.connect(self._on_start)
         self.controls.stopRequested.connect(self._on_stop)
         self.controls.grabRequested.connect(self._grab_annotated)
@@ -445,30 +444,6 @@ class MainWindow(QMainWindow):
         for line in lines:
             log.info("[check] %s", line)
 
-    def _run_selftest(self) -> None:
-        entry = self._entry
-        if entry is None or entry.spec is None:
-            return
-        if entry.spec.selftest is None:
-            return
-        lines: list[str] = []
-        try:
-            if entry.spec.prepare is not None:
-                written = entry.spec.prepare()
-                lines.append(f"· 准备资源：生成/更新 {written} 个文件")
-            failures = entry.spec.selftest()
-            if failures:
-                lines.append(f"✗ {len(failures)} 项失败")
-                lines.extend(f"    - {item}" for item in failures)
-            else:
-                lines.append("✓ 全部通过")
-        except Exception as exc:
-            lines.append(f"✗ {type(exc).__name__}: {exc}")
-
-        self._show_check_output(f"自检 {entry.key}", lines)
-        for line in lines:
-            log.info("[selftest] %s", line)
-
     # ------------------------------------------------------------------ #
     # 开始 / 停止
     # ------------------------------------------------------------------ #
@@ -669,7 +644,6 @@ class MainWindow(QMainWindow):
                 "stop": self._on_stop,
                 "grab": self._grab_annotated,
                 "check": self._run_check,
-                "selftest": self._run_selftest,
                 "detect": self.controls.refresh_windows,
                 "page_diagram": lambda: self.workspace.setCurrentIndex(0),
                 "page_recognition": lambda: self.workspace.setCurrentIndex(1),
@@ -683,7 +657,6 @@ class MainWindow(QMainWindow):
                 "stop": self.controls.stop_btn,
                 "grab": self.controls.grab_btn,
                 "check": self.controls.check_btn,
-                "selftest": self.controls.selftest_btn,
                 "detect": self.controls.detect,
             }
         )

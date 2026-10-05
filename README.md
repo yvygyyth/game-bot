@@ -38,7 +38,7 @@ game-bot/
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
 │   └── mingjiangsha/            #   名将杀：游戏级定义 + 各功能脚本
 │       ├── templates/           #     游戏级公共模板
-│       └── jingji/              #     竞技场脚本：状态 / 流程 / 步骤 / 自检
+│       └── jingji/              #     竞技场脚本：状态 / 流程 / 步骤
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）
@@ -81,7 +81,6 @@ game-bot/
 写业务代码只碰 `games/`，改框架才碰 `src/gamebot/`。
 
 `tests/` 放的是**框架自己**的单元测试（层级依赖、类型契约、决策逻辑）；
-`games/` 里的脚本各自带 `selftest()`，检查的是"这份定义本身对不对"
 （图齐不齐、ROI 框得对不对、状态之间有没有区分度）。两边职责不同。
 
 ## 快速开始
@@ -112,10 +111,8 @@ python main.py capture -o a.png
 python -m games list                          # 有哪些脚本
 python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
-python -m games selftest mingjiangsha/jingji  # 静态自检
-python -m games probe    mingjiangsha/jingji  # 真机探针：现在认不认得出目标
 
-# 真的跑起来。建议按 probe -> --dry-run -> 真跑 的顺序来
+# 真的跑起来。建议按 check -> --dry-run -> 真跑 的顺序来
 python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
 python -m games run mingjiangsha/jingji --max-runtime 300          # 真跑
 python -m games run mingjiangsha/jingji --node jingji              # 从中间某个节点开始调
@@ -148,7 +145,7 @@ gamebot ui --script none   # 不选脚本，只用 config/app.yaml 看画面
 ① 选软件（下拉框列出可见窗口，并显示它的客户区坐标）
 ② 选游戏
 ③ 选脚本（再挑一个起始节点，调试用）
-   → 抓一张 / 检查 / 自检 / ▶ 开始 / ■ 停止
+   → 抓一张 / 检查 / ▶ 开始 / ■ 停止
 ```
 
 **为什么"选软件"排第一**：坐标是从窗口来的 —— 截图和点击都以那个窗口的客户区
@@ -164,7 +161,7 @@ gamebot ui --script none   # 不选脚本，只用 config/app.yaml 看画面
 |---|---|
 | **状态 / 流程** | 状态树、流程图**画成图**，**当前状态描红加粗、当前节点描红**；两者不一致时一个红一个绿边 —— 那正是重定位的瞬间 |
 | **识图日志** | **每次匹配的带框图**（红框=命中、橙框=未命中、蓝框=搜索范围）+ 结构化表格（查了什么、在哪搜、几分、中没中）。点某一行直接跳到它那一帧的图 |
-| **检查输出** | 检查 / 自检 / 每次运行的结论 |
+| **检查输出** | 检查 / 每次运行的结论 |
 
 > **没有实时画面。** 试过，但它回答不了真问题：同一帧上"logo 在左上角 0.98"和
 > "在右下角 0.91"在缩略图里长得一样，而一个是命中、一个是偶然相似。
@@ -270,10 +267,10 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 | 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位、YAML 加载全部实现 |
 | 执行层 | ✅ 完整 | 策略对象/步骤构造（`step_from_dict`）/结果记录/`Executor.run`/10 个 Step 的 `run()`/journal JSONL 落盘全部实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
-| 业务层 | 🟡 部分 | ★ 一级游戏 / 二级功能，注册表自动发现，`check`/`setup`/`selftest`/`probe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
+| 业务层 | 🟡 部分 | ★ 一级游戏 / 二级功能，注册表自动发现，`check`/`setup`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
 | 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥、journal JSONL 已实现；每次运行独立日志、结构化事件流待实现 |
-| UI | ✅ 阶段 2 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、开始/停止真的能跑、运行状态面板（含每次重定位）、实时画面（跑起来时复用引擎那一帧）、日志大框、检查/自检。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
-| 测试 | ✅ 495 个用例 | 框架的结构契约与单元测试；业务层脚本各自带 `selftest()` |
+| UI | ✅ 阶段 2 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、开始/停止真的能跑、运行状态面板（含每次重定位）、实时画面（跑起来时复用引擎那一帧）、日志大框、检查。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
+| 测试 | ✅ 536 个用例 | 框架的结构契约与单元测试 |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
