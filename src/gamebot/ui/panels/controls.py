@@ -69,6 +69,7 @@ class ControlsBar(QWidget):
         self._nodes: tuple[NodeEntry, ...] = ()
         self._windows: list[str] = []
         self._runnable = False
+        self._hints: dict[str, str] = {}
 
         # ---- 第一步：选软件（这一步就把坐标定下来） ----
         self.window = QComboBox(self)
@@ -81,7 +82,6 @@ class ControlsBar(QWidget):
         self.window.currentTextChanged.connect(self._on_window_changed)
 
         self.detect = QPushButton("重新检测", self)
-        self.detect.setToolTip("重新枚举当前可见的软件窗口")
         self.detect.clicked.connect(self.refresh_windows)
 
         self.coords = QLabel(_NO_WINDOW, self)
@@ -108,18 +108,12 @@ class ControlsBar(QWidget):
 
         # ---- 动作 ----
         self.check_btn = QPushButton("检查", self)
-        self.check_btn.setToolTip("校验这份定义：状态 id、边的端点、模板文件是否齐全")
         self.check_btn.clicked.connect(self.checkRequested.emit)
 
         self.selftest_btn = QPushButton("自检", self)
-        self.selftest_btn.setToolTip("跑脚本自带的自检（检查定义本身对不对）")
         self.selftest_btn.clicked.connect(self.selftestRequested.emit)
 
         self.grab_btn = QPushButton("抓一张", self)
-        self.grab_btn.setToolTip(
-            "截一帧，按当前脚本把每个状态的查询跑一遍，并把命中的区域用红框画出来存下。\n"
-            "跑脚本之前用它确认「它到底认的是哪一块」—— 这是调 ROI 和阈值最快的办法。"
-        )
         self.grab_btn.clicked.connect(self.grabRequested.emit)
 
         self.start_btn = QPushButton("▶ 开始", self)
@@ -129,6 +123,9 @@ class ControlsBar(QWidget):
         self.stop_btn.setEnabled(False)
 
         self._build_layout()
+        # 静态按钮的 tooltip 统一在这里设：留在各自的构造点上会和
+        # ``set_shortcut_hints`` 的刷新顺序打架（谁会赢取决于调用时机）。
+        self._refresh_tips()
         self.set_runnable(False, "先选软件，再选脚本")
         self.set_stoppable(False)
 
@@ -250,9 +247,7 @@ class ControlsBar(QWidget):
         self.window.blockSignals(False)
         if current:
             self.window.setCurrentText(current)
-        self.detect.setToolTip(
-            f"重新枚举软件窗口（找到 {len(titles)} 个）" if titles else "没有找到可见窗口"
-        )
+        self.detect.setToolTip(self._detect_tip())
         self._refresh_coords()
         return titles
 
@@ -288,13 +283,55 @@ class ControlsBar(QWidget):
     # ------------------------------------------------------------------ #
     # 状态
     # ------------------------------------------------------------------ #
+    def set_shortcut_hints(self, hints: dict[str, str]) -> None:
+        """登记"哪个动作的键位提示是什么"，由 :meth:`_tip` 拼到 tooltip 上。
+
+        **不能改成"启动时往 tooltip 后面追加一次"** —— 那几个按钮的 tooltip
+        是动态的（``set_runnable`` 每换一次脚本就重设一次），追加的那份会被
+        下一次重设冲掉，表现就是"键位提示时有时无"。所以提示统一在
+        :meth:`_tip` 里拼，谁设 tooltip 都绕不过它。
+
+        登记完要 :meth:`_refresh_tips` 一次：静态按钮的 tooltip 是在
+        ``__init__`` 里设的，那时这张表还是空的 —— 不重设就永远缺个键位提示。
+        """
+        self._hints = dict(hints)
+        self._refresh_tips()
+
+    def _refresh_tips(self) -> None:
+        """按当前的键位表重设静态按钮的 tooltip（动态那几个各管各的）。"""
+        self.detect.setToolTip(self._detect_tip())
+        self.check_btn.setToolTip(
+            self._tip("check", "校验这份定义：状态 id、边的端点、模板文件是否齐全")
+        )
+        self.selftest_btn.setToolTip(
+            self._tip("selftest", "跑脚本自带的自检（检查定义本身对不对）")
+        )
+        self.grab_btn.setToolTip(
+            self._tip(
+                "grab",
+                "截一帧，按当前脚本把每个状态的查询跑一遍，并把命中的区域用红框画出来存下。\n"
+                "跑脚本之前用它确认「它到底认的是哪一块」—— 这是调 ROI 和阈值最快的办法。",
+            )
+        )
+
+    def _detect_tip(self) -> str:
+        found = len(self._windows)
+        text = f"重新枚举软件窗口（找到 {found} 个）" if found else "重新枚举当前可见的软件窗口"
+        return self._tip("detect", text)
+
+    def _tip(self, key: str, text: str) -> str:
+        hint = self._hints.get(key, "")
+        return f"{text} {hint}".strip() if text else hint
+
     def set_runnable(self, ok: bool, reason: str = "") -> None:
         self.start_btn.setEnabled(ok)
-        self.start_btn.setToolTip(reason or "开始运行")
+        self.start_btn.setToolTip(self._tip("start", reason or "开始运行"))
 
     def set_stoppable(self, ok: bool) -> None:
         self.stop_btn.setEnabled(ok)
-        self.stop_btn.setToolTip("请求停止（毫秒级响应）" if ok else "还没在跑")
+        self.stop_btn.setToolTip(
+            self._tip("stop", "请求停止（毫秒级响应）" if ok else "还没在跑")
+        )
 
     def set_running(self, running: bool) -> None:
         """运行中：锁住选择、把开始换成灰的、把停止点亮。

@@ -43,6 +43,7 @@ from .panels.info import InfoPanel
 from .panels.logview import LogView
 from .panels.recognition import RecognitionPanel
 from .registry import ScriptDetails, ScriptEntry, load_details, load_scripts
+from .shortcuts import SHORTCUTS, Keymap
 from .theme import monospace
 
 log = get_logger("ui.window")
@@ -221,6 +222,8 @@ class MainWindow(QMainWindow):
         # 注意：日志信号由 LogView 在它自己的构造里接上（那块归它管）。
         # 这里**不要**再连一次 —— 连两次的话每条日志会被追加两遍。
         # 实时画面已经去掉：用户反馈"看不出问题"，能看出问题的是带框的识图记录。
+
+        self._wire_shortcuts()
 
     # ------------------------------------------------------------------ #
     # 脚本
@@ -618,6 +621,74 @@ class MainWindow(QMainWindow):
         body = "\n".join(lines) if lines else "（无输出）"
         self._check_view.setPlainText(f"== {title} ==\n{body}")
         self.workspace.setCurrentWidget(self._check_page)
+
+    # ------------------------------------------------------------------ #
+    # 快捷键
+    # ------------------------------------------------------------------ #
+    def _wire_shortcuts(self) -> None:
+        """按 ``shortcuts.SHORTCUTS`` 绑键，并把键位提示贴到按钮上。
+
+        三个"停止"入口（按钮 / Esc / 关窗）都走 :meth:`_on_stop`，所以
+        "没在跑时按 Esc" 是安全的空操作。
+        """
+        self.keymap = Keymap(
+            self,
+            {
+                "run": self._on_start,
+                "stop": self._on_stop,
+                "grab": self._grab_annotated,
+                "check": self._run_check,
+                "selftest": self._run_selftest,
+                "detect": self.controls.refresh_windows,
+                "page_diagram": lambda: self.workspace.setCurrentIndex(0),
+                "page_recognition": lambda: self.workspace.setCurrentIndex(1),
+                "page_check": lambda: self.workspace.setCurrentIndex(2),
+                "help": self._show_shortcuts,
+            },
+        )
+        self.keymap.add_tooltips(
+            {
+                "start": self.controls.start_btn,
+                "stop": self.controls.stop_btn,
+                "grab": self.controls.grab_btn,
+                "check": self.controls.check_btn,
+                "selftest": self.controls.selftest_btn,
+                "detect": self.controls.detect,
+            }
+        )
+        # 再登记一份给控件栏：它那几个按钮的 tooltip 是**动态**的
+        # （``set_runnable`` 每次换脚本都重设），只追加一次会被冲掉。
+        # 登记之后由 ``ControlsBar._tip`` 统一拼，谁重设都带着键位。
+        self.controls.set_shortcut_hints(
+            {
+                spec.button: spec.hint
+                for spec in SHORTCUTS
+                if spec.button
+            }
+        )
+        log.info("快捷键已就绪（%d 条，F1 看清单）", len(self.keymap))
+
+    @Slot()
+    def _show_shortcuts(self) -> None:
+        """F1：把快捷键清单弹出来。
+
+        用对话框而不是常驻的菜单栏：菜单要占一行高度，而这个界面宁愿把高度
+        留给日志和带框的图。快捷键本来就该"用熟了不用看"，需要看时按 F1。
+        """
+        lines = [
+            "快捷键",
+            "",
+            *self.keymap.help_lines(),
+            "",
+            "两点说明：",
+            "  · Esc 只在运行中有效，且下拉框弹窗开着时先由下拉框吃掉（关弹窗）",
+            "  · 左边三页也能直接点标签切换；图里可滚轮缩放、拖动平移",
+        ]
+        box = QMessageBox(self)
+        box.setWindowTitle("快捷键")
+        box.setText("\n".join(lines))
+        box.setIcon(QMessageBox.Icon.Information)
+        box.exec()
 
     def _warn_about_unimplemented(self) -> None:
         log.info("=" * 60)
