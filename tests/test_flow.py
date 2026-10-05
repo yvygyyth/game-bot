@@ -370,8 +370,13 @@ class TestGraphCursor:
         assert ok is False
         assert "最大访问次数" in why
 
-    def test_should_run_page_guard(self, ctx) -> None:
-        """实际页面 ≠ 节点期望页面时拒绝执行 —— 防止在错误页面上乱点。"""
+    def test_should_run_ignores_state(self, ctx) -> None:
+        """状态校验**不在这里** —— 它归引擎走关联表。
+
+        这条用例钉的是"同一件事只有一个出处"：状态不符时该不该动手、
+        以及该去哪儿，都由 ``StateBinding`` 回答（见 ``TestEngineRealign``）。
+        ``should_run`` 只管这个节点自己的运行期计数（冷却 / 访问次数）。
+        """
         tree = PageTree()
         tree.add(Page("home", queries=(ImageQuery("h.png"),)))
         tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
@@ -382,12 +387,20 @@ class TestGraphCursor:
         cursor = GraphCursor(graph)
 
         ctx.pages.update(PageMatch(id="home", path=("home",)), now=1.0)
-        ok, why = cursor.should_run(ctx)
-        assert ok is False
-        assert "期望页面" in why
+        assert cursor.should_run(ctx) == (True, ""), "状态不符不归它管"
 
         ctx.pages.update(PageMatch(id="battle", path=("battle",)), now=2.0)
         assert cursor.should_run(ctx) == (True, "")
+
+    def test_should_run_enforces_max_visits(self, ctx) -> None:
+        graph = Graph(initial="a")
+        graph.add_node(Node("a", max_visits=2))
+        cursor = GraphCursor(graph)
+        assert cursor.should_run(ctx) == (True, "")
+        cursor.visits["a"] = 2
+        ok, why = cursor.should_run(ctx)
+        assert ok is False
+        assert "最大访问次数" in why
 
     def test_should_run_without_page_declaration(self, ctx) -> None:
         graph = Graph(initial="x")

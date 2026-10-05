@@ -629,13 +629,22 @@ class GraphCursor:
     def should_run(self, ctx: RunContext, *, now: float = 0.0) -> tuple[bool, str]:
         """当前节点这一轮该不该执行 steps。返回 ``(该执行?, 原因)``。
 
-        两个拦截条件：
+        两个拦截条件，都是**这个节点自己的运行期计数**：
 
         * ``max_visits`` 用尽 —— 防止原地死循环刷同一个界面；
         * ``cooldown`` 还没过 —— 防止空转打满 CPU 和 adb。
 
-        另外会检查 :attr:`Node.page`：**实际页面 ≠ 期望页面时拒绝执行**。
-        这是防止在错误页面上乱点的第一道闸，见 ``docs/state-and-flow.md``。
+        ## 状态校验**不在这里**
+
+        早期它还会比一次 ``node.page`` 和实测状态。那条检查现在归引擎，走
+        :class:`~gamebot.flow.binding.StateBinding`：
+
+        * 关联表才说得清"期望什么、实测什么、不一致时该去哪"；
+          这里比一下只能给出一句"不符"，而且会**绕开关联表**变成第二份实现；
+        * 引擎的顺序是"先校验（可能重定位）、再问该不该跑"，位置不对时根本
+          走不到这里。
+
+        留着它会让同一件事有两个出处 —— 那是这套设计一直在避免的东西。
         """
         node = self.graph.node(self.current)
         if node is None:
@@ -643,13 +652,6 @@ class GraphCursor:
 
         if node.max_visits and self.visits_of(node.id) >= node.max_visits:
             return False, f"已达最大访问次数 {node.max_visits}"
-
-        if node.page is not None:
-            match = getattr(ctx, "page", None)
-            actual = getattr(match, "id", None)
-            if actual is not None and actual != node.page:
-                # 位置不符：宁可不做，也不要在错误页面上瞎点
-                return False, f"期望页面 {node.page!r}，实际 {actual!r}"
 
         return True, ""
 
