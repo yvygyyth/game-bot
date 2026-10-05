@@ -31,6 +31,10 @@ python -m games list                          # 有哪些脚本
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 python -m games selftest mingjiangsha/jingji  # 静态自检
 python -m games probe    mingjiangsha/jingji  # 真机探针（要游戏开着）
+
+# 真的跑起来（业务层脚本；gamebot run 跑的是 config/app.yaml 那个示例流程）
+python -m games run mingjiangsha/jingji --dry-run --max-ticks 20
+python -m games run mingjiangsha/jingji --max-runtime 300
 ```
 
 ## 先读哪几份

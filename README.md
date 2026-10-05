@@ -114,7 +114,19 @@ python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连�
 python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 python -m games selftest mingjiangsha/jingji  # 静态自检
 python -m games probe    mingjiangsha/jingji  # 真机探针：现在认不认得出目标
+
+# 真的跑起来。建议按 probe -> --dry-run -> 真跑 的顺序来
+python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
+python -m games run mingjiangsha/jingji --max-runtime 300          # 真跑
+python -m games run mingjiangsha/jingji --node jingji              # 从中间某个节点开始调
 ```
+
+`run` 跑完会打三样最该看的东西：**停止原因**、**每次重定位**
+（`expected -> actual => node`）、**失败的步骤**。
+逐步骤的记录在 `logs/journals/<功能>.jsonl` 里。
+
+> 退出码有意义：预算跑完算成功（0），而"一个步骤都没执行、从头到尾 unknown"
+> 算失败（1）—— 那基本就是窗口标题不对 / 游戏没开 / 没站在预期界面上。
 
 业务层按**一级游戏、二级功能**组织，脚本永远在功能目录里
 （`games/<游戏>/<功能>/`）。约定见 [games/README.md](games/README.md)；

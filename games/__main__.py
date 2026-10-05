@@ -1,16 +1,21 @@
 """业务层命令行。
 
     python -m games list                  列出所有脚本
-    python -m games describe <脚本>       打印页面树 + 流程图（不连游戏）
+    python -m games describe <脚本>       打印状态树 + 流程图（不连游戏）
     python -m games check <脚本>          校验定义 + 检查模板文件是否齐全
     python -m games setup <脚本>          生成 / 下载这个脚本需要的资源
     python -m games selftest <脚本>       跑脚本自带的自检
+    python -m games probe <脚本>          真机探针（要游戏开着）
+    python -m games run <脚本>            **真的跑起来**（会操作游戏！）
 
-前四条**都不需要游戏在运行** —— 它们只做静态检查。
+除 ``probe`` / ``run`` 外都不需要游戏在运行 —— 它们只做静态检查。
 写脚本时最花时间的就是"图还没截、流程还没跑"，先靠它们把能查的错查掉。
 
-（真正的 ``run`` 要等 ``PageTree.locate()`` 和 ``FlowEngine.tick()`` 实现完，
-那时候会加一个 ``python -m games run <脚本>``。）
+## ``run`` 的顺序建议
+
+1. ``python -m games probe <脚本>`` —— 先确认"现在认不认得出"
+2. ``python -m games run <脚本> --dry-run`` —— 空跑：只识别、只决策，不碰键鼠
+3. ``python -m games run <脚本>`` —— 真跑
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 # 先把自己所在的项目根加进 sys.path，这样 `python -m games` 不需要先安装框架
 _ROOT = Path(__file__).resolve().parents[1]
@@ -75,9 +81,9 @@ def cmd_describe(args: argparse.Namespace) -> int:
     unclaimed = scenario.unclaimed_pages()
     print()
     if unclaimed:
-        print(f"没有节点认领的页面（只观察不动作）: {', '.join(unclaimed)}")
+        print(f"没有节点认领的状态（不会出现在定位结果里）: {', '.join(unclaimed)}")
     else:
-        print("每个页面都有节点认领（叠加层和终态页面不算 —— 它们不需要节点）")
+        print("每个状态都有节点认领（分类节点和叠加层不算 —— 它们不需要节点）")
     return 0
 
 
@@ -90,7 +96,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     scenario.validate()
     print(f"✓ 定义校验通过: {spec.key}（{spec.title}）")
     print(
-        f"  {len(scenario.tree)} 个页面 / {len(scenario.graph)} 个节点 / "
+        f"  {len(scenario.tree)} 个状态 / {len(scenario.graph)} 个节点 / "
         f"{len(scenario.graph.edges)} 条边"
     )
 
@@ -189,6 +195,125 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """**真的跑起来**：装配 -> 跑流程 -> 打报告。
+
+    和 ``gamebot run`` 的区别：那个跑的是 ``config/app.yaml`` 里那个"文档级"
+    示例流程；这个跑**业务层脚本**（``games/<游戏>/<功能>`` 的 ``build_config``
+    + ``build_scenario``）—— 也就是真正认识某个游戏的那份定义。
+
+    跑完一定要看报告里的三样东西：
+
+    * ``stop_reason``：为什么停的（``max_ticks`` 是"跑到预算了"，正常；
+      ``unknown`` 是"长时间认不出来"，多半是没站在预期的界面上）；
+    * ``recoveries``：每次**重定位**。正常情况下每次点击换屏都会有一条 ——
+      重点不是"有没有"，而是 ``to_node`` 是不是你预期的那个节点；
+    * ``steps`` 里的失败项：哪一步没成、重试了几次。journal 文件里有逐条记录。
+    """
+    from gamebot.bootstrap import build_context, build_engine
+    from gamebot.execution.journal import JsonlJournal, NullJournal
+    from gamebot.flow.engine import StopReason
+    from gamebot.utils.logging import setup_logging
+
+    spec = get_script(args.script)
+    config = spec.build_config()
+    if args.window:
+        config.screen.window_title = args.window
+    if args.dry_run:
+        config.dry_run = True
+
+    scenario = spec.build_scenario()
+    if args.max_runtime is not None:
+        scenario.options.max_runtime = args.max_runtime
+    if args.max_ticks is not None:
+        scenario.options.max_ticks = args.max_ticks
+    if args.node and scenario.graph.node(args.node) is None:
+        print(f"✗ 没有这个节点: {args.node!r}", file=sys.stderr)
+        return 2
+
+    # 装配期就把能查的错查掉：配置 + 定义 + 模板文件。
+    # **别把"模板少一张"拖到跑起来之后** —— 那时它表现为"跑到某个分支就卡住"，
+    # 排查成本高得多。
+    scenario.validate()
+    config.paths.ensure()
+    from gamebot.bootstrap import check_templates
+
+    missing = check_templates(config, scenario)
+    if missing:
+        print(f"✗ 缺 {len(missing)} 个模板文件，先跑 check 看看:", file=sys.stderr)
+        for name in missing[:5]:
+            print(f"    - {name}", file=sys.stderr)
+        return 1
+
+    setup_logging(config.logging.level)
+
+    journal: Any = NullJournal()
+    if not args.no_journal:
+        journal = JsonlJournal(config.paths.resolve(config.paths.journals) / f"{spec.slug}.jsonl")
+
+    print(f"跑 {spec.key}（{spec.title}）")
+    print(f"  窗口   {config.screen.window_title!r} @ {config.screen.source_size or '自动探测'}")
+    print(f"  起点   {args.node or scenario.graph.initial}")
+    print(f"  模式   {'空跑（只识别，不操作）' if config.dry_run else '真跑（会操作游戏）'}")
+    runtime = scenario.options.max_runtime or "不限"
+    ticks = scenario.options.max_ticks or "不限"
+    print(f"  预算   {runtime}s / {ticks} 轮")
+    if config.dry_run:
+        print("  （空跑时动作步骤不真的下发，但仍然走完整的决策与记账）")
+    print()
+
+    ctx = None
+    try:
+        ctx = build_context(config, scenario=scenario, journal=journal)
+        engine = build_engine(config, ctx, scenario)
+        report = engine.run()
+    except KeyboardInterrupt:
+        print("\n… 被 Ctrl+C 中断")
+        return 130
+    finally:
+        if ctx is not None:
+            ctx.close()
+        journal.close()
+
+    print()
+    print(report.summary())
+    if report.errors:
+        print(f"✗ {len(report.errors)} 条错误:")
+        for message in report.errors[:5]:
+            print(f"    - {message}")
+
+    recoveries = [r for r in report.recoveries if r.to_node]
+    if recoveries:
+        print(f"· 重定位 {len(recoveries)} 次（画面变了、游标下一轮才跟上，属正常）:")
+        for record in recoveries[:5]:
+            print(f"    {record.expected} -> {record.actual}  =>  {record.to_node}")
+        if len(recoveries) > 5:
+            print(f"    …… 还有 {len(recoveries) - 5} 次")
+
+    failed = report.failed_steps
+    if failed:
+        print(f"✗ {len(failed)} 个步骤失败:")
+        for outcome in failed[:5]:
+            print(f"    {outcome.step}: {outcome.message}")
+
+    if report.stop_reason is StopReason.UNKNOWN:
+        print("\n提示: 长时间认不出状态。先跑 `python -m games probe` 确认")
+        print("      游戏现在停在脚本认识的那个界面上。")
+
+    # 退出码要能反映"有没有真的做事"。
+    # 一个步骤都没执行、而且从头到尾都是 unknown —— 那基本就是
+    # "窗口标题不对 / 游戏没开 / 没站在预期界面上"，必须算失败。
+    # 否则 CI 和调用方会把一次"什么都没干"当成成功（`max_ticks` 本身是正常停止原因）。
+    did_nothing = report.step_count == 0 and report.initial_page == "unknown"
+    if report.ok and did_nothing:
+        print("\n⚠ 一轮都没做事（0 个步骤）—— 多半是没抓到画面或没认出状态：")
+        print(f"    初始状态 {report.initial_page} / 最终状态 {report.final_page}")
+        print("  先跑 `python -m games probe <脚本>` 看现在屏幕上认不认得出。")
+        return 1
+
+    return 0 if report.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m games",
@@ -202,13 +327,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--refresh", action="store_true", help="忽略缓存重新发现")
 
     for name, help_text in (
-        ("describe", "打印页面树 + 流程图"),
+        ("describe", "打印状态树 + 流程图"),
         ("check", "校验定义并检查模板文件"),
         ("selftest", "跑脚本自带的自检（静态）"),
         ("probe", "真机探针：现在屏幕上认不认得出来"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
+
+    p_run = sub.add_parser("run", help="真的跑起来（会操作游戏）")
+    p_run.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
+    p_run.add_argument("--dry-run", action="store_true", help="空跑：只识别不操作")
+    p_run.add_argument("--max-runtime", type=float, default=None, help="总时长上限（秒）")
+    p_run.add_argument("--max-ticks", type=int, default=None, help="最大轮数")
+    p_run.add_argument("--node", default="", help="从哪个节点开始（调试用，不解除状态校验）")
+    p_run.add_argument("--window", default="", help="覆盖窗口标题")
+    p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
 
     p_setup = sub.add_parser("setup", help="生成 / 下载脚本需要的资源")
     p_setup.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
@@ -224,6 +358,7 @@ _HANDLERS = {
     "setup": cmd_setup,
     "selftest": cmd_selftest,
     "probe": cmd_probe,
+    "run": cmd_run,
 }
 
 

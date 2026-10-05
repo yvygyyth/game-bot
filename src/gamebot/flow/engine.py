@@ -170,11 +170,19 @@ class RunReport:
 
     @property
     def ok(self) -> bool:
+        """这次运行算不算"正常结束"。
+
+        ``max_ticks`` / ``max_runtime`` **算正常** —— 那是你设的预算用完了，
+        不是出错。把它们算成失败的话，"跑满 3 轮看看流程对不对"这种最常用的
+        调试方式会永远返回非零，退出码就失去意义了。
+        """
         return self.stop_reason in (
             StopReason.STOP_PAGE,
             StopReason.TERMINAL_NODE,
             StopReason.COMPLETED,
             StopReason.USER,
+            StopReason.MAX_TICKS,
+            StopReason.MAX_RUNTIME,
         )
 
     def summary(self) -> str:
