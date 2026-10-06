@@ -202,6 +202,179 @@ def _wait_until(qt_app, predicate, timeout: float = 8.0) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+class _FakeRegion:
+    """冒充 ``Region`` —— 控件栏的坐标显示会读它。"""
+
+    def __init__(self) -> None:
+        self.x, self.y, self.w, self.h = 0, 0, 640, 360
+
+
+class _FakeWindow:
+    """冒充 ``WindowInfo``。
+
+    需要 ``title``（预检按它比对）**和** ``region``（下拉框一变，控件栏就会
+    重算并显示客户区坐标 —— 少这个属性会炸在那儿）。
+    """
+
+    def __init__(self, title: str) -> None:
+        self.title = title
+        self.region = _FakeRegion()
+
+
+class TestTargetWindowPreflight:
+    """开跑前确认"要抓的那个窗口**现在**还在"。
+
+    ## 为什么值得单独一组用例
+
+    窗口下拉框是**枚举当时**的快照。选完之后那个窗口关掉了的话，原来那条路
+    会把底层异常直接弹给用户：
+
+        [装不起来] BackendError: 未找到标题包含 'README.md - game-bot - Cursor' 的窗口
+
+    用户看到的是自己几十分钟前选过的另一个窗口的标题 —— 既没说"是窗口问题"，
+    也没说怎么办。现在改成开跑前就用**人话**问清楚。
+    """
+
+    def _stub_windows(self, monkeypatch, titles, *, chosen: str | None = None):
+        """把窗口枚举换掉：省掉真枚举（慢），也让"窗口在不在"可控。
+
+        ``chosen`` 模拟"用户在上面选了哪个" —— 注意 ``ControlsBar.window_title``
+        是**只读属性**（它读的是下拉框的文本），所以设的是下拉框而不是属性。
+        """
+        from gamebot.ui import window as win_mod
+        from gamebot.ui.panels import controls as controls_mod
+
+        monkeypatch.setattr(
+            controls_mod, "_list_windows", lambda keyword="": [_FakeWindow(t) for t in titles]
+        )
+        return win_mod
+
+    def test_missing_window_is_caught_before_anything_else(
+        self, qt_app, ui, monkeypatch
+    ) -> None:
+        """窗口不在时**当场拦下**，而且引擎不许起来。"""
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, ["别的窗口"])
+        shown: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            main, "_info_box", lambda title, body: shown.append((title, body))
+        )
+        main.controls.window.setCurrentText("README.md - game-bot - Cursor")
+
+        assert main._target_window_ok(entry) is False
+        assert shown == [], "枚举得到别的窗口时不该走'枚举不到'那条分支"
+
+    def test_missing_window_offers_to_redetect(self, qt_app, ui, monkeypatch) -> None:
+        """要问一句，而且点了「Yes」就重新枚举。"""
+        from PySide6.QtWidgets import QMessageBox
+
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, ["别的窗口"])
+        main.controls.window.setCurrentText("已经关掉的窗口")
+
+        refreshed: list[bool] = []
+        monkeypatch.setattr(
+            main.controls, "refresh_windows", lambda keyword="": refreshed.append(True) or []
+        )
+        asked: list[str] = []
+
+        def fake_question(parent, title, body, *args, **kwargs):
+            asked.append(body)
+            return QMessageBox.StandardButton.Yes
+
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(fake_question))
+
+        assert main._target_window_ok(entry) is False
+        assert refreshed == [True], "点了 Yes 应该重新枚举窗口列表"
+        assert "已经关掉的窗口" in asked[0], "提示里要写出到底在找哪个窗口"
+        assert "重新枚举" in asked[0], "要告诉用户下一步做什么"
+
+    def test_declining_does_not_refresh(self, qt_app, ui, monkeypatch) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, ["别的窗口"])
+        main.controls.window.setCurrentText("关掉的")
+        refreshed: list[bool] = []
+        monkeypatch.setattr(
+            main.controls, "refresh_windows", lambda keyword="": refreshed.append(True) or []
+        )
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
+        )
+
+        assert main._target_window_ok(entry) is False
+        assert refreshed == []
+
+    def test_existing_window_passes(self, qt_app, ui, monkeypatch) -> None:
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, ["在的窗口", "别的"])
+        main.controls.window.setCurrentText("在的窗口")
+
+        assert main._target_window_ok(entry) is True
+
+    def test_empty_enumeration_is_not_reported_as_missing_window(
+        self, qt_app, ui, monkeypatch
+    ) -> None:
+        """一个窗口都枚举不到时**不说**"窗口不在" —— 那是后端不可用。
+
+        这两种情况的处理完全不同（一个是"重选一个"，一个是"去装后端"），
+        混成一句话会把人引到错的方向。
+        """
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, [])
+        main.controls.window.setCurrentText("随便什么")
+        shown: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            main, "_info_box", lambda title, body: shown.append((title, body))
+        )
+
+        assert main._target_window_ok(entry) is False
+        assert len(shown) == 1
+        assert "枚举不到" in shown[0][0]
+        assert "pywin32" in shown[0][1]
+
+    def test_start_is_blocked_when_window_is_gone(self, qt_app, ui, monkeypatch) -> None:
+        """端到端：窗口不在时点「开始」，引擎不能起来。"""
+        main, _entry, _ = ui
+        self._stub_windows(monkeypatch, ["别的窗口"])
+        main.controls.window.setCurrentText("关掉的窗口")
+        monkeypatch.setattr(main, "_info_box", lambda title, body: None)
+        from PySide6.QtWidgets import QMessageBox
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
+        )
+
+        main._on_start()
+
+        assert main._engine_running is False, "窗口不在就不该启动引擎"
+
+    def test_no_selection_falls_back_to_config_title(
+        self, qt_app, ui, monkeypatch
+    ) -> None:
+        """没选软件时，按**配置里**的 window_title 检查（那才是后端会用的）。"""
+        main, entry, _ = ui
+        self._stub_windows(monkeypatch, ["在的窗口"])
+        main.controls.window.setCurrentText("")
+        monkeypatch.setattr(
+            entry.spec, "build_config", lambda: _config_with_title("在的窗口")
+        )
+
+        assert main._target_window_ok(entry) is True
+
+
+def _config_with_title(title: str) -> AppConfig:
+    config = _config()
+    config.screen.window_title = title
+    return config
+
+
+# --------------------------------------------------------------------------- #
 class TestStartStop:
     def test_start_button_actually_runs_the_engine(self, qt_app, ui) -> None:
         """点「开始」真的能起来 —— 就是这条能抓住 ``_engine_tick_relay`` 那个错。"""

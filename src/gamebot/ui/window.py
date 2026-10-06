@@ -379,6 +379,67 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # 开始 / 停止
     # ------------------------------------------------------------------ #
+    def _target_window_ok(self, entry: ScriptEntry) -> bool:
+        """开跑前确认"要抓的那个窗口**现在**还在"。不在就当场说清楚。
+
+        ## 为什么非要加这一步
+
+        窗口下拉框是**枚举当时**的快照，而窗口会关、会被改名。选完之后窗口没了
+        的话，原来那条路的报错是底层异常直接弹出来：
+
+            [装不起来] BackendError: 未找到标题包含 'README.md - game-bot - Cursor' 的窗口
+
+        用户看到的是**自己几十分钟前选过的另一个窗口的标题**，而"它不在了"
+        这件事得自己从异常里推出来 —— 报错既没说"是窗口问题"，也没说怎么办。
+        （实测踩过：选过 Cursor 的窗口标题，回来点开始时那个标签页已经关了。）
+
+        所以在这里就用**人话**问清楚，并给一个「重新检测」的出口。
+
+        :return: 能不能继续。``False`` 时调用方必须直接 return。
+        """
+        import contextlib
+
+        from .panels.controls import _list_windows
+
+        chosen = self.controls.window_title
+        config_title = ""
+        with contextlib.suppress(Exception):
+            config_title = entry.spec.build_config().screen.window_title
+        wanted = chosen or config_title
+        if not wanted:
+            # 既没选、配置里也没有 —— 交给后端按整屏抓，不是这里能判断的
+            return True
+
+        windows = _list_windows()
+        if any(info.title == wanted for info in windows):
+            return True
+
+        if not windows:
+            # 一个窗口都枚举不到：多半是后端没装或平台不对，别冒充"窗口不在"
+            self._info_box(
+                "枚举不到任何窗口",
+                "现在一个可见窗口都列不出来 —— 这通常是后端不可用"
+                "（Windows 需要 pywin32），或者跑在无头环境里。\n\n"
+                "先看看日志里有没有 BackendUnavailable。",
+            )
+            return False
+
+        source = "上面选的软件" if chosen else "配置文件里的 window_title"
+        answer = QMessageBox.question(
+            self,
+            "要操作的窗口不在了",
+            f"按{source}要抓的是：\n\n    {wanted}\n\n"
+            "但现在枚举不到这个窗口 —— 它可能被关掉了，或者标题变了"
+            "（比如编辑器换了标签页）。\n\n"
+            "点「Yes」重新枚举一次窗口列表，然后你在上面重新选一个；"
+            "点「No」就什么都不做。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.controls.refresh_windows()
+        return False
+
     def _on_start(self) -> None:
         """装配 -> 交给工作线程跑。
 
@@ -391,6 +452,9 @@ class MainWindow(QMainWindow):
             self._info_box("先选脚本", "「开始」要知道跑哪份定义。先在上面选一个脚本。")
             return
         if self._engine_running:
+            return
+
+        if not self._target_window_ok(entry):
             return
 
         from ..bootstrap import build_context, build_engine, check_templates
