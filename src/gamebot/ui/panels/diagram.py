@@ -52,7 +52,9 @@ __all__ = ["DiagramPanel", "FlowDiagramView", "StateTreeView"]
 #: 节点框的尺寸。**够写下两行**：name 一行、id 一行。
 NODE_W = 210.0
 NODE_H = 46.0
-GAP_X = 60.0
+GAP_X = 150.0
+"""列间距。**不只是留白**：长的边说明要放在这一缝里（见 `_edge`），
+60 太窄会压到下一个节点上。"""
 GAP_Y = 18.0
 
 #: 自动缩放的比例上下限。"刚好看得清"比"铺满视口"重要 —— 见 ``reset_view``。
@@ -85,6 +87,13 @@ class _Diagram(QGraphicsView):
         self.setScene(self._scene)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setBackgroundBrush(QBrush(COLOR_BG))
+        # ---- 导航：拖拽，不要滚动条 ----
+        #
+        # **关掉滚动条但仍然能拖**：``ScrollBarAlwaysOff`` 只是不画那两个条，
+        # 滚动范围照旧存在，所以 ``ScrollHandDrag`` 的拖动、以及滚轮缩放
+        # 都还正常。图本来就不大，滚动条占地方又容易误拖。
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._scene.setBackgroundBrush(QBrush(COLOR_BG))
@@ -93,8 +102,47 @@ class _Diagram(QGraphicsView):
         self._user_zoomed = False
         #: 画完了但还没适配（等有了真实尺寸再适配，见 showEvent）
         self._fit_pending = False
+        #: 中键拖拽的起点（``None`` = 没在拖）。左键也能拖（``ScrollHandDrag``），
+        #: 但左键在图元上会被它自己接管；中键是通用的"平移"手势，补一个。
+        self._pan_from: QPointF | None = None
 
     # -- 交互 -------------------------------------------------------------- #
+    def mousePressEvent(self, event: Any) -> None:
+        """中键按下 = 开始平移。"""
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_from = event.position()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: Any) -> None:
+        """中键拖拽：把位移换算成滚动条的值。
+
+        走滚动条（而不是 ``translate`` 变换）：**和 ``ScrollHandDrag`` 同一套机制**，
+        两者不会互相打架，``reset_view`` 也只要重算缩放、不用管平移量。
+        """
+        if self._pan_from is not None:
+            delta = event.position() - self._pan_from
+            self._pan_from = event.position()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - int(delta.x())
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - int(delta.y())
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: Any) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton and self._pan_from is not None:
+            self._pan_from = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def wheelEvent(self, event: Any) -> None:
         """滚轮缩放（以鼠标为中心）。调脚本时经常要看全貌/看细节。"""
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -214,7 +262,7 @@ class _Diagram(QGraphicsView):
             self._scene.addItem(hint)
         return rect
 
-    def _arrow(
+    def _edge(
         self,
         src: QRectF,
         dst: QRectF,
@@ -223,48 +271,115 @@ class _Diagram(QGraphicsView):
         dashed: bool = False,
         active: bool = False,
     ) -> None:
-        """从 src 右边 -> dst 左边画一条带箭头的线（同一列时走上下）。"""
+        """画一条**直角**转移线，标签放在线上方并带底色。
+
+        ## 三种走法
+
+        * **往前**（目标在源右边）：``源右 → 中缝竖线 → 目标左``。
+          标签放在中缝那段的上方；
+        * **回边**（目标在源左边或同一列）：从**上方通道**绕过去 ——
+          ``源右 → 上 → 通道横线 → 目标上``，箭头朝下进目标。
+          这样回边不会横穿中间那些节点（以前是斜线穿过去，根本读不出来）；
+        * **自环**（源就是目标）：在节点上方绕一个小方框。
+
+        ## 标签为什么要有底色
+
+        以前标签放在"两点中点再偏一点"，而两列之间只有 ``GAP_X`` 那么宽 ——
+        长一点的说明直接压在下一个节点上，糊成一片。
+        现在：中缝加宽、标签放在**线上方**、并且**铺一层底色**，
+        和线重叠也读得清。
+        """
         color = COLOR_ARROW_ACTIVE if active else COLOR_ARROW
         pen = QPen(color, 2.0 if active else 1.2)
         if dashed:
             pen.setStyle(Qt.PenStyle.DashLine)
-        if abs(src.y() - dst.y()) < NODE_H / 2:
-            start = QPointF(src.right(), src.center().y())
-            end = QPointF(dst.left(), dst.center().y())
-        else:
-            start = QPointF(src.center().x(), src.bottom())
-            end = QPointF(dst.center().x(), dst.top())
-        self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
 
-        # 箭头：按方向画一个小三角
+        def line(x1: float, y1: float, x2: float, y2: float, *, arrow: bool = False) -> None:
+            self._scene.addLine(x1, y1, x2, y2, pen)
+            if arrow:
+                self._arrow_head(QPointF(x2, y2), QPointF(x1, y1), color)
+
+        gap = dst.left() - src.right()
+        if gap > 8:
+            # 往前：中缝走直角
+            mid_x = src.right() + gap / 2
+            line(src.right(), src.center().y(), mid_x, src.center().y())
+            if abs(src.center().y() - dst.center().y()) > 1:
+                line(mid_x, src.center().y(), mid_x, dst.center().y())
+            line(mid_x, dst.center().y(), dst.left(), dst.center().y(), arrow=True)
+            # 标签走**下方**通道（不是上方、也不是横线正上方）：
+            #
+            # * 横线在节点垂直中间，紧挨着就是节点里的两行字，贴着看不清谁是谁；
+            # * 上方留给**回边**（见下面那条分支）—— 否则回边的通道横线会和
+            #   前瞻边的标签撞在同一高度上，字压在线上（踩过）。
+            self._edge_label(
+                label, active, mid_x + 6, max(src.bottom(), dst.bottom()) + 6
+            )
+            return
+
+        # 回边 / 自环：走上方通道
+        channel_y = min(src.top(), dst.top()) - max(20.0, NODE_H * 0.5)
+        if src == dst:
+            out_x = src.right() + 16  # 自环：右边出去、上面绕回来
+            line(src.right(), src.center().y(), out_x, src.center().y())
+            line(out_x, src.center().y(), out_x, channel_y)
+            line(out_x, channel_y, src.center().x(), channel_y)
+            line(src.center().x(), channel_y, src.center().x(), src.top(), arrow=True)
+        else:
+            out_x = src.right() + 16
+            line(src.right(), src.center().y(), out_x, src.center().y())
+            line(out_x, src.center().y(), out_x, channel_y)
+            line(out_x, channel_y, dst.center().x(), channel_y)
+            line(dst.center().x(), channel_y, dst.center().x(), dst.top(), arrow=True)
+        self._edge_label(label, active, min(src.center().x(), dst.center().x()), channel_y - 20)
+
+    def _edge_label(self, label: str, active: bool, x: float, y: float) -> None:
+        """边上的说明文字 + 一层底色（否则和线重叠就读不出来）。
+
+        ``QGraphicsSimpleTextItem.boundingRect()`` 是**相对它自己**的
+        （左右各带一点留白、上边从 -1 左右开始）。所以底色框要拿它
+        **放到场景之后**的范围（``sceneBoundingRect``）来算 ——
+        直接用 boundingRect 当场景坐标的话，框会整体偏出去，
+        图上看着像文字浮在一块错位的深色板上。
+        """
+        if not label:
+            return
+        item = QGraphicsSimpleTextItem(_elide(label, 44))
+        font = QFont()
+        font.setPointSize(7)
+        item.setFont(font)
+        item.setBrush(QBrush(COLOR_TEXT_DIM if not active else COLOR_BORDER_MISALIGNED))
+        item.setPos(x, y)
+        item.setZValue(4)
+        self._scene.addItem(item)
+
+        box = QGraphicsRectItem(item.sceneBoundingRect().adjusted(-2, -1, 2, 1))
+        box.setBrush(QBrush(COLOR_BG))
+        box.setPen(QPen(Qt.PenStyle.NoPen))
+        box.setZValue(3)
+        self._scene.addItem(box)
+
+    def _arrow_head(self, tip: QPointF, from_: QPointF, color: QColor) -> None:
+        """在 ``tip`` 画一个指向前进方向的小三角。"""
         size = 6.0
-        if start.x() != end.x():
-            tip = end
-            pts = [
-                tip,
-                QPointF(end.x() - size, end.y() - size / 1.6),
-                QPointF(end.x() - size, end.y() + size / 1.6),
+        dx, dy = tip.x() - from_.x(), tip.y() - from_.y()
+        if dx == 0 and dy == 0:
+            return
+        if abs(dx) >= abs(dy):
+            base = [
+                QPointF(tip.x() - size, tip.y() - size / 1.8),
+                QPointF(tip.x() - size, tip.y() + size / 1.8),
             ]
         else:
-            tip = end
-            pts = [
-                tip,
-                QPointF(end.x() - size / 1.6, end.y() - size),
-                QPointF(end.x() + size / 1.6, end.y() - size),
+            base = [
+                QPointF(tip.x() - size / 1.8, tip.y() - size),
+                QPointF(tip.x() + size / 1.8, tip.y() - size),
             ]
-        arrow = QPolygonF(pts)
-        item = self._scene.addPolygon(arrow, QPen(color, 1.0), QBrush(color))
-        item.setZValue(0)
-
-        if label:
-            text = QGraphicsSimpleTextItem(_elide(label, 18))
-            font = QFont()
-            font.setPointSize(7)
-            text.setFont(font)
-            text.setBrush(QBrush(COLOR_TEXT_DIM if not active else COLOR_BORDER_MISALIGNED))
-            text.setPos((start.x() + end.x()) / 2 - 20, (start.y() + end.y()) / 2 - 14)
-            text.setZValue(2)
-            self._scene.addItem(text)
+        item = self._scene.addPolygon(
+            QPolygonF([tip, *base]), QPen(color, 1.0), QBrush(color)
+        )
+        item.setZValue(2)
 
     def _tree_edges(self, parent: QRectF, children: list[QRectF]) -> None:
         """一棵子树的分组连线：**折线直角**，而且兄弟共用一条竖干线。
@@ -486,7 +601,7 @@ class FlowDiagramView(_Diagram):
             if src is None or dst is None:
                 continue
             label = edge.label or ("无条件" if not edge.has_condition else "条件")
-            self._arrow(
+            self._edge(
                 src,
                 dst,
                 label=label,
