@@ -15,9 +15,21 @@ class TestTable:
         keys = [spec.keys for spec in SHORTCUTS]
         assert len(keys) == len(set(keys)), f"有重复键位: {keys}"
 
-    def test_actions_are_unique(self):
-        actions = [spec.action for spec in SHORTCUTS]
-        assert len(actions) == len(set(actions))
+    def test_actions_are_unique_except_aliases(self):
+        """一个动作一个主键 —— **除了显式标了 ``alias`` 的别名**。
+
+        ``Shortcut`` 是"一个键 → 一个动作"的绑定，所以同一个动作出现两次
+        必须是有意的（``alias=True``），否则就是复制粘贴事故。
+        别名还得指向一个真实存在的主键 —— 不能凭空冒出一个动作。
+        """
+        primary = [spec.action for spec in SHORTCUTS if not spec.alias]
+        assert len(primary) == len(set(primary)), f"有重复的主动作: {primary}"
+        for spec in SHORTCUTS:
+            if not spec.alias:
+                continue
+            assert any(
+                other.action == spec.action and not other.alias for other in SHORTCUTS
+            ), f"{spec.keys} 标成别名了，但没有对应的主键"
 
     def test_every_entry_is_described(self):
         """没有说明的快捷键，在 F1 帮助里就是一串看不懂的字母。"""
@@ -30,11 +42,19 @@ class TestTable:
         actions = {spec.action for spec in SHORTCUTS}
         assert {"run", "stop", "help"} <= actions
 
-    def test_stop_is_escape_and_run_is_f5(self):
-        """用户问的就是这个，钉住。"""
-        mapping = {spec.action: spec.keys for spec in SHORTCUTS}
-        assert mapping["run"] == "F5"
-        assert mapping["stop"] == "Esc"
+    def test_stop_keys_and_run_key(self):
+        """用户问的就是这个，钉住。
+
+        ``stop`` 有**两个**键：``Esc``（直觉）和 ``F9``（几乎没人抢）。
+        ``F9`` 兼作诊断：它有效而 ``Esc`` 无效，就说明 ``Esc`` 被别的软件
+        占了（全局钩子在 Windows 上是链式的，先装的先拿到），
+        而不是本工具的钩子没装上。
+        """
+        keys_for: dict[str, list[str]] = {}
+        for spec in SHORTCUTS:
+            keys_for.setdefault(spec.action, []).append(spec.keys)
+        assert keys_for["run"] == ["F5"]
+        assert set(keys_for["stop"]) == {"Esc", "F9"}
 
     def test_button_names_are_known(self):
         """``button`` 只能是控件栏里真有的那几种，否则 tooltip 会静默贴不上。"""

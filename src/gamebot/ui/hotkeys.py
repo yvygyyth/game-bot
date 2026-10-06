@@ -60,6 +60,7 @@ _WM_KEYUP = 0x0101
 _WM_SYSKEYDOWN = 0x0104
 _WM_SYSKEYUP = 0x0105
 _WM_QUIT = 0x0012
+_PM_NOREMOVE = 0x0000
 
 _VK_SHIFT = 0x10
 _VK_CONTROL = 0x11
@@ -311,9 +312,30 @@ class GlobalHotkeys(QObject):
 
     # ------------------------------------------------------------------ #
     def _run(self) -> None:
-        """钩子线程主体：装钩子 -> 消息循环 -> 卸钩子。"""
+        """钩子线程主体：**建消息队列** → 装钩子 → 消息循环 → 卸钩子。
+
+        ## 顺序在这里是决定性的（踩过，而且极难查）
+
+        低级钩子要把键盘事件投递到**装钩子那个线程的消息队列**。而一个线程的
+        消息队列是**第一次碰消息 API 时才创建**的。原来的顺序是"先
+        ``SetWindowsHookExW``、进循环时才第一次 ``GetMessageW``" ——
+        也就是**队列还不存在就装了钩子**。
+
+        后果正是最难查的那种：``SetWindowsHookExW`` 返回**有效句柄**、
+        ``GetLastError`` 是 0、"装上了"看起来一切正常，但回调**一次都不会被调用**
+        （外部表现就是"失焦后快捷键无效"）。
+
+        所以先 ``PeekMessageW`` 一次把队列建出来，再装钩子。
+        """
         try:
             self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+
+            # 1) 先把本线程的消息队列建出来（PeekMessage 的副作用）。
+            #    用 PM_NOREMOVE，不取走任何消息，只为触发队列创建。
+            msg = _wintypes.MSG()
+            ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, _PM_NOREMOVE)
+
+            # 2) 现在装钩子 —— 事件有地方投递了
             self._proc = _HOOKPROC(self._callback)
             self._hook = ctypes.windll.user32.SetWindowsHookExW(
                 _WH_KEYBOARD_LL, self._proc, None, 0
@@ -324,7 +346,7 @@ class GlobalHotkeys(QObject):
             self._ok = True
             self._ready.set()
 
-            msg = ctypes.wintypes.MSG()
+            # 3) 消息循环
             while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 pass
         except Exception:  # pragma: no cover - 取决于平台
@@ -449,6 +471,14 @@ if sys.platform == "win32":
             _wintypes.UINT,
         ]
         u.GetMessageW.restype = ctypes.c_int
+        u.PeekMessageW.argtypes = [
+            ctypes.POINTER(_wintypes.MSG),
+            _wintypes.HWND,
+            _wintypes.UINT,
+            _wintypes.UINT,
+            _wintypes.UINT,
+        ]
+        u.PeekMessageW.restype = _wintypes.BOOL
 
     _declare_win32()
 

@@ -68,6 +68,19 @@ class Shortcut:
     真被占了就把这里的 ``global_hotkey`` 关掉，界面内照样能按。
     """
 
+    alias: bool = False
+    """这是**同一个动作的另一个键**（别名），不是新动作。
+
+    为什么要区分：:class:`Shortcut` 是"一个键 → 一个动作"的绑定，而
+    ``action`` 在表里默认是唯一的（有测试钉着）。别名会让它出现两次 ——
+    那不是重复定义，是**同一动作的第二个键**，所以用这个字段显式标出来。
+
+    实际用途：``stop`` 同时给 ``Esc`` 和 ``F9``。``Esc`` 太常被别的软件占用，
+    而全局钩子在 Windows 上是**链式**的（先装的先拿到，吞掉的后面的就收不到）；
+    给一个几乎没人抢的 ``F9`` 既能救急，也是个诊断手段 ——
+    ``F9`` 有效而 ``Esc`` 无效，就说明是 ``Esc`` 被抢了，而不是钩子没装上。
+    """
+
     @property
     def hint(self) -> str:
         return f"（{self.keys}）"
@@ -84,9 +97,21 @@ class Shortcut:
 #:
 #: ``global_hotkey=True`` 的只有开始 / 停止 / 帮助 —— 这三条要"游戏在前台、
 #: 本界面在后台"时也能按。理由和代价见 :attr:`Shortcut.global_hotkey`。
+#:
+#: ## 停止为什么有两个键
+#:
+#: ``Esc`` 是直觉上最好按的，但**它太常被别的软件占用**（编辑器、输入法、
+#: 各种悬浮工具都会挂全局 ``Esc``）。全局快捷键在 Windows 上是**链式**的：
+#: 先装的先拿到事件，而"先拿到"的那个如果吞掉它（``RegisterHotKey`` 就吞），
+#: 后面的就收不到了。
+#:
+#: 所以停止给两个键：``Esc``（顺手）+ ``F9``（几乎没人抢）。
+#: **这也是一个诊断手段**：如果 ``F9`` 全局有效而 ``Esc`` 无效，
+#: 那问题就是"``Esc`` 被别的软件抢了"，而不是本工具的钩子没装上。
 SHORTCUTS: tuple[Shortcut, ...] = (
     Shortcut("run", "F5", "开始运行", button="start", global_hotkey=True),
     Shortcut("stop", "Esc", "停止（毫秒级）", button="stop", global_hotkey=True),
+    Shortcut("stop", "F9", "停止（毫秒级）", button="stop", global_hotkey=True, alias=True),
     Shortcut("detect", "F7", "重新检测可见软件窗口", button="detect"),
     Shortcut("page_diagram", "Ctrl+1", "切到「状态 / 流程」"),
     Shortcut("page_recognition", "Ctrl+2", "切到「识图日志」"),
