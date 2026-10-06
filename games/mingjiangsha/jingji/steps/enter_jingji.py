@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from gamebot.types import ActionResult
 
-from ...shortcuts import click_jingji_entry
+from ..shortcuts import click_jingji_entry
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext

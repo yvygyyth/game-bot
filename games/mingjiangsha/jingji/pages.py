@@ -82,7 +82,7 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 
-from ..shortcuts import CONF_JINGJI, JINGJI_ROI, T_JINGJI
+from .shortcuts import CONF_JINGJI, JINGJI_ROI, T_JINGJI
 
 #: 左上角「竞技场」标题。
 #:

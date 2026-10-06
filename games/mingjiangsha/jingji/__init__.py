@@ -39,9 +39,12 @@ TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
 #: 名字拼错报 ``did you mean ...?``。所以"结构对不对"在**写的时候**就有反馈 ——
 #: 不需要跑起来，也不需要点一个"检查"按钮。
 #:
-#: ``base_config`` / ``base_tree`` 收的是**游戏级**的东西（窗口标题、分辨率、
-#: 公共页面）—— 那是"怎么跑"、而且与环境相关，所以由游戏级提供，
-#: 本功能不重复声明。
+#: ``base_config`` 收的是**游戏级**的东西（窗口标题、分辨率）—— 那是"怎么跑"、
+#: 而且与环境相关，所以由游戏级提供，本功能不重复声明。
+#:
+#: **没有 ``base_tree``。** 页面不再分"游戏级公共"和"功能级"——
+#: 那套分层在只有一个功能时只带来负担（理由见 :mod:`games.mingjiangsha.game`）。
+#: 状态树整个在 :mod:`.pages` 里，包括它自己的首页那层。
 SPEC = FeatureSpec(
     name=f"{_game.SLUG}/{SLUG}",
     title=TITLE,
@@ -50,7 +53,6 @@ SPEC = FeatureSpec(
     templates_dir=TEMPLATES_DIR,
     scenario=SCENARIO,
     base_config=_game.base_config,
-    base_tree=_game.new_tree,
     form=FORM,
 )
 """``form`` 是可选的：不写就是空表单，界面上不显示那一块。

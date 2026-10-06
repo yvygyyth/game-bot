@@ -55,10 +55,10 @@ game-bot/
 │   │   ├── actions.py           #   L5 点/拖/滚/按键
 │   │   ├── vision.py            #   Matcher / TextReader 协议
 │   │   └── backends/            #   平台后端：windows / android / fake
-│   ├── execution/               # ★ 执行层：步骤 + 重试 + 记账
-│   │   ├── step.py              #   Step 家族
-│   │   ├── policy.py            #   RetryPolicy / StepPolicy / ErrorMode
-│   │   ├── executor.py          #   Executor
+│   ├── execution/               # ★ 执行层：跑步骤 + 记账
+│   │   ├── step.py              #   步骤契约（就是一个函数）+ 命名
+│   │   ├── builtins.py          #   常用步骤：click_image / wait_for / run_all …
+│   │   ├── executor.py          #   Executor（只调函数 + 记账，不重试）
 │   │   └── journal.py           #   落盘记录（JSONL 契约）
 │   ├── state/                   # ★ 状态层：我在哪个状态
 │   │   ├── page.py              #   状态树 Page / PageTree / PageMatch + 定位两条路径

@@ -38,7 +38,6 @@ from .exceptions import ConfigError
 from .flow.scenario import Scenario
 from .params import FormSpec
 from .scenario_spec import ScenarioSpec
-from .state.page import PageTree
 
 __all__ = ["FeatureSpec"]
 
@@ -62,8 +61,13 @@ class FeatureSpec:
     :param build_config: 可选。在框架拼好的配置上做**本功能**的最后调整。
         绝大多数脚本不需要 —— 模板根、名字、tick 间隔框架都会从声明里填好。
         留这个入口是为了"这个脚本真要拧某个框架级旋钮"这种情况。
-    :param base_tree: 可选。造一棵**游戏级公共页面**的树；框架会先放它、
-        再放 ``scenario.pages``。同样必须是可调用对象（每次一棵新的）。
+    :param base_tree: ~~可选。造一棵游戏级公共页面的树。~~
+        **已删除。** 页面不再分"游戏级公共"和"功能级"—— 那套分层在只有一个
+        功能时只带来负担，而且实测下来"游戏级公共"当时装的全是某一个功能的
+        东西。状态树整个写在 ``ScenarioSpec.tree`` 里。
+
+        （``ScenarioSpec.materialize(tree=...)`` 那个参数**留着**：
+        它现在只服务于"在已有树上加"这种用法，不再是"游戏级公共页"的载体。）
     :param description: 一句话说明，进列表和日志。
     :param form: 运行参数表单。没有就是空表单（界面上不显示那一块）。
     """
@@ -77,7 +81,6 @@ class FeatureSpec:
     description: str = ""
     form: FormSpec | None = None
     build_config: Callable[[AppConfig], AppConfig] | None = None
-    base_tree: Callable[[], PageTree] | None = None
 
     def __post_init__(self) -> None:
         """声明自身的检查。**构造这一行就报**，而不是等框架捞不着东西才猜。
@@ -111,11 +114,6 @@ class FeatureSpec:
             raise ConfigError(
                 f"{self.name}: build_config 要是可调用对象或 None，"
                 f"收到 {type(self.build_config).__name__}"
-            )
-        if self.base_tree is not None and not callable(self.base_tree):
-            raise ConfigError(
-                f"{self.name}: base_tree 要是可调用对象或 None，"
-                f"收到 {type(self.base_tree).__name__}"
             )
 
     # ------------------------------------------------------------------ #
@@ -151,5 +149,4 @@ class FeatureSpec:
         ``name`` 用 SPEC 的（而不是 ``ScenarioSpec`` 上另写一个）——
         脚本名只该有一个出处，否则报告里的名字和列表里的对不上。
         """
-        tree = self.base_tree() if self.base_tree is not None else None
-        return self.scenario.materialize(name=self.name, tree=tree)
+        return self.scenario.materialize(name=self.name)

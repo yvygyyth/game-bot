@@ -60,15 +60,24 @@ network_error       [overlay]       ← 顶层叠加层，哪一页都可能出�
 2. **重定位之后去哪**：状态层说"真实在 `home/jingji`"，流程图得回答"那归谁管"；
 3. **动完手之后我在哪**：节点跑完，当前"预期状态"要跟着变。
 
-三件事收在一个对象上：`gamebot.flow.binding.StateBinding`。
-它是**启动期算出来的纯数据**，不是新的配置文件 —— 数据来源就是节点的 `page` 字段：
+三件事收在一张表上：**关联表**（`gamebot.flow.bindings.NodeBindings`）。
+它是**启动期定好的纯数据**，而且是**独立的一个产物** —— 不藏在状态树里，
+也不藏在流程图里（节点**不**声明自己是哪个状态）：
 
 ```python
-node = graph.node("jingji")          # page="home/jingji/before_create"
-binding.state_of(node)               # -> "home/jingji/before_create"   我负责哪个状态
-binding.node_for("home/jingji/before_create")  # -> node("jingji")  这个状态归谁管
-binding.check(node, actual)          # -> (True/False, 说明)  动手前校验
+# games/<游戏>/<功能>/bindings.py
+BINDINGS = NodeBindings(pairs=(
+    Binding("jingji", "home/jingji/before_create"),
+))
+
+BINDINGS.state_of("jingji")                      # -> "home/jingji/before_create"  我负责哪个状态
+BINDINGS.node_for("home/jingji/before_create")   # -> "jingji"                     这个状态归谁管
 ```
+
+> **校验不在关联表上。** "节点期望的状态和实测对不上"这件事没有单独的机制：
+> 进入流程节点 -> 关联表说"当前状态是它关联的那个" -> 跑那个状态的**定位代码** ->
+> 对上了干活，对不上重定位。**自检和定位是同一个动作。**
+> 想知道某个节点当前对不对得上，问引擎的 `FlowEngine.check_state()`。
 
 ### 一个方向是"一定"，另一个方向是"最多一个"
 

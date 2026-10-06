@@ -1,13 +1,38 @@
-"""名将杀 —— 游戏级定义与配置。"""
+"""名将杀 —— 游戏级定义与配置（**只有"怎么跑"，没有"页面"**）。
+
+## 这里**不**放页面
+
+原来这里有个 :func:`new_tree` + ``pages.py``（游戏级公共页面），还有一份
+``shortcuts.py``（公共识别逻辑）。那两样都删了：翻了一遍发现"游戏级公共"
+当时装的**全是竞技功能的东西** —— 竞技卡、竞技入口的 roi、点它的函数。
+
+用某一个功能的资源去定义"游戏级的东西"是反的：别的功能要认首页，就得反过来
+引用竞技场的图。所以全都搬到了 :mod:`games.mingjiangsha.jingji`
+（:mod:`.pages` 和 :mod:`.shortcuts`）。
+
+## 留下的是什么
+
+只有**与环境相关、且跨功能真的共用**的东西：
+
+* 窗口标题和**锁定分辨率** —— 换分辨率所有模板和坐标全部失效，是游戏级的；
+* 游戏级模板根（多个脚本共用的图放这儿；现在目录不存在，因为只有一个脚本）；
+* :func:`base_config` —— 造一份基础配置，功能脚本在它上面改自己的部分。
+
+**判断标准**：一条东西要留在游戏级，得能回答"第二个功能会不会原样用它"。
+答不上来就放功能级 —— 提到游戏级是**加法**（多一层需要理解的关系），
+放功能级是**默认位置**。
+
+## 以后什么时候建游戏级公共模块
+
+等真有第二个功能、而且某一跳确实一模一样时再提。现在就提是过早抽象 ——
+只有一个样本时，你没法知道"共用的那一块"到底是哪一块。
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from gamebot.config.schema import AppConfig, BackendKind
-from gamebot.state import PageTree
-
-from .pages import COMMON_PAGES
 
 #: 项目根（games/mingjiangsha/game.py -> 上三级）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,17 +74,3 @@ def base_config() -> AppConfig:
     config.vision.use_pyramid = True
     config.paths.root = PROJECT_ROOT
     return config
-
-
-def new_tree() -> PageTree:
-    """新建一棵**只含游戏级公共页面**的树。
-
-    游戏级公共页面现在是空的（理由见 :mod:`games.mingjiangsha.pages`），
-    所以返回空树 —— 功能脚本用 ``tree.add`` 往里放自己的页面（含它的
-    `home`）。这个函数留着，是因为"游戏级公共页面"这件事本身要有个位置，
-    而不是让每个功能各自 ``PageTree()``：那样以后加公共页就得改所有功能。
-    """
-    tree = PageTree()
-    for page, parent in COMMON_PAGES:
-        tree.add(page, parent)
-    return tree

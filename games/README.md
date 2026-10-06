@@ -8,20 +8,27 @@
 games/
 └── <游戏>/                        一级：一个游戏一个目录（容器）
     ├── __init__.py               游戏级导出
-    ├── game.py                   游戏级定义：窗口、锁定分辨率、公共配置
-    ├── pages.py                  游戏级公共页面（首页、各类弹窗）
-    ├── shortcuts.py              游戏级快捷方法（关弹窗、回主界面）
-    ├── templates/                游戏级公共模板
+    ├── game.py                   游戏级定义：窗口、锁定分辨率、基础配置
+    ├── templates/                游戏级公共模板（多个脚本共用的图）
     └── <功能>/                    二级：一个脚本功能一个目录
         ├── __init__.py            ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
         ├── form.py                动态表单声明（FORM，没人调参数就不用写）
         ├── pages.py               状态（**一个文件就够**，再复杂也别拆）
         ├── graph.py               流程（同上）
+        ├── bindings.py            关联表（状态末梢 ↔ 流程节点的 id 映射）
         ├── steps/                 ★ 一个步骤一个文件
         ├── shortcuts.py           这个功能专用的快捷方法
         ├── templates/             这个功能的图片资源
         └── README.md              这个脚本怎么调
 ```
+
+**游戏级目录里没有 `pages.py` / `shortcuts.py`。** 它们原来有，装的却是
+某一个功能的东西（竞技卡、竞技入口的 roi、点它的函数）—— 用某一个功能的
+资源去定义"游戏级的东西"是反的，所以都搬进了功能目录。
+
+**判断一条东西该放哪一级**：它要留在游戏级，得能回答"第二个功能会不会
+原样用它"。答不上来就放功能级 —— 提到游戏级是**加法**（多一层需要理解的
+关系），放功能级是默认位置。
 
 （**没有 `checks.py` 了** —— 早先每个脚本要抄一份自检代码，已经删掉，
 见下面"查错"那一节。）
@@ -44,12 +51,12 @@ T_CREATE_TEAM = "jingji/create_team.png"     # 这个步骤用的模板
 TEAM_ROI = Region(1400, 630, 470, 360)       # 它的搜索范围
 CONF_BUTTON = 0.85                           # 它的阈值
 
-class CreateTeamStep(Step):                  # 它的逻辑
+def create_team(ctx) -> ActionResult:        # 它的逻辑（**就是一个函数**）
     ...
 ```
 
-`steps/__init__.py` **只做转发**（`from .advance_team import CreateTeamStep`），
-不要在那里写逻辑 —— 这样 `from .steps import CreateTeamStep` 照常能用，
+`steps/__init__.py` **只做转发**（`from .advance_team import create_team`），
+不要在那里写逻辑 —— 这样 `from .steps import create_team` 照常能用，
 而"这个步骤到底长什么样"永远在一个文件里看得完。
 
 **页面标识放 `pages.py`，不要放 `steps/`。** `T_TITLE` 那种是页面身份，
@@ -90,62 +97,85 @@ SPEC = FeatureSpec(
     slug="qianli",                           # 功能目录名（进 journal 文件名）
     description="自动刷本，连胜就继续",         # 可选
     templates_dir="games/mingjiangsha/qianli/templates",
-    scenario=SCENARIO,                       # 状态树 + 流程图 + 引擎选项（见下）
+    scenario=SCENARIO,                       # 状态树 + 流程图 + 关联表 + 引擎选项
     base_config=game.base_config,            # 游戏级基础配置（可调用对象）
-    base_tree=game.new_tree,                 # 可选：游戏级公共页面
     form=FORM,                               # 可选：运行参数表单
 )
 ```
 
-`scenario` 是另一个纯数据对象：
+`scenario` 是另一个纯数据对象，**三个产物各一个字段**：
 
 ```python
 # games/<游戏>/<功能>/graph.py
+from gamebot.flow import Binding, EngineOptions, Node, NodeBindings, Transition
 from gamebot.scenario_spec import ScenarioSpec
-from gamebot.flow import EngineOptions, Node, Transition
 from games import on_page
 
+from .bindings import BINDINGS
+from .pages import FEATURE_TREE
+from .steps import create_team, enter_qianli
+
 SCENARIO = ScenarioSpec(
-    initial="home",                          # 必选：流程从哪开始
-    tree=PageGroup(                          # 整棵状态树（嵌套）
-        # **嵌套的树**：分类节点和状态节点是两种类型
-        PageGroup("home", children=(
-            PageLeaf("home/lobby", queries=(...)),        # 记录"我在首页"
-            PageGroup("home/jingji", roi=..., children=(
-                PageLeaf("home/jingji/before_create", queries=(...)),
-            )),
-        )),
-    ),
-    nodes=(
-        # **出边写在节点自己身上** —— 起点就是"我"，不用写
+    initial="lobby",                         # 必选：流程从哪开始
+    tree=FEATURE_TREE,                       # ① 状态树 —— "我在哪"（见 pages.py）
+    bindings=BINDINGS,                       # ② 关联表 —— 谁对应谁（见 bindings.py）
+    nodes=(                                  # ③ 流程图 —— "做什么"
         Node(
-            "home",
-            page="home/lobby",
-            steps=[EnterJingjiStep()],
-            cooldown=0.5,
+            "lobby",
+            steps=[enter_qianli],            # 步骤是**普通函数**，直接放进来
             transitions=[
+                # 出边写在节点自己身上：起点就是"我"，不用写
                 Transition(
-                    "home/jingji/before_create",           # 终点（也是目标节点 id）
-                    on_page("home/jingji/before_create"),  # 条件（挨着写，能对上）
-                    10,                                    # priority
-                    "竞技场出现",                            # label
+                    "qianli/battle",           # 终点（也是目标节点 id）
+                    on_page("qianli/battle"),  # 条件（挨着写，能对上）
+                    10,                        # priority
+                    "进战斗了",                  # label
                 ),
             ],
         ),
-        Node("home/jingji/before_create", page="home/jingji/before_create",
-             steps=[CreateTeamStep()]),
+        Node("qianli/battle", steps=[create_team]),
     ),
     options=EngineOptions(tick_interval=0.4, max_runtime=180.0),
 )
 ```
 
-> **节点 id 用它所声明状态的 id** 是个约定（`"home/jingji/before_create"` 既是节点
-> id 也是页面 id）。条件里写的就是那个页面 id —— 两处挨着，读的时候能立刻对上。
-> 想打破这个约定也行（节点 id 可以随便取），那就把 `Transition` 的终点写成节点 id。
+```python
+# games/<游戏>/<功能>/bindings.py —— 独立的一个文件
+from gamebot.flow import Binding, NodeBindings
 
-> **节点的 `page` 要写"真正记录信息的那个状态"**，不是分类容器。
-> 上例里是 `home/lobby` 而不是 `home` —— 容器不记录信息，
-> 把节点挂在它上面会被 `validate_binding` 拦住（那是对的）。
+BINDINGS = NodeBindings(pairs=(
+    Binding("lobby", "lobby"),
+    Binding("qianli/battle", "qianli/battle"),
+))
+```
+
+> **节点不声明自己是哪个状态** —— 那在关联表里。所以流程图和状态树
+> 互不认识对方，只有关联表把两者对上。见 [docs/state-and-flow.md](../docs/state-and-flow.md)。
+
+> **节点 id 和状态 id 同名**是个**约定**，不是框架要求 —— 对应关系只认关联表。
+> 同名只是让关联表读起来一眼能对上。
+
+> **关联表要指向"真正记录信息的那个状态"**，不是分类容器（`kind: group`）。
+> 分类节点自己不匹配、不会出现在定位结果里，关联它等于那个节点永远不执行。
+> `NodeBindings.validate()` 会在装配期拦下这类错。
+
+### 一个步骤就是一个函数
+
+```python
+# games/<游戏>/<功能>/steps/click_skill.py
+from gamebot.execution.builtins import click_image
+from gamebot.types import ActionResult
+
+def click_skill(ctx) -> ActionResult:
+    """点技能按钮。找不到就如实返回 —— 上层会去重定位。"""
+    return click_image(ctx, "battle/skill.png", region=SKILL_ROI)
+```
+
+没有基类、没有 `self`、没有 `__init__`。名字就是 `__name__`，要带参数用
+`functools.partial`。**不要写重试循环** —— 失败（多半是识图没命中）由上层
+拿实测状态去重定位。也**不要在这里轮询等待** —— 那是原子层 `wait_*` 的事。
+
+`ctx` 上有什么见 [docs/run-context.md](../docs/run-context.md)。
 
 ### 边为什么写在节点上，而不是一张单独的边表
 
