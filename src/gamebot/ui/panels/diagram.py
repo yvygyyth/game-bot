@@ -240,6 +240,59 @@ class _Diagram(QGraphicsView):
             text.setZValue(2)
             self._scene.addItem(text)
 
+    def _tree_edges(self, parent: QRectF, children: list[QRectF]) -> None:
+        """一棵子树的分组连线：**折线直角**，而且兄弟共用一条竖干线。
+
+        ```
+        父 ──┐
+             ├── 子1
+             ├── 子2
+             └── 子3
+        ```
+
+        ## 为什么不用"每条边各画一条斜线"
+
+        斜线（父右下角 → 子左上角）在**两个以上**子节点时会变成一把扇子：
+        线互相交叉、看不出哪几条是兄弟，而且父子关系靠角度猜。
+        实际上第一版就是那么画的（见 git 历史）。
+
+        直角 + 共用干线是树状图的常规画法，好处是**结构一眼看出来**：
+        同一条干线上的分支就是兄弟，进了干线再出来就是换了一层。
+
+        ## 为什么"分组"画而不是"每条边"画
+
+        干线要跨越"最上面那个子"到"最下面那个子"，这个区间只有拿到**一组兄弟**
+        才知道。逐边画的话每条边只能画到自己那个孩子，拼不出共用的干线。
+
+        :param parent: 父节点的矩形。
+        :param children: 它的直接子节点矩形，**顺序即左边列的上下顺序**。
+        """
+        if not children:
+            return
+        pen = QPen(COLOR_ARROW, 1.2)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+
+        # 干线放在父右边到子左边之间的中线上 —— 不贴任何一边，看着才像树的枝
+        bus_x = parent.right() + (children[0].left() - parent.right()) / 2
+
+        def segment(x1: float, y1: float, x2: float, y2: float) -> None:
+            self._scene.addLine(x1, y1, x2, y2, pen)
+
+        # 父 -> 干线的横枝
+        segment(parent.right(), parent.center().y(), bus_x, parent.center().y())
+
+        if len(children) == 1:
+            # 只有一个子：直接从父画一条横线过去，不需要竖干线
+            # （画了会变成一个小台阶，反而像"这里有个分支"）
+            child = children[0]
+            segment(parent.right(), child.center().y(), child.left(), child.center().y())
+            return
+
+        # 竖干线 + 每个子的横枝
+        segment(bus_x, children[0].center().y(), bus_x, children[-1].center().y())
+        for child in children:
+            segment(bus_x, child.center().y(), child.left(), child.center().y())
+
     def _empty(self, message: str) -> None:
         text = QGraphicsSimpleTextItem(message)
         text.setBrush(QBrush(COLOR_TEXT_DIM))
@@ -276,44 +329,50 @@ class StateTreeView(_Diagram):
             return
 
         layout: dict[str, QRectF] = {}
-        cursor_y: dict[int, float] = {}
+        cursor_y: list[float] = [0.0]
 
-        def place(page: Any, depth: int, parent_rect: QRectF | None) -> None:
+        def place(node: Any, depth: int) -> QRectF:
+            """先给**整棵子树**排好位，返回本节点的矩形。
+
+            **先递归、后画线**是必须的：兄弟共用一条竖干线，而干线的范围取决于
+            所有子节点的位置 —— 所以得先把子节点都排完，才知道线该画多长。
+            """
+            while len(cursor_y) <= depth:
+                cursor_y.append(0.0)
             x = depth * (NODE_W + GAP_X)
-            y = cursor_y.get(depth, 0.0)
+            y = cursor_y[depth]
             cursor_y[depth] = y + NODE_H + GAP_Y
+
             sub = ""
-            if page.is_group:
+            if node.is_group:
                 sub = "分类节点（不匹配）"
-            elif page.is_overlay:
+            elif node.is_overlay:
                 sub = "叠加层"
-            elif page.id in overlay_pages:
+            elif node.id in overlay_pages:
                 sub = "已命中（叠加）"
             rect = self._node(
                 x,
                 y,
-                page.id,
-                current=page.id == current_page,
-                matched=bool(current_node_page) and page.id == current_node_page,
-                group=page.is_group or page.is_overlay,
+                node.id,
+                current=node.id == current_page,
+                matched=bool(current_node_page) and node.id == current_node_page,
+                group=node.is_group or node.is_overlay,
                 sub=sub,
             )
-            layout[page.id] = rect
-            if parent_rect is not None:
-                self._arrow(parent_rect, rect)
-            # 注意：``children_of`` 返回的是 **Page 对象**，不是 id。
-            # 早先这里写成 ``for child_id in ...: tree.get(child_id)``，
-            # 于是 ``get`` 拿到一个 Page 对象、查不到、返回 None，
-            # 整棵子树**静默地**没画出来（树上就少了一大截，但界面不报错）。
-            # 这种"拿错类型 → None → 静默跳过"是最难看出来的一类 bug，
-            # 所以这里显式取 id，并且失败要记日志。
-            for child in tree.children_of(page.id):
-                place(child, depth + 1, rect)
+            layout[node.id] = rect
+
+            # ``children_of`` 返回的是**节点对象**，不是 id。
+            # 早先这里写成 ``for child_id in ...: tree.get(child_id)`` ——
+            # get 拿到一个对象、查不到、返回 None，于是整棵子树**静默地**没画出来。
+            # 那种"拿错类型 → None → 静默跳过"最难看出来，所以这里直接用对象。
+            children = [place(child, depth + 1) for child in tree.children_of(node.id)]
+            self._tree_edges(rect, children)
+            return rect
 
         for root_id in tree.roots:
             root = tree.get(root_id)
             if root is not None:
-                place(root, 0, None)
+                place(root, 0)
 
         self.reset_view()
 

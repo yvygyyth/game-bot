@@ -13,6 +13,7 @@ from gamebot.state import (
     Blackboard,
     Page,
     PageChange,
+    PageGroup,
     PageKind,
     PageMatch,
     PageState,
@@ -101,7 +102,7 @@ class TestPage:
     def test_kind_defaults_to_page(self) -> None:
         assert Page("a").kind is PageKind.PAGE
         assert Page("a").is_overlay is False
-        assert Page("b", kind=PageKind.OVERLAY).is_overlay is True
+        assert Page("b", overlay=True).is_overlay is True
 
     def test_has_conditions(self) -> None:
         assert Page("a").has_conditions is False
@@ -158,7 +159,7 @@ def build_tree() -> PageTree:
     tree.add(
         Page(
             "network_error",
-            kind=PageKind.OVERLAY,
+            overlay=True,
             priority=100,
             queries=(ImageQuery("net.png"),),
         )
@@ -313,7 +314,7 @@ class TestPageTreeValidate:
         tree = PageTree()
         tree.add(Page("root"))
         tree.add(
-            Page("root/popup", kind=PageKind.OVERLAY, queries=(ImageQuery("p.png"),)), parent="root"
+            Page("root/popup", overlay=True, queries=(ImageQuery("p.png"),)), parent="root"
         )
         tree.add(Page("root/popup/inner", queries=(ImageQuery("i.png"),)), parent="root/popup")
         with pytest.raises(StateError):
@@ -605,7 +606,7 @@ class TestPageTreeLocate:
         tree.add(
             Page(
                 "network_error",
-                kind=PageKind.OVERLAY,
+                overlay=True,
                 priority=100,
                 queries=(ImageQuery("err.png"),),
             )
@@ -620,7 +621,7 @@ class TestPageTreeLocate:
         tree = PageTree()
         tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
         tree.add(
-            Page("battle/popup", kind=PageKind.OVERLAY, queries=(ImageQuery("pop.png"),)),
+            Page("battle/popup", overlay=True, queries=(ImageQuery("pop.png"),)),
             parent="battle",
         )
         match = tree.locate(_frame(matcher)).value
@@ -757,7 +758,7 @@ class TestGroupStates:
 
     def build(self) -> PageTree:
         tree = PageTree()
-        tree.add(Page("home", kind=PageKind.GROUP))
+        tree.add(PageGroup("home"))
         tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
         tree.add(Page("home/jingji", queries=(ImageQuery("t.png"),)), parent="home")
         return tree
@@ -784,20 +785,22 @@ class TestGroupStates:
         tree = self.build()
         assert tree.locate(_frame(matcher), hint="home").value.id == "home/lobby"
 
-    def test_group_with_queries_is_rejected(self) -> None:
-        tree = PageTree()
-        tree.add(Page("folder", kind=PageKind.GROUP, queries=(ImageQuery("x.png"),)))
-        tree.add(Page("folder/kid", queries=(ImageQuery("k.png"),)), parent="folder")
-        with pytest.raises(StateError) as excinfo:
-            tree.validate()
-        assert "不该写 queries" in str(excinfo.value)
+    def test_group_cannot_take_queries_at_all(self) -> None:
+        """**分类节点和状态节点是不同类型** —— 给它写 queries 是 ``TypeError``。
+
+        这条以前是"运行期 ``validate()`` 才报的配置错误"。现在校验层那一句
+        检查**删掉了** —— 因为 :class:`PageGroup` 根本没有 ``queries`` 字段，
+        Python 在**写的那一行**就拒了。类型比校验更早、也更难绕过。
+        """
+        with pytest.raises(TypeError, match="queries"):
+            PageGroup("folder", queries=(ImageQuery("x.png"),))  # type: ignore[call-arg]
 
     def test_group_without_children_is_rejected(self) -> None:
         tree = PageTree()
-        tree.add(Page("folder", kind=PageKind.GROUP))
+        tree.add(PageGroup("folder"))
         with pytest.raises(StateError) as excinfo:
             tree.validate()
-        assert "没有任何子页面" in str(excinfo.value)
+        assert "没有任何子节点" in str(excinfo.value)
 
     def test_state_leaf_without_queries_is_rejected(self) -> None:
         """状态节点没写 queries = 永远不会被认出来，必须报错。"""
@@ -823,10 +826,10 @@ class TestPageTreeRecover:
 
     def build(self) -> PageTree:
         tree = PageTree()
-        tree.add(Page("home", kind=PageKind.GROUP))
+        tree.add(PageGroup("home"))
         tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
         tree.add(Page("home/shop", queries=(ImageQuery("shop.png"),)), parent="home")
-        tree.add(Page("battle", kind=PageKind.GROUP))
+        tree.add(PageGroup("battle"))
         tree.add(Page("battle/fight", queries=(ImageQuery("fight.png"),)), parent="battle")
         return tree
 
@@ -860,7 +863,7 @@ class TestPageTreeRecover:
     def test_cheaper_candidates_are_tried_first(self, matcher) -> None:
         """同一圈里 ROI 小的先试（"看得少"更快也更不容易误判）。"""
         tree = PageTree()
-        tree.add(Page("root", kind=PageKind.GROUP))
+        tree.add(PageGroup("root"))
         tree.add(
             Page("root/big", roi=Region(0, 0, 600, 600), queries=(ImageQuery("big.png"),)),
             parent="root",
@@ -894,7 +897,7 @@ class TestPageTreeRecover:
         """主状态全认不出来，但弹窗还在 —— 至少要把弹窗报出来。"""
         tree = self.build()
         tree.add(
-            Page("net", kind=PageKind.OVERLAY, queries=(ImageQuery("net.png"),))
+            Page("net", overlay=True, queries=(ImageQuery("net.png"),))
         )
         matcher.matches = {"net.png": (Point(1, 1), 0.99)}
         match = tree.recover(_frame(matcher), near="home/lobby").value

@@ -20,7 +20,7 @@ from gamebot.flow import (
     StopReason,
     UnknownPolicy,
 )
-from gamebot.state import Page, PageKind, PageMatch, PageTracker, PageTree
+from gamebot.state import Page, PageGroup, PageMatch, PageTracker, PageTree
 from gamebot.types import ActionResult, Point
 
 
@@ -512,7 +512,7 @@ class TestScenario:
     def test_group_state_needs_no_node(self) -> None:
         """分类节点（group）自己不参与匹配，所以不需要节点认领。"""
         scenario = build_scenario()
-        scenario.tree.add(Page("folder", kind=PageKind.GROUP))
+        scenario.tree.add(PageGroup("folder"))
         scenario.tree.add(
             Page("folder/kid", queries=(ImageQuery("kid.png"),)), parent="folder"
         )
@@ -557,9 +557,9 @@ class TestScenario:
         """
         scenario = build_scenario()
         scenario.tree.add(
-            Page("popup", kind=PageKind.OVERLAY, queries=(ImageQuery("p.png"),))
+            Page("popup", overlay=True, queries=(ImageQuery("p.png"),))
         )
-        scenario.tree.add(Page("folder", kind=PageKind.GROUP))
+        scenario.tree.add(PageGroup("folder"))
         scenario.tree.add(
             Page("folder/kid", queries=(ImageQuery("k.png"),)), parent="folder"
         )
@@ -837,11 +837,11 @@ def build_live() -> tuple[Scenario, object]:
     ``matcher.matches`` 决定。
     """
     tree = PageTree()
-    tree.add(Page("home", kind=PageKind.GROUP))
+    tree.add(PageGroup("home"))
     tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
     tree.add(Page("home/battle", queries=(ImageQuery("battle.png"),)), parent="home")
     tree.add(
-        Page("net", kind=PageKind.OVERLAY, priority=100, queries=(ImageQuery("net.png"),))
+        Page("net", overlay=True, priority=100, queries=(ImageQuery("net.png"),))
     )
 
     graph = Graph(initial="lobby")

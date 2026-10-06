@@ -106,11 +106,14 @@ from gamebot.flow import EngineOptions, Node
 
 SCENARIO = ScenarioSpec(
     initial="home",                          # 必选：流程从哪开始
-    pages=(                                  # (页面, 父页面 id)，**父在前**
-        (Page("home", kind=PageKind.GROUP), None),      # 分类容器：不记录信息
-        (Page("home/lobby", queries=(...)), "home"),    # 真正记录"我在首页"
-        (Page("home/jingji", kind=PageKind.GROUP), "home"),
-        (Page("home/jingji/before_create", ...), "home/jingji"),
+    tree=PageGroup(                          # 整棵状态树（嵌套）
+        # **嵌套的树**：分类节点和状态节点是两种类型
+        PageGroup("home", children=(
+            PageLeaf("home/lobby", queries=(...)),        # 记录"我在首页"
+            PageGroup("home/jingji", roi=..., children=(
+                PageLeaf("home/jingji/before_create", queries=(...)),
+            )),
+        )),
     ),
     nodes=(
         Node("home", page="home/lobby", steps=[EnterJingjiStep()], cooldown=0.5),

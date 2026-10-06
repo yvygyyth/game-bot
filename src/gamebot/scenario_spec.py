@@ -34,12 +34,9 @@ from typing import Any
 from .exceptions import ConfigError
 from .flow.graph import Edge, Graph, Node
 from .flow.scenario import EngineOptions, Scenario
-from .state.page import Page, PageId, PageTree
+from .state.page import PageGroup, PageNode, PageTree
 
 __all__ = ["ScenarioSpec"]
-
-#: ``(页面, 父页面 id)``，父在前。和 ``PageTree.add_many`` 收的形状一致。
-PageEntry = tuple[Page, PageId | None]
 
 #: ``(起点节点 id, 终点节点 id, 边的其余参数)``。
 #: 用三元组而不是直接收一个 ``Edge``：``Edge`` 要求 ``source`` / ``target``
@@ -65,7 +62,7 @@ class ScenarioSpec:
     """
 
     initial: str
-    pages: tuple[PageEntry, ...] = ()
+    tree: PageGroup | None = None
     nodes: tuple[Node, ...] = ()
     edges: tuple[EdgeEntry, ...] = ()
     options: EngineOptions = field(default_factory=EngineOptions)
@@ -94,12 +91,11 @@ class ScenarioSpec:
                 f"（有: {sorted(seen)}）"
             )
 
-        for page, _parent in self.pages:
-            if page.is_group and page.queries:
-                raise ConfigError(
-                    f"分类节点 {page.id!r}（kind: group）不该有 queries —— "
-                    "它自己不参与匹配，只负责组织结构与 ROI 继承"
-                )
+        if self.tree is not None and not isinstance(self.tree, PageNode):
+            raise ConfigError(
+                f"ScenarioSpec.tree 要是 PageGroup / PageLeaf，"
+                f"收到 {type(self.tree).__name__}"
+            )
 
     # ------------------------------------------------------------------ #
     # 组装
@@ -120,8 +116,9 @@ class ScenarioSpec:
         :raises ConfigError: 声明里有跨对象的问题。
         """
         target = tree if tree is not None else PageTree()
-        for page, parent in self.pages:
-            target.add(page, parent)
+        if self.tree is not None:
+            # 嵌套结构：add() 会递归把整棵树加进去（父先子后由递归保证）
+            target.add(self.tree)
 
         graph = Graph(initial=self.initial)
         for node in self.nodes:

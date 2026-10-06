@@ -79,7 +79,7 @@ home                      首页（**分类节点**：不记录信息，只是�
 from __future__ import annotations
 
 from gamebot.atomic.query import ImageQuery
-from gamebot.state import Page, PageKind
+from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 
 from ..shortcuts import CONF_JINGJI, JINGJI_ROI, T_JINGJI
@@ -104,7 +104,7 @@ JINGJI_TEAM_ROI = Region(1400, 630, 470, 360)
 CONF_BUTTON = 0.85
 
 #: 首页那个状态。**分类节点 `home` 不记录信息**，真正记录的是它。
-home_lobby = Page(
+home_lobby = PageLeaf(
     "home/lobby",
     name="首页",
     min_stable_frames=2,  # 进首页时那排卡有个滑入动画，等它停稳
@@ -115,61 +115,52 @@ home_lobby = Page(
     ),
     description="主界面：中间一排模式卡（竞技 / 房间 / 战没 / 煮酒）",
 )
-"""``home/lobby`` 而不是 ``home`` 自己记录信息。
 
-"首页上排着哪些卡"是**具体状态**，而 `home` 只是"首页这一层"这个容器 ——
-两者分开之后，以后加"房间 / 战没 / 煮酒"这些兄弟状态时不用再动结构。
-"""
 
-FEATURE_PAGES: list[tuple[Page, str | None]] = [
-    (
-        # **纯分类容器**：无 queries、无 roi（理由见模块开头）。
-        Page(
-            "home",
-            name="首页（容器）",
-            kind=PageKind.GROUP,
-            description="首页这一层：下面是主界面、竞技场等并列状态",
-        ),
-        None,
-    ),
-    (home_lobby, "home"),
-    (
-        # 竞技场也是个分类节点：它自己不记录信息，
-        # 只提供"右下角那块面板"的 ROI 给三个阶段继承。
-        Page(
+#: 整棵状态树。**嵌套**，不是平铺 + 父 id。
+#:
+#: 为什么嵌套：树形结构直接体现在对象里，父子关系是**对象引用** ——
+#: "父必须先于子"这条顺序约束自然消失，而"分类节点没有 queries"由类型保证
+#: （:class:`~gamebot.state.page.PageGroup` 根本没那个字段）。
+#:
+#: 为什么需要 `home` 这层分类容器：首页和竞技场是**并列的两个状态**，
+#: 不是包含关系。原来的 `home` 是普通状态（用竞技卡当特征），于是
+#: `home/jingji` 的 roi 落在它外面，被 ``add()`` 拦住报了 StateError ——
+#: 那条报错是对的，暴露的是结构错了。
+FEATURE_TREE = PageGroup(
+    "home",
+    name="首页（容器）",
+    description="首页这一层：下面是主界面、竞技场等并列状态",
+    children=(
+        home_lobby,
+        PageGroup(
             "home/jingji",
             name="竞技场",
-            kind=PageKind.GROUP,
             roi=JINGJI_TEAM_ROI,
             description="竞技场：三个并列阶段（建队前 / 建队后 / 加完伙伴）",
+            children=(
+                PageLeaf(
+                    "home/jingji/before_create",
+                    name="竞技场 · 建队前",
+                    queries=(ImageQuery(T_CREATE_TEAM, confidence=CONF_BUTTON),),
+                    description="右下角是「创建队伍」",
+                ),
+                PageLeaf(
+                    "home/jingji/after_create",
+                    name="竞技场 · 建队后",
+                    queries=(ImageQuery(T_ADD_PET, confidence=CONF_BUTTON),),
+                    description="右下角是「添加伙伴」",
+                ),
+                PageLeaf(
+                    "home/jingji/after_add",
+                    name="竞技场 · 加完伙伴",
+                    queries=(ImageQuery(T_START_MATCH, confidence=CONF_BUTTON),),
+                    description="右下角是「开始匹配」",
+                ),
+            ),
         ),
-        "home",
     ),
-    (
-        Page(
-            "home/jingji/before_create",
-            name="竞技场 · 建队前",
-            queries=(ImageQuery(T_CREATE_TEAM, confidence=CONF_BUTTON),),
-            description="右下角是「创建队伍」",
-        ),
-        "home/jingji",
-    ),
-    (
-        Page(
-            "home/jingji/after_create",
-            name="竞技场 · 建队后",
-            queries=(ImageQuery(T_ADD_PET, confidence=CONF_BUTTON),),
-            description="右下角是「添加伙伴」",
-        ),
-        "home/jingji",
-    ),
-    (
-        Page(
-            "home/jingji/after_add",
-            name="竞技场 · 加完伙伴",
-            queries=(ImageQuery(T_START_MATCH, confidence=CONF_BUTTON),),
-            description="右下角是「开始匹配」",
-        ),
-        "home/jingji",
-    ),
-]
+)
+"""分类容器的 roi 会被**整棵子树继承**，所以 `home` 不写 roi（= 不限制），
+每个子状态各自声明自己的范围。给它一个窄 roi（比如竞技卡那块），
+竞技场那支就全被框死在卡里了。"""

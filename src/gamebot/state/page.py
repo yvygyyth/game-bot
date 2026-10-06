@@ -66,9 +66,12 @@ __all__ = [
     "UNKNOWN_PAGE",
     "Page",
     "PageAttempt",
+    "PageGroup",
     "PageId",
     "PageKind",
+    "PageLeaf",
     "PageMatch",
+    "PageNode",
     "PageTree",
 ]
 
@@ -131,23 +134,152 @@ class PageKind(StrEnum):
 
 
 # --------------------------------------------------------------------------- #
-# 页面
+# 页面 —— **分类节点和状态节点是两种不同的类型**
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True, slots=True, eq=False)
-class Page:
+class PageNode:
     """状态树的一个节点。**只有识别规则，没有行为。**
 
-    只有 :attr:`kind` 是 ``PAGE`` 的节点才记录信息（末梢状态）；
-    ``GROUP`` 是纯分类节点（自己不匹配，直接下探子节点），
-    ``OVERLAY`` 是盖在主状态之上的一层。见 :class:`PageKind`。
+    ## 为什么分成三种类型，而不是一个 ``kind`` 字段
 
-    :param id: 唯一标识。``add()`` 会按嵌套位置自动推导成路径形式，
-        也可以在配置里显式指定。
+    原来是一个类加一个 :class:`PageKind` 字段。问题是**类型上看不出区别**：
+    ``Page("home", queries=...)`` 和 ``Page("home", kind=GROUP)`` 是同一个类型，
+    于是"分类节点不该写 queries"只能靠运行期校验兜着，编辑器一声不吭。
+
+    现在分成三种**类型**：
+
+    * :class:`PageGroup` —— 纯分类节点。它**没有** ``queries`` / ``roi``
+      （不是"不该填"，是**根本没有那个字段**）；
+    * :class:`PageLeaf` —— 记录信息的状态，也就是末梢；
+    * 这个基类只放两者共有的东西（``id`` / ``name`` / ``description``）。
+
+    于是"给分类节点写 queries"从"运行期才会报的配置错误"变成
+    ``TypeError: unexpected keyword argument 'queries'`` —— 写的时候就报了。
+
+    :attr:`kind` 仍然保留（派生自类型），因为加载器和界面还要按它分支。
+
+    :param id: 唯一标识。
+    :param name: 人看的名字，进日志。
+    :param description: 更长的说明。
+    :param meta: 任意附加信息。
+    """
+
+    id: PageId
+    roi: Region | None = None
+    """**整棵子树**的搜索范围，子节点继承它（相对父节点的 roi 原点）。
+
+    放在基类上是因为**分类节点和状态节点都需要它**：分类节点自己虽然不匹配，
+    但它的子节点要靠它收窄范围 —— 这是树最大的性能收益来源。
+    """
+
+    priority: int = 0
+    """同级之间谁先试。弹窗类给高值。
+
+    放在基类上：**分类节点也需要它**（多个分支都像的时候，靠它定先探哪一支）。
+    """
+
+    name: str = ""
+    description: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """共有的构造期校验：id 不能空、roi 不能是空区域。子类的规则各自加。"""
+        if not self.id or not self.id.strip():
+            raise StateError("页面的 id 不能为空")
+        if self.roi is not None and self.roi.is_empty:
+            raise StateError(f"页面 {self.id!r} 的 roi 是空区域: {self.roi.to_tuple()}")
+
+    @property
+    def kind(self) -> PageKind:
+        """节点类型。**派生自类型**，不是独立字段 —— 两者不可能不一致。"""
+        raise NotImplementedError
+
+    @property
+    def display(self) -> str:
+        return self.name or self.id
+
+    def to_dict(self) -> dict[str, Any]:
+        """给界面和日志用的纯数据形式。子类补自己的字段。"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kind": self.kind.value,
+            "priority": self.priority,
+            "roi": self.roi.to_tuple() if self.roi else None,
+        }
+
+    @property
+    def is_group(self) -> bool:
+        """纯分类节点：自己不记录信息，也就不参与匹配。"""
+        return self.kind is PageKind.GROUP
+
+    @property
+    def is_overlay(self) -> bool:
+        return self.kind is PageKind.OVERLAY
+
+    @property
+    def has_conditions(self) -> bool:
+        """有没有识别条件。分类节点永远没有。"""
+        return False
+
+    @property
+    def effective_confidence(self) -> float | _Unset:
+        """要传给查询的阈值。
+
+        分类节点没有查询，所以这个值只在 :class:PageLeaf 上真正被用；
+        放基类是为了让树层不用每处都 `isinstance` 一下（它是个纯派生值，
+        对分类节点返回"不覆盖"没有任何副作用）。
+        """
+        return _UNSET
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PageGroup(PageNode):
+    """**纯分类节点：自己不记录任何信息，也就不参与匹配。**
+
+    它只做两件事：给子树提供 ROI 继承、把状态组织成树。定位时**直接下探它的
+    子节点**，不要求它自己成立 —— 这一点很关键：要求"父页面成立"会让
+    「首页 → 竞技场 → 战斗」这种链条一进下一层就全部失效，
+    因为上一层的特征已经不在屏幕上了。
+
+    ## 子节点是**嵌套**的，不是"平铺 + 父 id"
+
+    直接在 ``children`` 里放子节点（见 :class:`PageGroup` 的用法）：
+
+    ```python
+    PageGroup("home", roi=..., children=(
+        PageLeaf("home/lobby", queries=(...)),
+        PageGroup("home/jingji", children=(...)),
+    ))
+    ```
+
+    为什么不平铺成 ``(页面, 父id)`` 的列表：那样**树形只存在于 id 字符串里**，
+    类型上看不出嵌套关系，而且"父在前"这条顺序约束得靠约定加校验去守。
+    嵌套之后，父子关系是**对象引用**，顺序问题自然消失，
+    而且 `mypy` 能检查每一层。
+
+    :param children: 子节点。空分组没有意义（校验会报）。
+    :param roi: **整棵子树**的搜索范围，子节点继承它。
+        分类节点自己不需要 ROI（它不匹配），但它的子节点需要 —— 所以这个字段
+        在这里，而不是在 :class:`PageLeaf` 上重复写。
+    """
+
+    children: tuple[PageNode, ...] = ()
+
+    @property
+    def kind(self) -> PageKind:
+        return PageKind.GROUP
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PageLeaf(PageNode):
+    """**记录信息的状态** —— 也是定位能落到的那一层（末梢）。
+
     :param queries: 命中条件。**默认全部命中**才算（AND 语义）——
         同时看两个特征比只看一个可靠得多。需要 OR 就包一个 ``OrQuery``。
     :param exclude: 否决条件。命中任一则**排除**这个页面。
         用来处理"子页面和父页面长得太像"这类冲突。
-    :param roi: 搜索区域，**相对父页面**（None = 与父页面相同）。
+    :param roi: 搜索区域，**相对父节点的 roi 原点**（None = 与父节点相同）。
         这是树最大的性能收益来源：别整屏匹配。
     :param confidence: 相似度阈值。**显式传进来才会覆盖页面里各查询自己的阈值**；
         不传（默认）时每个查询用自己的 —— 查询级阈值通常是被实测校准过的
@@ -157,27 +289,20 @@ class Page:
         >1 能过滤动画过程中的"闪现"（加载类页面建议 2~3）。
         **由跟踪层使用**，本模块的单帧匹配不管它。
     :param priority: 同级之间谁先试。弹窗类给高值。
-    :param kind: 记录信息的状态 / 纯分类 / 叠加层，见 :class:`PageKind`。
+    :param overlay: 叠加式还是替换式。``True`` 表示"父状态仍然成立，
+        它只是盖在上面"（弹窗、加载遮罩）；``False``（默认）是替换式 ——
+        进入它就不再是父状态了。
     :param terminal: 终态，进入即结束整个流程（如"游戏已关闭"）。
     :param timeout: 允许在该页面停留的秒数，超了算异常。None = 不限。
-    :param name: 人看的名字，进日志。
-    :param description: 更长的说明。
-    :param meta: 任意附加信息。
     """
 
-    id: PageId
     queries: tuple[Query, ...] = ()
     exclude: tuple[Query, ...] = ()
-    roi: Region | None = None
     confidence: float = DEFAULT_CONFIDENCE
     min_stable_frames: int = 1
-    priority: int = 0
-    kind: PageKind = PageKind.PAGE
+    overlay: bool = False
     terminal: bool = False
     timeout: float | None = None
-    name: str = ""
-    description: str = ""
-    meta: dict[str, Any] = field(default_factory=dict)
     confidence_explicit: bool = field(default=False, compare=False)
     """``confidence`` 是作者显式写的，还是默认值。
 
@@ -194,7 +319,7 @@ class Page:
         confidence: float | _Unset | None = _UNSET,
         min_stable_frames: int = 1,
         priority: int = 0,
-        kind: PageKind = PageKind.PAGE,
+        overlay: bool = False,
         terminal: bool = False,
         timeout: float | None = None,
         name: str = "",
@@ -214,7 +339,7 @@ class Page:
         object.__setattr__(self, "confidence_explicit", explicit)
         object.__setattr__(self, "min_stable_frames", min_stable_frames)
         object.__setattr__(self, "priority", priority)
-        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "overlay", overlay)
         object.__setattr__(self, "terminal", terminal)
         object.__setattr__(self, "timeout", timeout)
         object.__setattr__(self, "name", name)
@@ -223,61 +348,48 @@ class Page:
         self._validate()
 
     def _validate(self) -> None:
-        """**构造即校验**：不合法的页面根本造不出来。
+        """**构造即校验**：不合法的状态根本造不出来。
 
         ## 为什么在这儿，而不是一个单独的 ``validate()``
 
         这些规则只依赖这一个对象自己的字段（id 非空、帧数 >= 1、阈值在 (0,1]、
         roi 非空）。放构造期有两个好处：
 
-        * **报错位置就是写错的那一行** —— ``Page(...)`` 那行直接抛，而不是等
-          整个树建完、再调一次校验才发现"某一页的阈值不对"；
-        * 非法对象**根本不存在**，下游不用再怀疑"手上这个 Page 有没有问题"。
+        * **报错位置就是写错的那一行** —— ``PageLeaf(...)`` 那行直接抛，
+          而不是等整个树建完、再调一次校验才发现"某一页的阈值不对"；
+        * 非法对象**根本不存在**，下游不用再怀疑"手上这个节点有没有问题"。
 
-        跨对象的规则（子页面 roi 落在父页面内、分类节点必须有子页面、节点认领
+        跨对象的规则（子节点 roi 落在父节点内、分类节点必须有子节点、节点认领
         状态）留在 ``PageTree.validate()`` / ``Graph.validate()`` /
         ``validate_binding()`` —— 那些**原理上**要看到全部数据才能判断。
 
         :raises StateError: 任一条件不满足，message 里带页面 id 便于定位。
         """
+        # **不能写 super()** —— dataclass(slots=True) 会重建类，
+        # 而 super() 依赖的 __class__ cell 指向被替换掉的那个旧类，
+        # 于是运行期报 "super(type, obj): obj must be an instance or subtype of type"。
+        PageNode.__post_init__(self)
         label = repr(self.id) if self.id else "<空 id>"
-        if not self.id or not self.id.strip():
-            raise StateError("页面的 id 不能为空")
         if self.min_stable_frames < 1:
             raise StateError(f"页面 {label} 的 min_stable_frames 必须 >= 1")
         if not 0.0 < self.confidence <= 1.0:
             raise StateError(f"页面 {label} 的 confidence 必须在 (0, 1] 之间")
-        if self.roi is not None and self.roi.is_empty:
-            raise StateError(f"页面 {label} 的 roi 是空区域: {self.roi.to_tuple()}")
         if self.timeout is not None and self.timeout <= 0:
             raise StateError(f"页面 {label} 的 timeout 必须 > 0 或留空")
 
     @property
-    def display(self) -> str:
-        return self.name or self.id
+    def kind(self) -> PageKind:
+        return PageKind.OVERLAY if self.overlay else PageKind.PAGE
 
     @property
-    def is_overlay(self) -> bool:
-        return self.kind is PageKind.OVERLAY
-
-    @property
-    def is_group(self) -> bool:
-        """纯分类节点：自己不记录信息，也就不参与匹配。"""
-        return self.kind is PageKind.GROUP
+    def has_conditions(self) -> bool:
+        """有 queries 或 exclude 才算"有识别条件"。"""
+        return bool(self.queries or self.exclude)
 
     @property
     def effective_confidence(self) -> float | _Unset:
         """要传给查询的阈值：没显式写就是"不覆盖"。"""
         return self.confidence if self.confidence_explicit else _UNSET
-
-    @property
-    def has_conditions(self) -> bool:
-        """这个节点**自己**有没有识别条件。
-
-        ``GROUP`` 永远返回 False —— 它按定义不记录信息。这一点让
-        "父节点是分类"这条纪律变成可校验的：给 group 写 queries 是配置错误。
-        """
-        return bool(self.queries) and not self.is_group
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -294,7 +406,13 @@ class Page:
         }
 
     def __repr__(self) -> str:
-        return f"Page({self.id!r}, kind={self.kind.value}, queries={len(self.queries)})"
+        return f"PageLeaf({self.id!r}, kind={self.kind.value}, queries={len(self.queries)})"
+
+
+#: ``PageLeaf`` 的旧名字。**保留是为了少改 41 处调用点** ——
+#: 对"记录信息的状态"来说 ``Page`` 也说得通，而分类节点现在有了自己的类型
+#: :class:`PageGroup`。新代码建议直接用 ``PageLeaf``（名字更明确）。
+Page = PageLeaf
 
 
 # --------------------------------------------------------------------------- #
@@ -387,7 +505,7 @@ class PageTree:
     __slots__ = ("_children", "_pages", "_parent", "_roots")
 
     def __init__(self, roots: Iterable[PageId] = ()) -> None:
-        self._pages: dict[PageId, Page] = {}
+        self._pages: dict[PageId, PageNode] = {}
         self._children: dict[PageId, list[PageId]] = {}
         self._parent: dict[PageId, PageId | None] = {}
         self._roots: list[PageId] = []
@@ -399,23 +517,39 @@ class PageTree:
     # ------------------------------------------------------------------ #
     # 构建（装配期）
     # ------------------------------------------------------------------ #
-    def add(self, page: Page, parent: PageId | None = None) -> Page:
-        """加一个页面。
+    def add(self, page: PageNode, parent: PageId | None = None) -> PageNode:
+        """加一个节点。**分类节点会把它的子节点一起加进来。**
 
-        :param parent: 父页面 id；None 表示顶层。
-        :raises StateError: id 重复、父页面不存在、或**子页面的 roi 伸出父页面**。
+        :param parent: 父节点 id；None 表示顶层。
+        :raises StateError: id 重复、父节点不存在、或**子节点的 roi 伸出父节点**。
+
+        ## 嵌套：给一个分类节点就是加一棵子树
+
+        :class:`PageGroup` 的 ``children`` 是嵌套的，所以 ``add`` 会递归下去，
+        按"父先子后"的顺序挨个加。这让 `PageTree` 的调用方能直接写：
+
+        ```python
+        tree.add(root_group)          # 整棵树
+        ```
+
+        而不是自己展平、还得自己保证"父在前"。
 
         ## 为什么 roi 越界在这里报，而不是等 ``validate()``
 
-        "子页面的 roi 必须落在父页面的有效 roi 内"是**跨两个对象**的规则，
-        所以只能等到知道父页面时才能判 —— 而那一刻就是 ``add()``。
+        "子节点的 roi 必须落在父节点的有效 roi 内"是**跨两个对象**的规则，
+        所以只能等到知道父节点时才能判 —— 而那一刻就是 ``add()``。
         在这里报，写错的那一行立刻炸；等 ``validate()`` 的话，报错点离写错的地方
         隔了整个树的构建过程。
 
-        这条规则的由来：roi 是**整棵子树**的搜索范围（不只是这一页自己的）。
-        子页面伸到父页面框外，就意味着它会在"父页面根本不存在"的地方去找自己的
+        这条规则的由来：roi 是**整棵子树**的搜索范围（不只是这一层自己的）。
+        子节点伸到父节点框外，就意味着它会在"父节点根本不存在"的地方去找自己的
         特征 —— 那正是"偶尔认错页面"这类最难查的 bug 的温床。
         """
+        if type(page) is PageNode:
+            raise StateError(
+                f"页面 {page.id!r} 是抽象的 PageNode —— 它既不是分类节点也不是状态节点。"
+                "要分类容器就用 PageGroup，要记录信息就用 PageLeaf"
+            )
         if page.id in self._pages:
             raise StateError(f"页面 id 重复: {page.id!r}")
         if parent is not None and parent not in self._pages:
@@ -432,9 +566,14 @@ class PageTree:
                 self._roots.append(page.id)
         else:
             self._children[parent].append(page.id)
+
+        # 分类节点的子节点跟着一起加（递归）。**父先子后**由递归天然保证。
+        if isinstance(page, PageGroup):
+            for child in page.children:
+                self.add(child, parent=page.id)
         return page
 
-    def _check_roi_within_parent(self, page: Page, parent: Page) -> None:
+    def _check_roi_within_parent(self, page: PageNode, parent: PageNode) -> None:
         """子页面的 roi 必须落在父页面的**有效 roi** 内。
 
         ## 坐标系（这里踩过一次）
@@ -463,7 +602,7 @@ class PageTree:
                 "地方去找自己的特征（表现为偶尔认错页面）"
             )
 
-    def add_many(self, pages: Iterable[tuple[Page, PageId | None]]) -> None:
+    def add_many(self, pages: Iterable[tuple[PageNode, PageId | None]]) -> None:
         """批量加。**按父先子后的顺序**给（loader 解析嵌套结构时天然满足）。"""
         for page, parent in pages:
             self.add(page, parent)
@@ -517,7 +656,7 @@ class PageTree:
     # 查询结构
     # ------------------------------------------------------------------ #
     @property
-    def pages(self) -> Mapping[PageId, Page]:
+    def pages(self) -> Mapping[PageId, PageNode]:
         return dict(self._pages)
 
     @property
@@ -530,10 +669,10 @@ class PageTree:
     def __contains__(self, page_id: object) -> bool:
         return page_id in self._pages
 
-    def get(self, page_id: PageId) -> Page | None:
+    def get(self, page_id: PageId) -> PageNode | None:
         return self._pages.get(page_id)
 
-    def require(self, page_id: PageId) -> Page:
+    def require(self, page_id: PageId) -> PageNode:
         """取页面，不存在就抛（装配期用，别静默返回 None）。"""
         page = self._pages.get(page_id)
         if page is None:
@@ -543,7 +682,7 @@ class PageTree:
     def parent_of(self, page_id: PageId) -> PageId | None:
         return self._parent.get(page_id)
 
-    def children_of(self, page_id: PageId | None = None) -> tuple[Page, ...]:
+    def children_of(self, page_id: PageId | None = None) -> tuple[PageNode, ...]:
         """子页面，按 ``priority`` 降序（同级的先试谁）。
 
         ``page_id=None`` 时返回所有顶层页面。
@@ -552,19 +691,21 @@ class PageTree:
         pages = [self._pages[i] for i in ids if i in self._pages]
         return tuple(sorted(pages, key=lambda p: p.priority, reverse=True))
 
-    def siblings_of(self, page_id: PageId, *, include_self: bool = False) -> tuple[Page, ...]:
+    def siblings_of(self, page_id: PageId, *, include_self: bool = False) -> tuple[PageNode, ...]:
         peers = self.children_of(self.parent_of(page_id))
         if include_self:
             return peers
         return tuple(p for p in peers if p.id != page_id)
 
-    def overlays_of(self, page_id: PageId) -> tuple[Page, ...]:
+    def overlays_of(self, page_id: PageId) -> tuple[PageLeaf, ...]:
         """某个页面的叠加层子节点（弹窗），按优先级降序。"""
-        return tuple(p for p in self.children_of(page_id) if p.is_overlay)
+        return tuple(
+            p for p in self.children_of(page_id) if isinstance(p, PageLeaf) and p.is_overlay
+        )
 
-    def global_overlays(self) -> tuple[Page, ...]:
+    def global_overlays(self) -> tuple[PageLeaf, ...]:
         """顶层叠加层 —— 任意页面上都可能出现的弹窗。"""
-        return tuple(p for p in self.children_of(None) if p.is_overlay)
+        return tuple(p for p in self.children_of(None) if isinstance(p, PageLeaf) and p.is_overlay)
 
     def ancestors_of(self, page_id: PageId) -> tuple[PageId, ...]:
         """祖先链，从根到父（不含自己）。"""
@@ -583,10 +724,10 @@ class PageTree:
         """根节点深度 0。"""
         return len(self.ancestors_of(page_id))
 
-    def walk(self, order: str = "dfs") -> Iterator[Page]:
+    def walk(self, order: str = "dfs") -> Iterator[PageNode]:
         """遍历所有页面。``dfs``（先父后子，默认）或 ``bfs``。"""
         queue: list[PageId] = list(self._roots)
-        collected: list[Page] = []
+        collected: list[PageNode] = []
         while queue:
             current = queue.pop(0) if order == "bfs" else queue.pop()
             page = self._pages.get(current)
@@ -599,7 +740,7 @@ class PageTree:
                 queue.extend(reversed(children))
         return iter(collected)
 
-    def leaves(self) -> tuple[Page, ...]:
+    def leaves(self) -> tuple[PageNode, ...]:
         """没有子页面的页面。"""
         return tuple(p for p in self.walk() if not self._children.get(p.id))
 
@@ -652,6 +793,12 @@ class PageTree:
         # 而它既不该出现在定位结果里，也没有流程节点认领它。
         if target.is_group:
             return ActionResult.not_found(f"{target.id!r} 是分类节点（kind: group），不参与匹配")
+
+        # 到这里 `target` 一定是**状态节点**：`is_group` 只有 PageGroup 会是 True，
+        # 而抽象基类 PageNode 进不了树（`add()` 拦掉了）。收窄一次，
+        # 下面就能用 `exclude` / `queries` 这些只有状态才有的字段。
+        if not isinstance(target, PageLeaf):  # pragma: no cover - 防御性
+            return ActionResult.error(f"{target.id!r} 不是状态节点，无法匹配")
 
         if roi is None:
             roi = self.effective_roi(target.id)
@@ -799,7 +946,7 @@ class PageTree:
         # ---- ① 先验流程层的预期（一次匹配） ----
         if expected and expected in self._pages:
             page = self._pages[expected]
-            if page.has_conditions:
+            if isinstance(page, PageLeaf) and page.has_conditions:
                 ok, _why, values = self._probe(frame, page, attempts)
                 if ok:
                     overlays = self._scan_overlays(frame, expected, attempts, seen=set())
@@ -832,8 +979,12 @@ class PageTree:
 
         # 先精确验 hint 自己：它在"应该在这儿"这件事上比"顶层那一支"
         # 精确得多 —— 上一步的预期没命中时基本就是它变了。
-        if hint and hint in self._pages and not self._pages[hint].is_overlay:
-            hint_page = self._pages[hint]
+        hint_page = self._pages.get(hint) if hint else None
+        if (
+            hint
+            and isinstance(hint_page, PageLeaf)
+            and not hint_page.is_overlay
+        ):
             ok, _why, values = self._probe(frame, hint_page, attempts)
             if ok:
                 current_id, current_values, hint_verified = hint_page.id, values, True
@@ -843,11 +994,11 @@ class PageTree:
         # 分类节点（GROUP）**不参与匹配，但必须能穿过它**：它既不可能是结果，
         # 也不能挡住它的子节点。所以候选列表在进入循环前就把分类节点展开掉 ——
         # 让"穿过分类节点"和"命中了谁"彻底分开，循环里只剩一种情况（叶子状态）。
-        candidates: list[Page] = self._expand_groups(
+        candidates: list[PageLeaf] = self._expand_groups(
             self._searchable_children(current_id) if hint_verified else roots
         )
         while candidates:
-            hit_page: Page | None = None
+            hit_page: PageLeaf | None = None
             hit_values: dict[str, Any] = {}
             for page in candidates:
                 ok, _why, values = self._probe(frame, page, attempts)
@@ -864,21 +1015,25 @@ class PageTree:
             self._build_match(frame, current_id, current_values, overlays, attempts, now=now)
         )
 
-    def _expand_groups(self, pages: list[Page]) -> list[Page]:
-        """把候选里的分类节点（GROUP）就地展开成它们的子节点。
+    def _expand_groups(self, pages: Iterable[PageNode]) -> list[PageLeaf]:
+        """把候选里的分类节点就地展开成它们的子节点，返回**只剩状态节点**的列表。
 
-        分类节点没有识别条件，**探测它永远是未命中** —— 所以它绝不能留在候选
-        列表里（那会让整层搜索在第一项就"看起来失败"）。它唯一的作用是提供
-        ROI 继承和组织结构，展开之后按原来的顺序返回真正的状态。
+        分类节点没有识别条件 —— 别说是匹配，它连 ``queries`` 字段都没有
+        （见 :class:`PageGroup`）。所以它绝不能留在候选列表里：那会让整层搜索
+        在第一项就"看起来失败"。它唯一的作用是提供 ROI 继承和组织结构。
+
+        返回类型是 ``list[PageLeaf]`` 而不是 ``list[PageNode]`` —— 让**调用方**
+        不必再对每个候选 ``isinstance`` 一次。收窄就发生在这里，一处。
         """
-        expanded: list[Page] = []
+        expanded: list[PageLeaf] = []
         queue = list(pages)
         while queue:
             page = queue.pop(0)
-            if page.is_group:
+            if isinstance(page, PageGroup):
                 queue = self._searchable_children(page.id) + queue
                 continue
-            expanded.append(page)
+            if isinstance(page, PageLeaf):
+                expanded.append(page)
         return expanded
 
     def recover(
@@ -916,7 +1071,7 @@ class PageTree:
         near_page = self._pages.get(near) if near else None
 
         # ---- 第 0 圈：near 自己 ----
-        if near_page is not None and near_page.has_conditions:
+        if isinstance(near_page, PageLeaf) and near_page.has_conditions:
             ok, _why, values = self._probe(frame, near_page, attempts)
             if ok:
                 overlays = self._scan_overlays(frame, near_page.id, attempts, seen=set())
@@ -953,22 +1108,21 @@ class PageTree:
     # ------------------------------------------------------------------ #
     # 定位用的内部件
     # ------------------------------------------------------------------ #
-    def _searchable_children(self, page_id: PageId | None) -> list[Page]:
-        """下一层该试哪些页面。
+    def _searchable_children(self, page_id: PageId | None) -> list[PageNode]:
+        """下一层该试哪些节点。
 
-        排除两类：**叠加层**（它是"盖在某一页上的一层"，由
-        :meth:`_scan_overlays` 单独处理；当成主状态候选的话，一个断线弹窗
-        会把主状态整个顶掉，位置校验随即认为"期望 home、实测 net"）
-        和挂在 group 下的 group（会由它的子节点继续代表）——
+        排除**叠加层**（它是"盖在某一页上的一层"，由 :meth:`_scan_overlays` 单独
+        处理；当成主状态候选的话，一个断线弹窗会把主状态整个顶掉，位置校验随即
+        认为"期望 home、实测 net"）。
 
-        实际上第二个排除不需要写：group 会被正常下探，只是不进结果。
-        见 :meth:`locate` 的循环。
+        分类节点**保留**在结果里 —— 它会被正常下探（:meth:`locate` 的循环），
+        只是自己不进结果。
         """
         return [p for p in self.children_of(page_id) if not p.is_overlay]
 
     def _states_below(
         self, page_id: PageId | None, *, exclude_ids: set[PageId]
-    ) -> list[Page]:
+    ) -> list[PageLeaf]:
         """某一层分组的**全部末梢状态**（不含 group / 叠加层），按"看起来更便宜"排序。
 
         排序目的是让扩散搜索**先试成本低的**（ROI 小 = 匹配像素少）：既快，
@@ -980,24 +1134,30 @@ class PageTree:
           定位结果里就会出现一个"永远认不出"的假状态（而且它还没节点认领）；
         * **叠加层** —— 它由 :meth:`_scan_overlays` 单独处理，不是主状态。
         """
-        collected: list[Page] = []
+        collected: list[PageLeaf] = []
         queue = list(self._searchable_children(page_id))
         while queue:
             page = queue.pop(0)
             if page.id in exclude_ids:
                 continue
-            if page.is_group:
+            if isinstance(page, PageGroup):
                 queue.extend(self._searchable_children(page.id))
                 continue
-            if page.queries:
+            if isinstance(page, PageLeaf) and page.queries:
                 collected.append(page)
         return sorted(collected, key=self._cost)
 
-    def _cost(self, page: Page) -> tuple[int, int, int]:
+    def _cost(self, page: PageNode) -> tuple[int, int, int]:
         """越小的越先试：ROI 面积 -> 查询个数 -> 深度。"""
         roi = self.effective_roi(page.id)
         area = roi.area if roi is not None else 1 << 30
-        return (area, len(page.queries), self.depth_of(page.id))
+        count = len(page.queries) if isinstance(page, PageLeaf) else 0
+        return (area, count, self.depth_of(page.id))
+
+    def _state_confidence(self, page_id: PageId) -> float:
+        """某个状态的阈值；未知 / 分类节点给 0.0（PageMatch 只是记录用）。"""
+        page = self._pages.get(page_id)
+        return page.confidence if isinstance(page, PageLeaf) else 0.0
 
     def _probe(
         self,
@@ -1068,7 +1228,7 @@ class PageTree:
             id=page_id,
             path=self.path_of(page_id) if page_id != UNKNOWN_PAGE else (),
             overlays=overlays,
-            confidence=self._pages[page_id].confidence if page_id in self._pages else 0.0,
+            confidence=self._state_confidence(page_id),
             observed_at=now,
             frame_id=getattr(frame, "frame_id", -1),
             values=values,
@@ -1118,46 +1278,39 @@ class PageTree:
         if not self._roots:
             problems.append("没有任何顶层页面")
 
-        for page_id, page in self._pages.items():
-            label = repr(page_id) if page_id else "<空 id>"
+        for page_id in self._pages:
             if not page_id or not page_id.strip():
                 problems.append("存在空 id 的页面")
-            if page.min_stable_frames < 1:
-                problems.append(f"页面 {label} 的 min_stable_frames 必须 >= 1")
-            if not 0.0 < page.confidence <= 1.0:
-                problems.append(f"页面 {label} 的 confidence 必须在 (0, 1] 之间")
-            if page.roi is not None and page.roi.is_empty:
-                problems.append(f"页面 {label} 的 roi 是空区域: {page.roi.to_tuple()}")
 
         for page in self._pages.values():
             children = [c for c in self._children.get(page.id, []) if c in self._pages]
+            label = repr(page.id) if page.id else "<空 id>"
 
-            if page.is_group:
-                # 分类节点按定义**不记录信息**：它只是组织结构和 ROI 的载体。
-                # 给它写 queries 是自相矛盾的配置 —— 那说明作者以为它会参与匹配。
-                if page.queries:
-                    problems.append(
-                        f"分类节点 {page.id!r}（kind: group）不该写 queries —— "
-                        "它自己不参与匹配，只负责组织结构与 ROI 继承。"
-                        "要让它记录信息就把它建成普通状态节点。"
-                    )
+            if isinstance(page, PageGroup):
+                # 分类节点**不可能**有 queries（那是 PageLeaf 才有的字段），
+                # 所以这里不再有"给它写 queries"那条检查 —— 它变成了 TypeError。
                 if not children:
                     problems.append(
-                        f"分类节点 {page.id!r}（kind: group）没有任何子页面 —— "
-                        "空分组没有任何意义，要么给它加子状态，要么删掉它"
+                        f"分类节点 {page.id!r} 没有任何子节点 —— "
+                        "空分组没有任何意义，要么给它加子节点，要么删掉它"
                     )
-            elif not children and not page.queries:
+                continue
+
+            if not isinstance(page, PageLeaf):  # pragma: no cover - 进不了树
+                continue
+
+            if not children and not page.queries:
                 problems.append(
                     f"状态节点 {page.id!r} 既没有识别条件又是叶节点 —— "
                     "它永远不会被认出来（多半是忘了写 queries）。"
-                    "只想做分组的话请标成 kind: group。"
+                    "只想做分组的话请用 PageGroup。"
                 )
             if page.is_overlay and children:
                 problems.append(
                     f"叠加层 {page.id!r} 不该有子页面 —— 弹窗里套层级会让定位结果无法解释"
                 )
             if page.terminal and children:
-                problems.append(f"终态页面 {page.id!r} 不该有子页面")
+                problems.append(f"终态页面 {label} 不该有子页面")
 
         for page in self._pages.values():
             if page.roi is None:

@@ -46,7 +46,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import Cancelled, FlowError
-from ..state.page import UNKNOWN_PAGE, PageId
+from ..state.page import UNKNOWN_PAGE, PageId, PageLeaf
 from ..state.tracker import PageChange, PageTracker
 from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch, humanize
@@ -761,7 +761,7 @@ class FlowEngine:
             self.stop(StopReason.STOP_PAGE, f"进入终态状态 {page_id}")
             return True
         page = self.scenario.tree.get(page_id)
-        if page is not None and page.terminal:
+        if isinstance(page, PageLeaf) and page.terminal:
             self.stop(StopReason.STOP_PAGE, f"状态 {page_id} 是终态")
             return True
         return False

@@ -252,7 +252,9 @@ class TestShippedSamples:
 
         # ② 分类节点（group）自己不记录信息
         assert scenario.tree.require("home").is_group is True
-        assert scenario.tree.require("home").queries == ()
+        # 分类节点**没有** queries 字段（那是 PageLeaf 才有的）——
+        # 这正是"给它写 queries"从运行期配置错误变成 TypeError 的原因
+        assert not hasattr(scenario.tree.require("home"), "queries")
 
         # ③ 状态 ↔ 节点：每个记录信息的状态都能被重定位到
         binding = scenario.binding()

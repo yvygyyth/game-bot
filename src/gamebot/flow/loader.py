@@ -60,7 +60,7 @@ from typing import Any
 from ..atomic.query import query_from_dict
 from ..exceptions import ConfigError
 from ..execution.step import step_from_dict
-from ..state.page import Page, PageKind, PageTree
+from ..state.page import PageGroup, PageKind, PageLeaf, PageNode, PageTree
 from ..types import Region
 from .graph import Edge, EdgeKind, Graph, Node
 from .scenario import EngineOptions, Scenario, UnknownPolicy
@@ -78,6 +78,10 @@ __all__ = [
 _STRUCTURAL_KEYS = {"edges", "initial", "meta", "name", "nodes", "pages", "states"}
 
 #: 页面/状态定义允许的字段。
+#: 分类节点（`kind: group`）能写的键。**它没有识别相关的字段** ——
+#: 那些是 `PageLeaf` 才有的，所以这里和 `_PAGE_KEYS` 分开列。
+_GROUP_KEYS = frozenset({"priority", "roi", "name", "description", "meta"})
+
 _PAGE_KEYS = {
     "confidence",
     "description",
@@ -197,8 +201,17 @@ def parse_pages(data: Any) -> PageTree:
     return tree
 
 
-def _add_nested(tree: PageTree, page_id: str, spec: Any, *, parent: str | None) -> Page:
-    """加一页（含 children）。**父先子后**，满足 :meth:`PageTree.add` 的前置条件。"""
+def _add_nested(tree: PageTree, page_id: str, spec: Any, *, parent: str | None) -> PageNode:
+    """加一页（含 children）。**父先子后**，满足 :meth:`PageTree.add` 的前置条件。
+
+    ## ``kind`` 在这里翻译成**类型**
+
+    YAML 里写 ``kind: group`` / ``kind: overlay``，而类那边分成了
+    :class:`~gamebot.state.page.PageGroup` 和
+    :class:`~gamebot.state.page.PageLeaf`（见那两类的 docstring）。
+    所以**配置格式没变**，变的是它落到哪个 Python 类型上 ——
+    "分类节点不该有 queries"因此在写配置时也能被拦住（``PageGroup`` 没那个字段）。
+    """
     if spec is None:
         spec = {}
     if not isinstance(spec, dict):
@@ -206,10 +219,22 @@ def _add_nested(tree: PageTree, page_id: str, spec: Any, *, parent: str | None) 
 
     payload = dict(spec)
     children = payload.pop("children", None)
+    kind = payload.pop("kind", None)
+    if isinstance(kind, str):
+        kind = _coerce_enum(PageKind, kind, f"状态 {page_id!r} 的 kind")
     _reject_unknown(payload, _PAGE_KEYS, f"状态 {page_id!r}")
+    if kind is PageKind.GROUP:
+        # 分类节点只认下面这几个键 —— 它没有 queries / exclude / confidence /
+        # terminal 这些识别相关的字段（那些是 PageLeaf 才有的）。
+        # 这里早报一句人话，比等构造函数抛 "unexpected keyword argument" 好懂得多。
+        extra = sorted(set(payload) - _GROUP_KEYS)
+        if extra:
+            raise ConfigError(
+                f"状态 {page_id!r} 是分类节点（kind: group），不该有 {extra} —— "
+                "它自己不参与匹配，只负责组织结构与 ROI 继承。"
+                "要让它记录信息就别写 kind（那就是普通状态）。"
+            )
 
-    if isinstance(payload.get("kind"), str):
-        payload["kind"] = _coerce_enum(PageKind, payload["kind"], f"状态 {page_id!r} 的 kind")
     if payload.get("roi") is not None:
         payload["roi"] = _region_from_config(payload["roi"], f"状态 {page_id!r} 的 roi")
     for key in ("queries", "exclude"):
@@ -223,7 +248,12 @@ def _add_nested(tree: PageTree, page_id: str, spec: Any, *, parent: str | None) 
         except ValueError as exc:
             raise ConfigError(f"状态 {page_id!r} 的 {key} 解析失败: {exc}") from exc
 
-    tree.add(Page(id=page_id, **payload), parent)
+    if kind is PageKind.GROUP:
+        tree.add(PageGroup(id=page_id, **payload), parent)
+    else:
+        if kind is PageKind.OVERLAY:
+            payload["overlay"] = True
+        tree.add(PageLeaf(id=page_id, **payload), parent)
 
     if children is not None:
         if not isinstance(children, dict):

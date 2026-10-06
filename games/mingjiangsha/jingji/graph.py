@@ -42,7 +42,7 @@ from gamebot.flow import EngineOptions, Node, UnknownPolicy
 from gamebot.scenario_spec import ScenarioSpec
 from games import on_page
 
-from .pages import FEATURE_PAGES
+from .pages import FEATURE_TREE
 from .steps import AddPetStep, CreateTeamStep, EnterJingjiStep, StartMatchStep
 
 #: 这个功能的流程声明。**只有数据** —— 组装交给框架。
@@ -68,7 +68,7 @@ from .steps import AddPetStep, CreateTeamStep, EnterJingjiStep, StartMatchStep
 SCENARIO = ScenarioSpec(
     name="jingji",
     initial="home",
-    pages=tuple(FEATURE_PAGES),
+    tree=FEATURE_TREE,
     nodes=(
         Node(
             "home",

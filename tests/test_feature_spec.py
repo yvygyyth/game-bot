@@ -21,19 +21,19 @@ import pytest
 
 from gamebot.atomic.query import ImageQuery
 from gamebot.config.schema import AppConfig
-from gamebot.exceptions import ConfigError, FlowError, StateError
+from gamebot.exceptions import ConfigError, FlowError
 from gamebot.feature import FeatureSpec
 from gamebot.flow import Node
 from gamebot.flow.scenario import EngineOptions
 from gamebot.params import FormSpec
 from gamebot.scenario_spec import ScenarioSpec
-from gamebot.state import Page, PageKind
+from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 from games._spec import discovery_errors, get_script, list_scripts, read_spec
 
 
-def _page(pid: str, template: str = "x.png", **kwargs) -> Page:
-    return Page(pid, queries=(ImageQuery(template),), **kwargs)
+def _page(pid: str, template: str = "x.png", **kwargs) -> PageLeaf:
+    return PageLeaf(pid, queries=(ImageQuery(template),), **kwargs)
 
 
 def _spec(**overrides) -> FeatureSpec:
@@ -45,7 +45,7 @@ def _spec(**overrides) -> FeatureSpec:
         templates_dir="games/game/feature/templates",
         scenario=ScenarioSpec(
             initial="home",
-            pages=((_page("home"), None),),
+            tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
             nodes=(Node("home", page="home"),),
         ),
         base_config=AppConfig.defaults,
@@ -137,7 +137,9 @@ class TestDeclarationsAreData:
         from games.mingjiangsha.jingji.graph import SCENARIO
 
         assert isinstance(SCENARIO, ScenarioSpec)
-        assert isinstance(SCENARIO.pages, tuple)
+        # 状态树是**一棵嵌套的树**，不是平铺的 (页面, 父id) 列表
+        assert isinstance(SCENARIO.tree, PageGroup)
+        assert SCENARIO.tree.children, "根分类节点该有子节点"
         assert all(isinstance(node, Node) for node in SCENARIO.nodes)
         assert all(len(entry) == 3 for entry in SCENARIO.edges)
 
@@ -213,23 +215,24 @@ class TestScenarioSpecAssembles:
     def _spec(self, **overrides) -> ScenarioSpec:
         kwargs = dict(
             initial="home",
-            pages=((_page("home"), None),),
+            tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
             nodes=(Node("home", page="home"),),
         )
         kwargs.update(overrides)
         return ScenarioSpec(**kwargs)
 
-    def test_pages_are_added_parent_first(self):
-        """页面按声明顺序加，框架从 ``(页面, 父)`` 算出路径 id 与 ROI 继承。
+    def test_nested_tree_is_added_parent_first(self):
+        """**嵌套树**：给一个分类节点，它的子节点跟着一起进来。
 
-        （节点要认领**每一个**记录信息的状态，所以这里两个页面都得有节点 ——
+        （节点要认领**每一个**记录信息的状态，所以这里两个状态都得有节点 ——
         那正是 ``validate_binding`` 在管的规矩，声明里漏了它会在组装时报。）
         """
         spec = self._spec(
             initial="root",
-            pages=(
-                (_page("root", "r.png", roi=Region(0, 0, 200, 200)), None),
-                (_page("root/kid", "k.png"), "root"),
+            tree=PageGroup(
+                "root",
+                roi=Region(0, 0, 200, 200),
+                children=(PageLeaf("root/kid", queries=(ImageQuery("k.png"),)),),
             ),
             nodes=(Node("root", page="root"), Node("kid", page="root/kid")),
             # kid 得从 initial 走得到，否则它就是死代码（校验会报）
@@ -237,16 +240,23 @@ class TestScenarioSpecAssembles:
         )
         scenario = spec.materialize(name="x")
         assert scenario.tree.get("root/kid") is not None
-        # 子页面没写 roi，于是原样继承父页面的
+        # 子状态没写 roi，于是原样继承父分类节点的
         assert scenario.tree.effective_roi("root/kid") == Region(0, 0, 200, 200)
 
     def test_child_roi_is_relative_to_the_parent(self):
-        """子页面的 roi 是**相对父页面原点**的 —— 框架叠出绝对值。"""
+        """子状态的 roi 是**相对父节点原点**的 —— 框架叠出绝对值。"""
         spec = self._spec(
             initial="root",
-            pages=(
-                (_page("root", "r.png", roi=Region(100, 50, 200, 200)), None),
-                (_page("root/kid", "k.png", roi=Region(10, 20, 30, 40)), "root"),
+            tree=PageGroup(
+                "root",
+                roi=Region(100, 50, 200, 200),
+                children=(
+                    PageLeaf(
+                        "root/kid",
+                        queries=(ImageQuery("k.png"),),
+                        roi=Region(10, 20, 30, 40),
+                    ),
+                ),
             ),
             nodes=(Node("root", page="root"), Node("kid", page="root/kid")),
             edges=(("root", "kid", {}),),
@@ -287,18 +297,45 @@ class TestScenarioSpecAssembles:
         with pytest.raises(ConfigError, match="initial"):
             self._spec(initial="  ")
 
-    def test_group_page_with_queries_is_rejected(self):
-        group = Page("g", queries=(ImageQuery("g.png"),), kind=PageKind.GROUP)
-        with pytest.raises(ConfigError, match="group"):
-            self._spec(pages=((group, None),), nodes=(Node("home", page="g"),))
+    def test_group_cannot_take_queries_at_all(self):
+        """**分类节点和状态节点是不同类型** —— 给分类节点写 queries 是 ``TypeError``。
 
-    def test_parent_must_come_before_child(self):
-        """声明顺序错了（子在前）要有一句人话，而不是莫名其妙的错。"""
+        这就是这次分类型的直接收益：以前它是个"运行期才会报的配置错误"
+        （校验层拦），现在**写的那一行** Python 自己就拒了。
+        """
+        with pytest.raises(TypeError, match="queries"):
+            PageGroup("g", queries=(ImageQuery("g.png"),))  # type: ignore[call-arg]
+
+    def test_group_cannot_take_recognition_fields_at_all(self):
+        """识别相关的字段（queries / exclude / confidence / terminal）一个都不该有。"""
+        for field, value in (
+            ("exclude", (ImageQuery("x.png"),)),
+            ("confidence", 0.9),
+            ("terminal", True),
+        ):
+            with pytest.raises(TypeError, match=field):
+                PageGroup("g", **{field: value})  # type: ignore[call-arg]
+
+    def test_state_must_be_declared_before_its_child(self):
+        """**顺序约定消失了** —— 因为父子关系是对象引用，不是"父 id + 声明顺序"。
+
+        以前要给 ``(页面, 父id)`` 的列表、还得保证"父在前"；现在嵌套着写，
+        结构本身就说明了关系，写不出"子在前"这种状态。
+        """
         spec = self._spec(
-            pages=((_page("root/kid"), "root"), (_page("root"), None)),
+            tree=PageGroup(
+                "root",
+                children=(PageLeaf("root/kid", queries=(ImageQuery("k.png"),)),),
+            ),
+            # **每个记录信息的状态都要有节点认领**（另一条规矩，和声明顺序无关）。
+            # 分类节点不需要 —— 它不记录信息。
+            nodes=(Node("kid", page="root/kid"),),
+            edges=(),
+            initial="kid",
         )
-        with pytest.raises(StateError, match="父页面不存在"):
-            spec.materialize(name="x")
+        scenario = spec.materialize(name="x")
+        assert scenario.tree.parent_of("root/kid") == "root"
+        assert scenario.tree.path_of("root/kid") == ("root", "root/kid")
 
     def test_options_go_into_the_scenario(self):
         spec = self._spec(options=EngineOptions(max_ticks=7))

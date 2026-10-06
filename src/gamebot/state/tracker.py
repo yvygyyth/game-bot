@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..utils.logging import get_logger
-from .page import UNKNOWN_PAGE, PageId, PageMatch, PageTree
+from .page import UNKNOWN_PAGE, PageId, PageLeaf, PageMatch, PageTree
 
 log = get_logger("state.tracker")
 
@@ -357,7 +357,9 @@ class PageTracker:
         if self._tree is None:
             return 1
         page = self._tree.get(page_id)
-        return max(1, page.min_stable_frames) if page is not None else 1
+        # `min_stable_frames` 只有**状态节点**才有（分类节点不参与匹配，
+        # 也就无所谓稳几帧）。类型上是 `PageState` 才有的字段。
+        return max(1, page.min_stable_frames) if isinstance(page, PageLeaf) else 1
 
     def _record_change(
         self,
@@ -426,7 +428,8 @@ class PageTracker:
         if self._current is None or self._tree is None:
             return False
         page = self._tree.get(self._current.id)
-        if page is None or page.timeout is None:
+        # 同上：只有状态节点才有 `timeout`
+        if not isinstance(page, PageLeaf) or page.timeout is None:
             return False
         return self._current.duration(now) >= page.timeout
 

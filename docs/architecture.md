@@ -49,7 +49,7 @@ while True:
 │   tracker.py PageTracker / PageState / PageChange（跨帧持续性）    │
 │   store.py   Blackboard（业务共享数据）                           │
 │   · 状态按模块组成树，子状态继承父节点的 ROI                       │
-│   · 分类节点（kind: group）不记录信息、不参与匹配，只做组织与 ROI  │
+│   · 分类节点（PageGroup）不记录信息、不参与匹配，只做组织与 ROI    │
 │   · 叠加层（弹窗）和主状态**同时成立**                            │
 │   · 定位两条路径：locate（快，只探预期）/ recover（慢，扩散）      │
 │   · 认不出来是常态，有显式策略                                    │

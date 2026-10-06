@@ -240,7 +240,7 @@ tick N+2 : 校验通过，执行 jingji 的步骤
 ```yaml
 states:                          # id 由嵌套位置推导：home/jingji/battle
   home:
-    kind: group                  # 父节点一律 group
+    kind: group                  # YAML 里仍写 kind: group（解析成 PageGroup）
     children:
       jingji:
         queries: [{type: ImageQuery, template: jingji/title.png}]
