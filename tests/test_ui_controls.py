@@ -61,6 +61,100 @@ def _wait(qt_app, predicate, timeout: float = 8.0) -> bool:
     return False
 
 
+def _cursor_depth() -> int:
+    """当前有**几层** override cursor 压着。
+
+    ``overrideCursor()`` 只返回最上面那层、数不出层数，所以这里一边弹一边数，
+    最后再原样压回去 —— 对调用方无副作用。
+    """
+    from PySide6.QtGui import QGuiApplication
+
+    frames = []
+    while (current := QGuiApplication.overrideCursor()) is not None:
+        frames.append(current.shape())
+        QGuiApplication.restoreOverrideCursor()
+    for shape in frames:
+        QGuiApplication.setOverrideCursor(shape)
+    return len(frames)
+
+
+def _fake_window(title: str):
+    class _Region:
+        x = y = 0
+        w, h = 640, 360
+
+    class _Window:
+        region = _Region()
+
+        def __init__(self) -> None:
+            self.title = title
+
+    return _Window()
+
+
+class TestCursorIsBalanced:
+    """刷新窗口时那个"忙"光标必须**进出配对**。
+
+    ## 踩过的坑（用户报"软件打开就一直转圈"）
+
+    改这个方法时留下了一行**重复的**
+    ``QGuiApplication.setOverrideCursor(WaitCursor)``，而 ``finally`` 里只
+    ``restoreOverrideCursor()`` 一次 —— 每刷一次光标栈就涨一层。
+
+    表现是**整个软件一直转圈**（光标永远"忙"），点哪儿都像没反应 ——
+    看起来跟卡死一样。而且**没有任何报错**，测按钮和列表的用例也全都通过：
+    它们不看光标。
+
+    所以这个不变量要单独钉住：**刷多少次都不该留下光标。**
+    """
+
+    def test_depth_is_zero_after_startup(self, qt_app, ui) -> None:
+        assert _cursor_depth() == 0, "构造完之后不该有光标压着"
+
+    def test_each_refresh_leaves_no_cursor(self, qt_app, monkeypatch, ui) -> None:
+        main, _ = ui
+        controls = main.controls
+        monkeypatch.setattr(
+            controls_mod, "_list_windows", lambda keyword="": [_fake_window("甲")]
+        )
+
+        for _ in range(5):
+            controls.refresh_windows()
+
+        assert _cursor_depth() == 0, (
+            "刷了 5 次还有光标压着 —— setOverrideCursor / restoreOverrideCursor 没配对"
+        )
+
+    def test_clicking_detect_leaves_no_cursor(self, qt_app, monkeypatch, ui) -> None:
+        main, _ = ui
+        controls = main.controls
+        monkeypatch.setattr(
+            controls_mod, "_list_windows", lambda keyword="": [_fake_window("甲")]
+        )
+
+        for _ in range(3):
+            controls.detect.click()
+
+        assert _cursor_depth() == 0, "点重新检测之后光标该恢复"
+
+    def test_enumeration_failure_still_restores_the_cursor(
+        self, qt_app, monkeypatch, ui
+    ) -> None:
+        """枚举抛异常也要恢复光标（``finally`` 的意义所在）。"""
+        main, _ = ui
+        controls = main.controls
+
+        def boom(keyword=""):
+            raise RuntimeError("枚举炸了")
+
+        monkeypatch.setattr(controls_mod, "_list_windows", boom)
+
+        with pytest.raises(RuntimeError):
+            controls.refresh_windows()
+
+        assert _cursor_depth() == 0, "异常路径没恢复光标 —— 软件会一直转圈"
+
+
 class TestStartButtonAfterStop:
     """用户报："停止后没办法再开始了，按钮 disable 了"。
 

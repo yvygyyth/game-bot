@@ -283,7 +283,6 @@ class ControlsBar(QWidget):
             keyword = ""
 
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             infos = _list_windows(keyword)
         finally:
