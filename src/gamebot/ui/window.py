@@ -71,6 +71,9 @@ class MainWindow(QMainWindow):
         self._run_ctx: Any = None
         self._run_journal: Any = None
         self._recorder: Any = None
+        #: 快捷键帮助框开着吗。全局钩子**不吞键**，界面有焦点时同一次按键会
+        #: 同时走全局和 ``QShortcut``，不加这个会叠出两个对话框。
+        self._help_open = False
         self._last_report: Any = None
         """最近一次运行的 ``RunReport``。报告本身也写进日志和「检查输出」页，
         这里留一份是给外部（测试、以后的状态栏）读的。"""
@@ -705,7 +708,21 @@ class MainWindow(QMainWindow):
 
         用对话框而不是常驻的菜单栏：菜单要占一行高度，而这个界面宁愿把高度
         留给日志和带框的图。快捷键本来就该"用熟了不用看"，需要看时按 F1。
+
+        **加了重入保护**，因为全局钩子**不吞键**：界面有焦点时按 F1，同一次
+        按键会同时走全局钩子和 ``QShortcut`` —— 不加保护就会叠出两个对话框。
+        （``stop`` / ``run`` 不需要这层保护：前者重复设中止标志无害，
+        后者开头就有 ``if self._engine_running: return``。）
         """
+        if self._help_open:
+            return
+        self._help_open = True
+        try:
+            self._show_shortcuts_dialog()
+        finally:
+            self._help_open = False
+
+    def _show_shortcuts_dialog(self) -> None:
         lines = [
             "快捷键",
             "",
@@ -746,6 +763,10 @@ class MainWindow(QMainWindow):
         self._engine_thread.quit()
         if not self._engine_thread.wait(5000):
             log.warning("引擎线程没能在 5 秒内退出，仍继续关窗")
+
+        # 全局快捷键钩子：不卸掉的话它会一直挂在系统输入链上，
+        # 进程也退不干净（钩子线程虽说是 daemon，但留着钩子会拦住别的程序）
+        self.keymap.stop()
 
         self._release_run()
         self.bridge.detach()
