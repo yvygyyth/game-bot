@@ -33,6 +33,7 @@ game-bot/
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
 │   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
+│   ├── run-context.md           #   ★ RunContext 上挂着什么（写步骤时读这份）
 │   ├── state-and-flow.md        #   ★ 状态树与流程图怎么结合（关联表 / 两条定位路径）
 │   └── ui.md                    #   ★ 本地控制台 UI 的设计（布局 / 线程 / 分阶段）
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
@@ -317,6 +318,7 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 
 | 要做什么 | 命令 | 要游戏开着吗 |
 |---|---|---|
+| **写一个步骤函数** | 先读 [docs/run-context.md](docs/run-context.md)（`ctx` 上有什么） | 不用 |
 | 改界面 | `uv run gamebot ui`（可加 `--script mingjiangsha/jingji` 预选） | **不用** |
 | 跑测试 | `uv run pytest` | **不用**（假后端） |
 | 改识图/流程 | `uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20` | **要** |

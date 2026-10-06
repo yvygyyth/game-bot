@@ -207,9 +207,9 @@ class RunContext:
     def page(self) -> PageMatch | None:
         """当前页面的**单帧**观测；还没定位过时是 None。
 
-        ``flow.graph.GraphCursor.should_run()`` 通过它读"实际在哪个页面"来做
-        位置守卫 —— 实际页面 ≠ 节点期望页面时拒绝执行动作。
-        没有它，那个守卫会被静默跳过（只认位置不认人）。
+        给排查和 hooks 用（"现在到底认成了什么"）。注意它是**状态层的单帧观测**，
+        而"我该在哪个状态"在关联表里（``scenario.bindings``）——
+        想知道两者对不对得上，问 ``FlowEngine.check_state()``，别在这儿比。
         """
         state = self.pages.current
         if state is None:
