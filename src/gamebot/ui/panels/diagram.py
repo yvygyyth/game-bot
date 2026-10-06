@@ -49,9 +49,9 @@ if TYPE_CHECKING:
 
 __all__ = ["DiagramPanel", "FlowDiagramView", "StateTreeView"]
 
-#: 节点框的尺寸（够写下 "home/qianli/battle" 这种 id）
-NODE_W = 168.0
-NODE_H = 40.0
+#: 节点框的尺寸。**够写下两行**：name 一行、id 一行。
+NODE_W = 210.0
+NODE_H = 46.0
 GAP_X = 60.0
 GAP_Y = 18.0
 
@@ -62,11 +62,14 @@ MAX_FIT = 2.0
 COLOR_BG = QColor("#1e1e1e")
 COLOR_NODE = QColor("#2d2d30")
 COLOR_NODE_GROUP = QColor("#26343f")
-COLOR_NODE_CURRENT = QColor("#7a2f2f")
+#: 当前状态**和流程预期不一致**时的底色 —— 也就是"需要重定位"的那一刻。
+COLOR_NODE_MISALIGNED = QColor("#7a2f2f")
 COLOR_NODE_EDGE = QColor("#3d3d40")
 COLOR_BORDER = QColor("#5a5a5e")
-COLOR_BORDER_CURRENT = QColor("#e05c5c")
-COLOR_BORDER_MATCH = QColor("#4ec9b0")
+#: **绿 = 一致**：识别出来的状态就是流程预期的那个，一切正常。
+COLOR_BORDER_OK = QColor("#4ec9b0")
+#: **红 = 不一致**：流程以为在别处，需要重定位。**最该被看见的一刻。**
+COLOR_BORDER_MISALIGNED = QColor("#e05c5c")
 COLOR_TEXT = QColor("#e6e6e6")
 COLOR_TEXT_DIM = QColor("#9a9a9a")
 COLOR_ARROW = QColor("#8a8a8e")
@@ -146,44 +149,67 @@ class _Diagram(QGraphicsView):
         self,
         x: float,
         y: float,
-        label: str,
-        *,
-        current: bool = False,
-        matched: bool = False,
-        group: bool = False,
+        title: str,
         sub: str = "",
+        *,
+        aligned: bool | None = None,
+        group: bool = False,
     ) -> QRectF:
+        """画一个节点框：**第一行 title、第二行 sub**（sub 空就只显示一行）。
+
+        ## 边框的两个颜色是**一致 / 不一致**，不是"当前 / 预期"
+
+        * **绿**（``aligned=True``）—— 识别出来的状态**就是**流程预期的那个。
+          正常推进时一直是绿框，意思是"照着眼看走，没错位"；
+        * **红**（``aligned=False``）—— 识别到的状态**不是**流程预期的那个。
+          这就是"流程出错了、需要重定位"的那一刻：游标还停在 B，而画面已经是 C；
+        * ``None`` —— 比不了（还没跑、认不出来、或者这个节点压根不校验状态）。
+
+        用户点明过这个语义："红框 = 需要重定位，绿框 = 正常"。
+        比原来那套（红=当前状态、绿=流程预期）清楚：那套得先在脑子里把两个颜色
+        对应到两个来源，再自己判断它们是不是同一个 —— 而现在颜色**直接就是结论**。
+
+        底色只有在"当前状态"（``title`` 与正在跟踪的那页同名时由调用方决定）上才变化，
+        用来把注意力引到出问题的那一个节点上。
+
+        :param aligned: ``True`` 一致 / ``False`` 不一致 / ``None`` 无法比较。
+        """
         rect = QRectF(x, y, NODE_W, NODE_H)
         item = QGraphicsRectItem(rect)
-        fill = COLOR_NODE_CURRENT if current else (COLOR_NODE_GROUP if group else COLOR_NODE)
+        fill = COLOR_NODE_GROUP if group else COLOR_NODE
+        if aligned is False:
+            # 不一致：底色也变，让"出问题的是这一个"一眼看出来
+            fill = COLOR_NODE_MISALIGNED
         item.setBrush(QBrush(fill))
-        if current:
-            border = COLOR_BORDER_CURRENT
-        elif matched:
-            border = COLOR_BORDER_MATCH
+        if aligned is True:
+            border, width = COLOR_BORDER_OK, 2.4
+        elif aligned is False:
+            border, width = COLOR_BORDER_MISALIGNED, 2.4
         else:
-            border = COLOR_BORDER
-        item.setPen(QPen(border, 2.4 if current else 1.2))
+            border, width = COLOR_BORDER, 1.2
+        item.setPen(QPen(border, width))
         item.setZValue(1)
         self._scene.addItem(item)
 
-        text = QGraphicsSimpleTextItem(_elide(label, 22))
+        # 没有 sub 时把那一行居中，别让字贴着上边
+        top = 5.0 if sub else (NODE_H - 16) / 2
+        text = QGraphicsSimpleTextItem(_elide(title, 30))
         font = QFont()
         font.setPointSize(9)
-        font.setBold(current or group)
+        font.setBold(aligned is not None or group)
         text.setFont(font)
-        text.setBrush(QBrush(COLOR_TEXT if not group else COLOR_TEXT_DIM))
-        text.setPos(rect.x() + 8, rect.y() + (6 if sub else 11))
+        text.setBrush(QBrush(COLOR_TEXT))
+        text.setPos(rect.x() + 8, rect.y() + top)
         text.setZValue(2)
         self._scene.addItem(text)
 
         if sub:
-            hint = QGraphicsSimpleTextItem(sub)
+            hint = QGraphicsSimpleTextItem(_elide(sub, 30))
             small = QFont()
             small.setPointSize(7)
             hint.setFont(small)
             hint.setBrush(QBrush(COLOR_TEXT_DIM))
-            hint.setPos(rect.x() + 8, rect.y() + 23)
+            hint.setPos(rect.x() + 8, rect.y() + 25)
             hint.setZValue(2)
             self._scene.addItem(hint)
         return rect
@@ -235,7 +261,7 @@ class _Diagram(QGraphicsView):
             font = QFont()
             font.setPointSize(7)
             text.setFont(font)
-            text.setBrush(QBrush(COLOR_TEXT_DIM if not active else COLOR_BORDER_CURRENT))
+            text.setBrush(QBrush(COLOR_TEXT_DIM if not active else COLOR_BORDER_MISALIGNED))
             text.setPos((start.x() + end.x()) / 2 - 20, (start.y() + end.y()) / 2 - 14)
             text.setZValue(2)
             self._scene.addItem(text)
@@ -304,6 +330,38 @@ def _elide(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _alignment(
+    *, node_id: str, current_page: str, current_node_page: str
+) -> bool | None:
+    """这个节点该画**绿框**（一致）还是**红框**（需要重定位）？
+
+    * 它既不是"识别到的状态"也不是"流程预期的状态" —— ``None``（普通边框）；
+    * 识别到的状态 == 流程预期的状态 —— ``True``（绿）：照着眼看走，没错位。
+      这时只有那一个节点是绿的，别的都是普通边框；
+    * 两者不同 —— ``False``（红）：**需要重定位**。这种时候会有两个节点红
+      （"流程以为在哪" 和 "实际在哪"各一个），一眼就能看出错位是怎么发生的。
+
+    ## 为什么单独一个函数
+
+    这三分支的语义是这套设计的核心（"状态对不上就重定位"），
+    而它原来散在调用处用 ``current=`` / ``matched=`` 两个布尔表达 ——
+    读的人得先在脑子里把两个颜色对应到两个来源，再自己判断它们同不同。
+    收成一个函数之后，**颜色直接就是结论**，而且它**能被单测**
+    （见 ``tests/test_ui_diagram.py``）。
+
+    :param node_id: 正在画的这个节点的 id。
+    :param current_page: 状态层识别出来的当前状态（``""`` = 认不出来）。
+    :param current_node_page: 当前流程节点声明的状态（``""`` = 这个节点不校验状态）。
+    """
+    if not current_page:
+        return None
+    consistent = current_page == current_node_page
+    if consistent:
+        return True if node_id == current_page else None
+    # 不一致：预期的那个和实际的那个各标一个，错位的两头都看得见
+    return False if node_id in (current_page, current_node_page) else None
+
+
 class StateTreeView(_Diagram):
     """状态树的图：分类节点画成不同底色，**当前状态描红**。"""
 
@@ -343,21 +401,21 @@ class StateTreeView(_Diagram):
             y = cursor_y[depth]
             cursor_y[depth] = y + NODE_H + GAP_Y
 
-            sub = ""
-            if node.is_group:
-                sub = "分类节点（不匹配）"
-            elif node.is_overlay:
-                sub = "叠加层"
-            elif node.id in overlay_pages:
-                sub = "已命中（叠加）"
+            # **只显示 name 和 id** —— name 给人看，id 给写代码/配置时对。
+            # name 没写就退回 id，不留空行；两者相同时不重复写。
+            title = node.name or node.id
+            sub = node.id if node.name and node.name != node.id else ""
             rect = self._node(
                 x,
                 y,
-                node.id,
-                current=node.id == current_page,
-                matched=bool(current_node_page) and node.id == current_node_page,
-                group=node.is_group or node.is_overlay,
-                sub=sub,
+                title,
+                sub,
+                aligned=_alignment(
+                    node_id=node.id,
+                    current_page=current_page,
+                    current_node_page=current_node_page,
+                ),
+                group=node.is_group,
             )
             layout[node.id] = rect
 
@@ -411,9 +469,16 @@ class FlowDiagramView(_Diagram):
             x = level * (NODE_W + GAP_X)
             y = cursor_y.get(level, 0.0)
             cursor_y[level] = y + NODE_H + GAP_Y
-            sub = node.page or "不校验状态"
+            # 流程图节点：第一行是**节点 id**（流程图的身份），
+            # 第二行是它认领的状态（`page`）—— 没有状态就说明它不校验位置。
+            page_label = node.page or "不校验状态"
+            # 流程图里"当前节点"就是正常状态 -> 绿框（不是红：红留给"需要重定位"）
             layout[node_id] = self._node(
-                x, y, node_id, current=node_id == current, sub=_elide(sub, 26)
+                x,
+                y,
+                node_id,
+                _elide(page_label, 30),
+                aligned=True if node_id == current else None,
             )
 
         for edge in graph.edges:
