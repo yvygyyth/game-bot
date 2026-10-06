@@ -46,6 +46,7 @@ from .graph import (
     GraphCursor,
     Node,
     NodeId,
+    Transition,
 )
 from .loader import load_scenario, parse_scenario
 from .scenario import EngineOptions, Scenario, UnknownPolicy
@@ -66,6 +67,7 @@ __all__ = [
     "Scenario",
     "StateBinding",
     "StopReason",
+    "Transition",
     "UnknownPolicy",
     "load_scenario",
     "parse_scenario",

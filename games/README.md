@@ -102,7 +102,8 @@ SPEC = FeatureSpec(
 ```python
 # games/<游戏>/<功能>/graph.py
 from gamebot.scenario_spec import ScenarioSpec
-from gamebot.flow import EngineOptions, Node
+from gamebot.flow import EngineOptions, Node, Transition
+from games import on_page
 
 SCENARIO = ScenarioSpec(
     initial="home",                          # 必选：流程从哪开始
@@ -116,19 +117,49 @@ SCENARIO = ScenarioSpec(
         )),
     ),
     nodes=(
-        Node("home", page="home/lobby", steps=[EnterJingjiStep()], cooldown=0.5),
-        Node("create", page="home/jingji/before_create", steps=[CreateTeamStep()]),
-    ),
-    edges=(                                  # (source, target, Edge 的参数)
-        ("home", "create", {"condition": on_page("home/jingji/before_create"), "priority": 10}),
+        # **出边写在节点自己身上** —— 起点就是"我"，不用写
+        Node(
+            "home",
+            page="home/lobby",
+            steps=[EnterJingjiStep()],
+            cooldown=0.5,
+            transitions=[
+                Transition(
+                    "home/jingji/before_create",           # 终点（也是目标节点 id）
+                    on_page("home/jingji/before_create"),  # 条件（挨着写，能对上）
+                    10,                                    # priority
+                    "竞技场出现",                            # label
+                ),
+            ],
+        ),
+        Node("home/jingji/before_create", page="home/jingji/before_create",
+             steps=[CreateTeamStep()]),
     ),
     options=EngineOptions(tick_interval=0.4, max_runtime=180.0),
 )
 ```
 
+> **节点 id 用它所声明状态的 id** 是个约定（`"home/jingji/before_create"` 既是节点
+> id 也是页面 id）。条件里写的就是那个页面 id —— 两处挨着，读的时候能立刻对上。
+> 想打破这个约定也行（节点 id 可以随便取），那就把 `Transition` 的终点写成节点 id。
+
 > **节点的 `page` 要写"真正记录信息的那个状态"**，不是分类容器。
 > 上例里是 `home/lobby` 而不是 `home` —— 容器不记录信息，
 > 把节点挂在它上面会被 `validate_binding` 拦住（那是对的）。
+
+### 边为什么写在节点上，而不是一张单独的边表
+
+以前是 `edges=((a, b, {...}), ...)`。同一条边的事实散在两处：
+
+* **起点要写一遍** —— 而它其实就是哪个节点声明了这条边；
+* **终点的状态名在条件里又要写一遍** —— 两遍对不上只能等组装时才发现。
+
+现在起点不在声明里（它就是我），剩下那两遍**挨着**，读的时候能立刻对上。
+`Graph.add_node()` 会把它展开成带 `source` 的 `Edge`，
+所以运行期那一套（引擎、报告、决策、校验）完全不用改。
+
+`Transition` 的位置参数就是 `(to, when, priority, label)`，
+只有一个条件时一行就够。
 
 ### 声明是数据，**组装是框架的事**
 

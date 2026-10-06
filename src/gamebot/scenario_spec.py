@@ -32,39 +32,52 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .exceptions import ConfigError
-from .flow.graph import Edge, Graph, Node
+from .flow.graph import Graph, Node
 from .flow.scenario import EngineOptions, Scenario
 from .state.page import PageGroup, PageNode, PageTree
 
 __all__ = ["ScenarioSpec"]
-
-#: ``(起点节点 id, 终点节点 id, 边的其余参数)``。
-#: 用三元组而不是直接收一个 ``Edge``：``Edge`` 要求 ``source`` / ``target``
-#: 在**构造时**就给出，而"边从哪连到哪"正是这里想写得最短的部分。
-EdgeEntry = tuple[str, str, dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
 class ScenarioSpec:
     """一个脚本的状态树 + 流程图 + 运行选项，**都是数据**。
 
-    :param pages: ``(页面, 父页面 id)``，**父必须先于子**。``None`` 表示顶层。
-    :param nodes: 全部流程节点，顺序即声明顺序（同状态多节点时用它定主节点）。
-    :param edges: ``(source, target, kwargs)``。``kwargs`` 透传给
-        :class:`~gamebot.flow.graph.Edge`（``condition`` / ``priority`` /
-        ``label`` / ``cooldown`` / ``max_times`` / ``kind``）。
-        边在**所有节点加完之后**才连，所以悬空引用当场报。
+    :param nodes: 全部流程节点。**出边写在节点自己的 ``transitions`` 上**，
+        不再有单独的边表 —— 见下面"边为什么不单独列"。
+        顺序即声明顺序（同状态多节点时用它定主节点）。
+    :param tree: **整棵状态树**（嵌套的 :class:`~gamebot.state.page.PageGroup`
+        / :class:`~gamebot.state.page.PageLeaf`）。一棵树一个对象，
+        父子关系是对象引用 —— 没有"父必须先于子"这种顺序约定要守。
     :param initial: 起始节点 id。**必选**：一个流程从哪开始是它的核心信息，
         给默认值只会让"忘了写"变成"悄悄从第一个节点开始"。
     :param options: 引擎选项。不传就是默认值。
     :param name: 脚本名（进日志和报告）。留空则用 SPEC 的 name。
     :param meta: 任意附加信息。
+
+    ## 边为什么不单独列
+
+    以前这里是 ``edges=(("a", "b", {...}), ...)``。那样"一条边"要写三样东西：
+    起点、终点、条件 —— 而**起点是重复的**（边总是从某个节点出发的），
+    条件里往往又要再写一遍终点的状态名。同一条边的事实散在两处，
+    对不上只能等组装时才发现。
+
+    现在边写在 :attr:`Node.transitions` 上，起点就是"我"：
+
+    ```python
+    Node("home", page="home/lobby", transitions=[
+        Transition("jingji/before_create", when=on_page("home/jingji/before_create"),
+                   priority=10, label="竞技场出现（建队前）"),
+    ])
+    ```
+
+    起点不可能写错（它不在声明里），终点和条件挨着写、一眼能对上。
+    `Graph.add_node()` 会把它们展开成带 ``source`` 的边，运行期那一套不用改。
     """
 
     initial: str
     tree: PageGroup | None = None
     nodes: tuple[Node, ...] = ()
-    edges: tuple[EdgeEntry, ...] = ()
     options: EngineOptions = field(default_factory=EngineOptions)
     name: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
@@ -105,10 +118,11 @@ class ScenarioSpec:
 
         **框架调它，业务层不调。** 顺序是有讲究的：
 
-        1. 先建树（``pages`` 必须父先子后，``add()`` 才能算出路径 id 与 ROI 继承）；
-        2. 再加**全部**节点 —— 然后才连边。反过来的话，"边指向还没加的节点"
-           会变成一条假错误；
-        3. 连完边 ``Scenario.validate()`` 会跑完整校验（悬空引用、走不到的节点、
+        1. 先建树（``self.tree`` 是嵌套的，``add()`` 递归下去，
+           父先子后由递归天然保证）；
+        2. 再加**全部**节点 —— ``add_node()`` 会就地把它声明的
+           ``transitions`` 展开成边（补上 ``source``）；
+        3. ``Scenario.validate()`` 跑完整校验（悬空引用、走不到的节点、
            节点认领状态），报错里带全部问题。
 
         :param name: 脚本名（``Scenario.name``）。用 SPEC 的 name。
@@ -122,9 +136,8 @@ class ScenarioSpec:
 
         graph = Graph(initial=self.initial)
         for node in self.nodes:
+            # 边跟着节点一起进来 —— 不需要（也不可能）再单独连一次
             graph.add_node(node)
-        for source, edge_target, kwargs in self.edges:
-            graph.add_edge(Edge(source, edge_target, **kwargs))
 
         scenario = Scenario(
             name=self.name or name,

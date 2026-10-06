@@ -23,7 +23,7 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.config.schema import AppConfig
 from gamebot.exceptions import ConfigError, FlowError
 from gamebot.feature import FeatureSpec
-from gamebot.flow import Node
+from gamebot.flow import Node, Transition
 from gamebot.flow.scenario import EngineOptions
 from gamebot.params import FormSpec
 from gamebot.scenario_spec import ScenarioSpec
@@ -141,7 +141,8 @@ class TestDeclarationsAreData:
         assert isinstance(SCENARIO.tree, PageGroup)
         assert SCENARIO.tree.children, "根分类节点该有子节点"
         assert all(isinstance(node, Node) for node in SCENARIO.nodes)
-        assert all(len(entry) == 3 for entry in SCENARIO.edges)
+        # 边不再是声明里的三元组 —— 它们在节点上，由框架展开成 Edge
+        assert SCENARIO.nodes[0].transitions, "第一个节点该声明了出边"
 
 
 class TestFeatureSpecIsTyped:
@@ -234,9 +235,12 @@ class TestScenarioSpecAssembles:
                 roi=Region(0, 0, 200, 200),
                 children=(PageLeaf("root/kid", queries=(ImageQuery("k.png"),)),),
             ),
-            nodes=(Node("root", page="root"), Node("kid", page="root/kid")),
-            # kid 得从 initial 走得到，否则它就是死代码（校验会报）
-            edges=(("root", "kid", {}),),
+            nodes=(
+                # kid 得从 initial 走得到，否则它就是死代码（校验会报）。
+                # **边写在 root 自己的 transitions 上** —— 起点不用写。
+                Node("root", page="root", transitions=[Transition("kid")]),
+                Node("kid", page="root/kid"),
+            ),
         )
         scenario = spec.materialize(name="x")
         assert scenario.tree.get("root/kid") is not None
@@ -258,24 +262,39 @@ class TestScenarioSpecAssembles:
                     ),
                 ),
             ),
-            nodes=(Node("root", page="root"), Node("kid", page="root/kid")),
-            edges=(("root", "kid", {}),),
+            nodes=(
+                Node("root", page="root", transitions=[Transition("kid")]),
+                Node("kid", page="root/kid"),
+            ),
         )
         scenario = spec.materialize(name="x")
         assert scenario.tree.effective_roi("root/kid") == Region(110, 70, 30, 40)
 
-    def test_edges_are_connected_after_all_nodes(self):
-        """**边在全部节点加完之后才连** —— 反过来"边指向还没加的节点"会是假错误。"""
+    def test_transitions_are_expanded_when_the_node_is_added(self):
+        """节点的 `transitions` 在 **`add_node` 那一刻**就展开成带 source 的边。
+
+        所以声明侧只写一次（写在节点上），运行期拿到的还是完整的 `Edge` ——
+        引擎、报告、决策那一套完全不用知道声明长什么样。
+        """
         spec = self._spec(
-            nodes=(Node("home", page="home"), Node("next", page="home")),
-            edges=(("home", "next", {}),),
+            nodes=(
+                Node("home", page="home", transitions=[Transition("next", priority=7)]),
+                Node("next", page="home"),
+            ),
         )
         scenario = spec.materialize(name="x")
-        assert scenario.graph.edges
+        (edge,) = scenario.graph.edges
+        assert (edge.source, edge.target) == ("home", "next")
+        assert edge.priority == 7
 
     def test_dangling_edge_reference_is_caught(self):
         """边指向不存在的节点 —— 组装时报（不是跑到那条边才发现）。"""
-        spec = self._spec(edges=(("home", "ghost", {}),))
+        spec = self._spec(
+            nodes=(
+                Node("home", page="home", transitions=[Transition("ghost")]),
+                Node("other", page="home"),
+            ),
+        )
         with pytest.raises(FlowError, match="ghost"):
             spec.materialize(name="x")
 
@@ -330,7 +349,6 @@ class TestScenarioSpecAssembles:
             # **每个记录信息的状态都要有节点认领**（另一条规矩，和声明顺序无关）。
             # 分类节点不需要 —— 它不记录信息。
             nodes=(Node("kid", page="root/kid"),),
-            edges=(),
             initial="kid",
         )
         scenario = spec.materialize(name="x")

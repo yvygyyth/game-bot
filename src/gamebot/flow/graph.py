@@ -44,7 +44,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Union
 
@@ -70,6 +70,7 @@ __all__ = [
     "GraphCursor",
     "Node",
     "NodeId",
+    "Transition",
 ]
 
 NodeId = str
@@ -93,6 +94,73 @@ class EdgeKind(StrEnum):
 
     TERMINAL = "terminal"
     """终态：结束流程。"""
+
+
+@dataclass(frozen=True, slots=True)
+class Transition:
+    """**一条出边**，从声明它的那个节点出发。
+
+    这就是"边"在**业务声明**里的样子：起点不用写（它就是"我"），
+    于是原来那个重复彻底消失了 ——
+
+    ```python
+    # 以前：起点、终点、条件里的状态各写一遍（而且容易对不上）
+    ("home", "jingji/before_create",
+     {"condition": on_page("home/jingji/before_create"), ...}),
+
+    # 现在：写在 home 节点上，`to` 和 `when` 不再各说一遍
+    Node("home", page="home/lobby", transitions=[
+        Transition("jingji/before_create", when=on_page("home/jingji/before_create"),
+                   priority=10, label="竞技场出现（建队前）"),
+    ])
+    ```
+
+    ## 和 :class:`Edge` 的关系
+
+    :class:`Edge` 就是 ``Transition`` **加上 ``source``** —— 它继承这个类，
+    字段一个都不重复。运行期的图和报告都用 ``Edge``（那里确实需要知道起点）。
+
+    :param to: 终点节点 id。
+    :param when: 守卫条件。``None`` = 无条件（只要在上面的状态就直接走）。
+        优先用 ``Query``；需要复杂逻辑时用 ``Callable[[RunContext], bool]``。
+    :param priority: 数字大的先判断。多条边同时成立时靠它定胜负 ——
+        **不要靠列表顺序**，那样挪一行就会静默改变行为。
+    :param label: 人类可读说明，会写进日志和报告。
+    :param cooldown: 触发后多少秒内不允许再次触发。防止识别抖动导致来回横跳。
+    :param max_times: 一轮运行里最多触发几次；``0`` = 不限。用于"重试 3 次就放弃"。
+    :param kind: 转移类型，见 :class:`EdgeKind`。
+    :param meta: 任意附加信息。
+    """
+
+    to: NodeId
+    when: EdgeCondition | None = None
+    priority: int = 0
+    label: str = ""
+    cooldown: float = 0.0
+    max_times: int = 0
+    kind: EdgeKind = EdgeKind.NORMAL
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """**构造即校验**：只依赖自己字段的规则在这儿报。
+
+        剩下的是跨对象的（``to`` 指向的节点存不存在），留在 :meth:`Graph.validate`。
+
+        :raises FlowError: 任一条件不满足。
+        """
+        if not self.to or not self.to.strip():
+            raise FlowError("转移的 to 不能为空")
+        if self.cooldown < 0:
+            raise FlowError(f"转移 {self.to!r} 的 cooldown 不能为负")
+        if self.max_times < 0:
+            raise FlowError(f"转移 {self.to!r} 的 max_times 不能为负（0 = 不限）")
+
+    @property
+    def has_condition(self) -> bool:
+        return self.when is not None
+
+    def __repr__(self) -> str:
+        return f"Transition({self.to!r}, priority={self.priority})"
 
 
 # --------------------------------------------------------------------------- #
@@ -141,6 +209,19 @@ class Node:
     on_timeout: NodeId = ""
     description: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+
+    transitions: list[Transition] = field(default_factory=list)
+    """从这个节点出发的转移。**边写在这里，不写在一张单独的边上表里。**
+
+    这样"一条边"只有一个出处：起点是"我"，终点和条件都在这一个对象里，
+    不可能出现"边表里的起点和节点对不上"这种错。
+
+    ``Graph.add_node()`` 会把它们展开成 :class:`Edge`（补上 ``source``），
+    所以运行期那一套（决策、报告、校验）完全不用改。
+
+    同一个目标的多条转移是允许的（比如"成功走 A、失败走 B"），
+    它们靠 ``priority`` 和条件区分。
+    """
 
     def __post_init__(self) -> None:
         """**构造即校验**：只依赖自己字段的规则在这儿报（理由同 ``Page._validate``）。
@@ -195,61 +276,95 @@ class Node:
 # 边
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True, slots=True)
-class Edge:
-    """一条转移。
+class Edge(Transition):
+    """一条转移，**带起点** —— 运行期和报告里用的形态。
+
+    就是 :class:`Transition` 加上 ``source``，字段一个都没重复。
+    业务代码写 :class:`Transition`（写在节点上），框架展开成这个。
 
     :param source: 起点节点 id。
-    :param target: 终点节点 id。
-    :param condition: 守卫条件。``None`` = 无条件（只要在上面的状态就直接走）。
-        优先用 ``Query``；需要复杂逻辑时用 ``Callable[[RunContext], bool]``。
-    :param priority: 数字大的先判断。多条边同时成立时靠它定胜负 ——
-        **不要靠列表顺序**，那样在 YAML 里挪一行就会静默改变行为。
-    :param label: 人类可读说明，会写进日志和报告。
-    :param cooldown: 该边触发后多少秒内不允许再次触发。防止识别抖动导致来回横跳。
-    :param max_times: 一轮运行里最多触发几次；``0`` = 不限。用于"重试 3 次就放弃"。
-    :param kind: 边类型，见 :class:`EdgeKind`。
-    :param meta: 任意附加信息。
     """
 
-    source: NodeId
-    target: NodeId
-    condition: EdgeCondition | None = None
-    priority: int = 0
-    label: str = ""
-    cooldown: float = 0.0
-    max_times: int = 0
-    kind: EdgeKind = EdgeKind.NORMAL
-    meta: dict[str, Any] = field(default_factory=dict)
+    source: NodeId = field(default="", init=False)
+    """起点节点 id。
+
+    ``init=False`` 因为构造器是下面手写的那一个（它要同时收 ``to``/``target``
+    两套名字，field 顺序满足不了那个）。
+    """
+
+    def __init__(
+        self,
+        source: NodeId,
+        to: NodeId | None = None,
+        *,
+        target: NodeId | None = None,
+        when: EdgeCondition | None = None,
+        condition: EdgeCondition | None = None,
+        priority: int = 0,
+        label: str = "",
+        cooldown: float = 0.0,
+        max_times: int = 0,
+        kind: EdgeKind = EdgeKind.NORMAL,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """两套名字都收。
+
+        * ``Edge("a", "b")`` / ``Edge(source="a", target="b")`` —— **运行期**的叫法
+          （引擎、报告、决策都写 ``target`` / ``condition``，那是"边的终点"）；
+        * ``Edge("a", to="b", when=...)`` —— **声明侧**的叫法，和 :class:`Transition`
+          一致（写在节点上时说"从我这走到哪"更顺口）。
+
+        两种都能用是刻意的：改名的代价要落到几十处调用点上，而这两个名字各自在
+        自己的语境里都说得通 —— 与其统一成其中一个，不如让构造器都收。
+        字段本身只有一份（``to`` / ``when``），别名是只读属性。
+        """
+        if to is not None and target is not None and to != target:
+            raise FlowError(f"Edge 的 to 和 target 不一致: {to!r} vs {target!r}")
+        resolved_to = to if to is not None else target
+        if resolved_to is None:
+            raise FlowError("Edge 需要终点：位置参数 to，或者关键字 target")
+
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "to", resolved_to)
+        object.__setattr__(self, "when", when if when is not None else condition)
+        object.__setattr__(self, "priority", priority)
+        object.__setattr__(self, "label", label)
+        object.__setattr__(self, "cooldown", cooldown)
+        object.__setattr__(self, "max_times", max_times)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "meta", dict(meta or {}))
+        self.__post_init__()
 
     def __post_init__(self) -> None:
-        """**构造即校验**：只依赖自己字段的规则在这儿报。
-
-        剩下的是跨对象的（``source`` / ``target`` 指向的节点存不存在），
-        留在 :meth:`Graph.validate`。
-
-        :raises FlowError: 任一条件不满足。
-        """
+        # 先校验共有的（to / cooldown / max_times），再补起点这一条
+        Transition.__post_init__(self)
         if not self.source or not self.source.strip():
             raise FlowError("边的 source 不能为空")
-        if not self.target or not self.target.strip():
-            raise FlowError("边的 target 不能为空")
-        if self.cooldown < 0:
-            raise FlowError(f"边 {self.display} 的 cooldown 不能为负")
-        if self.max_times < 0:
-            raise FlowError(f"边 {self.display} 的 max_times 不能为负（0 = 不限）")
+
+    @property
+    def target(self) -> NodeId:
+        """``to`` 的别名。
+
+        运行期那一套（引擎、报告、决策）一直叫它 ``target`` —— 那是"边的终点"，
+        从 ``Edge`` 的角度看确实该叫 target。声明侧叫 ``to`` 更顺口
+        （"从我这走到哪"）。两个名字指的是同一个字段，保留别名的代价
+        比把几十处调用点改一遍小得多。
+        """
+        return self.to
+
+    @property
+    def condition(self) -> EdgeCondition | None:
+        """``when`` 的别名，理由同 :attr:`target`（引擎那边叫它 ``condition``）。"""
+        return self.when
 
     @property
     def display(self) -> str:
-        return self.label or f"{self.source} -> {self.target}"
-
-    @property
-    def has_condition(self) -> bool:
-        return self.condition is not None
+        return self.label or f"{self.source} -> {self.to}"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
-            "target": self.target,
+            "target": self.to,
             "priority": self.priority,
             "kind": self.kind.value,
             "label": self.label,
@@ -372,11 +487,19 @@ class Graph:
     # 构建
     # ------------------------------------------------------------------ #
     def add_node(self, node: Node) -> Node:
+        """加一个节点，**并就地展开它声明的出边**。
+
+        节点上的 :attr:`Node.transitions` 是"边的声明形态"（起点就是它自己），
+        这里补上 ``source`` 变成运行期用的 :class:`Edge`。
+        所以业务层只写 ``Node(..., transitions=[...])``，不用再维护一张边表。
+        """
         if node.id in self.nodes:
             raise FlowError(f"节点 id 重复: {node.id!r}")
         self.nodes[node.id] = node
         if not self.initial:
             self.initial = node.id
+        for transition in node.transitions:
+            self.add_edge(Edge(source=node.id, **asdict(transition)))
         return node
 
     def add_edge(self, edge: Edge) -> Edge:
