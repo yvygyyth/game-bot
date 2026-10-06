@@ -162,23 +162,29 @@ class TestWindowSelectionRefresh:
         fake = [_Window(t) for t in titles]
         monkeypatch.setattr(controls_mod, "_list_windows", lambda keyword="": fake)
 
-    def test_phantom_selection_is_cleared_on_refresh(self, qt_app, monkeypatch, ui) -> None:
+    def test_phantom_selection_is_kept_and_flagged(self, qt_app, monkeypatch, ui) -> None:
+        """选过的窗口刷新后不见了：**保留选择**，但坐标栏要说清"现在找不到它"。
+
+        曾经的错做法是"不在列表里就清空" —— 结果是用户明明选好了，
+        点一下刷新就被抹掉、还得重选一遍（实测被抱怨过）。
+
+        窗口标题本来就会变（浏览器换标签页、最小化），所以"刷新后原来的选项
+        不见了"是常态，不是异常。真正的把关留在「开始」那一刻。
+        """
         main, _ = ui
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
         controls.refresh_windows()
-        assert controls.window.count() == 2
 
-        # 用户手打了一个不存在的标题（可编辑下拉框允许这么做）
-        controls.window.setCurrentText("根本不存在-zzz")
+        controls.window.setCurrentText("pages.py - game-bot - Cursor  @ 2560x1392")
         controls.refresh_windows()
 
-        assert controls.window.currentText() == "", (
-            "不在列表里的选择必须被清空 —— 否则就是'显示 A 实际选中 B'那个假状态"
+        assert controls.window.currentText().startswith("pages.py"), "选择不该被抹掉"
+        assert "找不到" in controls.coords.text(), (
+            f"要让人看出来现在抓不到它，实际坐标栏是 {controls.coords.text()!r}"
         )
-        assert controls.window.currentIndex() == -1
 
-    def test_user_can_select_again_after_the_phantom(self, qt_app, monkeypatch, ui) -> None:
+    def test_user_can_select_something_else_afterwards(self, qt_app, monkeypatch, ui) -> None:
         main, _ = ui
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
@@ -186,8 +192,72 @@ class TestWindowSelectionRefresh:
         controls.refresh_windows()
 
         controls.window.setCurrentIndex(1)
-        assert controls.window_title == "窗口乙", "清空之后必须还能正常选"
+        assert controls.window_title == "窗口乙", "保留选择之后必须还能正常改选"
         assert "客户区" in controls.coords.text()
+
+    def test_clicking_detect_does_not_empty_the_list(self, qt_app, monkeypatch, ui) -> None:
+        """**点「重新检测」不能把列表清空。**
+
+        ## 这是个静默的参数事故（实测踩到）
+
+        ``QPushButton.clicked`` 会传一个 ``checked=False``，而
+        ``refresh_windows(self, keyword="")`` 正好有第二个位置参数 ——
+        于是那个 ``False`` 被当成**窗口标题过滤关键字**，
+        ``_list_windows(False)`` 过滤出零个窗口，下拉框被清空。
+
+        表现："点了重新检测，列表空了、再点也没反应"，**没有任何报错**。
+
+        修法是两头都堵：调用方用 ``lambda *_: ...()`` 吃掉信号参数，
+        被调方把 ``keyword`` 改成位置限定参数并用 ``*noise`` 吞多余实参。
+        """
+        main, _ = ui
+        controls = main.controls
+        self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
+        controls.refresh_windows()
+        assert controls.window.count() == 2
+
+        controls.detect.click()      # 和用户点按钮走同一条路
+        qt_app.processEvents()
+
+        assert controls.window.count() == 2, (
+            "点重新检测把列表清空了 —— 多半是信号带的 checked 被当成了过滤关键字"
+        )
+
+    def test_refresh_ignores_a_non_string_keyword(self, qt_app, monkeypatch, ui) -> None:
+        """直接传个非字符串进去（模拟接错信号）也不该静默清空列表。"""
+        main, _ = ui
+        controls = main.controls
+        self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
+
+        controls.refresh_windows(False)  # type: ignore[arg-type]
+
+        assert controls.window.count() == 2
+
+    def test_keyword_filter_still_works(self, qt_app, monkeypatch, ui) -> None:
+        """防噪声不能把**正常**的过滤功能弄坏。"""
+        main, _ = ui
+        controls = main.controls
+
+        class _Region:
+            x = y = 0
+            w, h = 640, 360
+
+        class _Window:
+            region = _Region()
+
+            def __init__(self, title: str) -> None:
+                self.title = title
+
+        windows = [_Window("甲窗口"), _Window("乙窗口")]
+        monkeypatch.setattr(
+            controls_mod,
+            "_list_windows",
+            lambda keyword="": [w for w in windows if not keyword or keyword in w.title],
+        )
+
+        titles = controls.refresh_windows("甲")
+
+        assert len(titles) == 1 and titles[0].startswith("甲窗口")
 
     def test_existing_selection_survives_a_refresh(self, qt_app, monkeypatch, ui) -> None:
         """窗口还在时，刷新不该把用户的选择弄丢。"""
@@ -202,10 +272,19 @@ class TestWindowSelectionRefresh:
         assert controls.window_title == "窗口乙", "刷新把还存在的选择弄丢了"
 
     def test_refresh_does_not_auto_select_the_first(self, qt_app, monkeypatch, ui) -> None:
-        """没选过就保持没选 —— 自动选中会被下游当成"用户选了它"。"""
+        """没选过就保持没选 —— 自动选中会被下游当成"用户选了它"。
+
+        注意：窗口构造时已经刷过一次并选中了第一项，所以这里**显式清空**
+        再验（第一次的选中是 `MainWindow.__init__` 那条路干的，不是这个方法）。
+        """
         main, _ = ui
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
+        # 注意：``setCurrentText("")`` 在可编辑下拉框上**不生效**（文本空了、
+        # 索引还在），所以这里用 setCurrentIndex(-1) 真正置空
+        controls.window.setCurrentIndex(-1)
+        controls.window.setEditText("")
+
         controls.refresh_windows()
 
         assert controls.window.currentText() == ""

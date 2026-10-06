@@ -54,6 +54,11 @@ _SIZE_SUFFIX = "  @ "
 #: 软件没选时坐标栏的占位文字（说清"现在按什么抓"，别让人以为坏了）
 _NO_WINDOW = "（没选软件 —— 按配置文件抓）"
 
+#: 选过、但**现在枚举不到**它时的提示。窗口标题是会变的（浏览器换标签页、
+#: 最小化），这时**保留用户的选择**，但必须让人看出来"现在抓不到它" ——
+#: 否则开始之后的报错会显得莫名其妙。
+_MISSING_WINDOW = "（选的那个现在找不到 —— 标题变了？窗口关了？）"
+
 
 class ControlsBar(QWidget):
     """顶部控制栏：三步顺序 + 动作按钮。"""
@@ -75,6 +80,8 @@ class ControlsBar(QWidget):
         self._has_script = False
         #: 现在在不在跑。note_runnable 运行中不生效，靠它判断
         self._running = False
+        #: 上次刷新时原来选的窗口不在列表里（只用于日志/提示）
+        self._previous_missing = False
         self._hints: dict[str, str] = {}
 
         # ---- 第一步：选软件（这一步就把坐标定下来） ----
@@ -88,7 +95,16 @@ class ControlsBar(QWidget):
         self.window.currentTextChanged.connect(self._on_window_changed)
 
         self.detect = QPushButton("重新检测", self)
-        self.detect.clicked.connect(self.refresh_windows)
+        # **必须吃掉 ``clicked`` 带的那个 ``checked`` 参数**（`lambda` 里那两个
+        # 下划线就是干这个的）。
+        #
+        # 原来直接接 ``self.refresh_windows``：``QPushButton.clicked`` 会传一个
+        # ``checked=False``，而 ``refresh_windows(self, keyword="")`` 正好有第二个
+        # 位置参数 —— 于是那个 ``False`` 被当成**窗口标题过滤关键字**，
+        # ``_list_windows(False)`` 过滤出零个窗口，**下拉框被清空**。
+        #
+        # 表现："点了重新检测，列表空了、再点也没反应。" 没有任何报错。
+        self.detect.clicked.connect(lambda *_: self.refresh_windows())
 
         self.coords = QLabel(_NO_WINDOW, self)
         self.coords.setStyleSheet("color:#8ab4f8; font-family:Consolas,monospace;")
@@ -219,28 +235,54 @@ class ControlsBar(QWidget):
             self.node.setToolTip("从哪个节点开始跑（FlowEngine(start_node=...) 已支持）")
         self._on_node_changed()
 
-    def refresh_windows(self, keyword: str = "") -> list[str]:
+    def refresh_windows(self, keyword: str = "", /, *noise: object) -> list[str]:
         """枚举可见软件窗口填进下拉框。返回标题列表（枚举不了时返回空）。
 
         ``WindowInfo.region`` **已经是客户区坐标**（后端用 ``GetClientRect`` +
         ``ClientToScreen`` 算的），所以这里拿到的不只是"窗口有多大"，
         而是"它在屏幕上的哪一块" —— 那正是后面所有坐标换算的原点。
 
-        **填完不自动选中第一项**：自动选中会被下游当成"用户选了它"，
-        于是预览立刻切去抓那个窗口 —— 而你刚要看的可能恰恰是整屏。
-        留空，等用户真的点一下。
+        ``keyword`` 是给"按标题过滤"用的（现在没有界面入口，留给以后加搜索框）。
 
-        ## 原来选中的那个窗口已经不在了怎么办（踩过的坑）
+        ## 两个防噪声的写法，都是踩出来的
 
-        下拉框是**可编辑**的（能手打标题关键字），所以
-        ``setCurrentText(一个不在列表里的标题)`` **不会报错**：它把显示的
-        文字改掉，但 ``currentIndex`` 还停在旧位置 —— 于是下拉框进入
-        "**显示 A、实际选中 B**"的状态。用户看到的是"我明明选了/输入了，
-        列表里却没这一项，而且改不回去"。
+        * ``/`` 把它变成**位置限定参数**：调用方写不了 ``refresh_windows(keyword=x)``，
+          于是"有人把这个方法接到信号上"时不会静默变成关键字调用；
+        * ``*noise`` **吞掉多余的实参**。Qt 的信号经常带参数
+          （``clicked(bool)`` / ``triggered(bool)``），接错一次就可能把一个
+          ``False`` 当成过滤关键字。
 
-        所以这里先查"原来那个还在不在"，**不在就明确清空** ——
-        宁可让用户重选一次，也不要留一个说不清的状态。
+          实测踩到：``self.detect.clicked.connect(self.refresh_windows)`` ——
+          ``clicked`` 传 ``checked=False``，正好落进这个 ``keyword``，
+          ``_list_windows(False)`` 过滤出**零个窗口**，下拉框被清空。
+          表现是"点了重新检测，列表空了、再点也没反应"，而且**没有任何报错**。
+
+        **填完不自动选中第一项**：``QComboBox.addItems`` 自己会选中第 0 项，
+        所以这里**显式撤掉**（``setCurrentIndex(-1)``）。理由：静默选中第一个
+        窗口，和你"没选软件就按配置抓"的意图是矛盾的，而且下游会把这次选中
+        当成"用户选了它"。宁可留空、让用户点一下。
+
+        ## 原来选中的那个窗口已经不在了怎么办
+
+        下拉框是**可编辑**的（能手打标题），而窗口标题是**会变**的 ——
+        浏览器/编辑器换个标签页、最小化，标题就不是原来那个了。
+        所以"刷新之后原来的选项不见了"是**常态**，不是异常。
+
+        **曾经的错做法**：把它清空。结果是用户明明选好了、点一下刷新就被抹掉，
+        还得重选一遍（实测被抱怨过"点了重新检测，选择就没了"）。
+
+        **现在**：保留用户的选择（不清），但把"现在找不到它"**显示在坐标栏里**
+        —— 那是这个控件本来就用来报告"这个窗口现在是什么状态"的地方。
+        真正的把关留在「开始」那一刻（:meth:`MainWindow._target_window_ok`），
+        那时才有必要拦住。
         """
+        if not isinstance(keyword, str):
+            # 传进来的不是标题（多半是某个信号的 bool）—— 明确忽略并留证据，
+            # 而不是拿它去过滤出一个空列表
+            log.warning("refresh_windows 收到非字符串的 keyword=%r，已忽略", keyword)
+            keyword = ""
+
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             infos = _list_windows(keyword)
@@ -253,15 +295,17 @@ class ControlsBar(QWidget):
         self.window.blockSignals(True)
         self.window.clear()
         self.window.addItems(titles)
+        self.window.setCurrentIndex(-1)  # Qt 会在 addItems 时自动选中第一项，撤掉
+        if previous:
+            # **无论如何都保留用户的选择**（见上面那段说明）：在列表里就选中它，
+            # 不在列表里就把它作为"当前文本"留住 —— 可编辑下拉框允许这样。
+            # 曾经写成"不在就清空"，结果是"点一下刷新，选好的窗口就没了"。
+            self.window.setCurrentText(previous)
         self.window.blockSignals(False)
 
-        if previous in titles:
-            self.window.setCurrentText(previous)
-        elif previous:
-            # 原来选的那个不在了 —— 明确清空，别留下"显示 A 实际选中 B"
-            self.window.setCurrentIndex(-1)
-            self.window.setEditText("")
-            log.info("原来选中的窗口 %r 已经不在列表里，选择已清空", previous)
+        self._previous_missing = bool(previous) and previous not in titles
+        if self._previous_missing:
+            log.info("原来选中的窗口 %r 现在不在枚举结果里（标题变了或最小化了）", previous)
         self.detect.setToolTip(self._detect_tip())
         self._refresh_coords()
         return titles
@@ -271,9 +315,16 @@ class ControlsBar(QWidget):
 
         显示的是 ``x=… y=… w=… h=…``，也就是 ``Frame`` 收的**源坐标**原点的来源。
         没选或枚举不到时说明"现在按配置抓"，而不是显示一个猜的值。
+
+        **选过、但现在找不到它**时要说清这一点 —— 窗口标题是会变的
+        （浏览器换个标签页、窗口最小化），这时选择保留着（不让用户白选一次），
+        但必须让人看出来"现在抓不到它"，否则开始之后的报错会显得莫名其妙。
         """
         info = self.current_window_info
         if info is None:
+            if self.window_title:
+                self.coords.setText(_MISSING_WINDOW)
+                return
             self.coords.setText(_NO_WINDOW)
             return
         region = info.region
