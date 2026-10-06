@@ -267,11 +267,26 @@ class TestGraphValidate:
             graph.validate()
         assert "走不到" in str(excinfo.value)
 
-    def test_negative_cooldown_raises(self) -> None:
-        graph = small_graph()
-        graph.edges[0] = Edge("a", "b", cooldown=-1.0)
-        with pytest.raises(FlowError):
-            graph.validate()
+    def test_negative_cooldown_raises_at_construction(self) -> None:
+        """负的 cooldown 在 **``Edge(...)`` 那一行**就报，不用等 ``validate()``。"""
+        with pytest.raises(FlowError, match="cooldown"):
+            Edge("a", "b", cooldown=-1.0)
+
+    def test_negative_max_times_raises_at_construction(self) -> None:
+        with pytest.raises(FlowError, match="max_times"):
+            Edge("a", "b", max_times=-1)
+
+    def test_empty_edge_endpoint_raises_at_construction(self) -> None:
+        with pytest.raises(FlowError, match="source"):
+            Edge("", "b")
+
+    def test_negative_node_values_raise_at_construction(self) -> None:
+        with pytest.raises(FlowError, match="cooldown"):
+            Node("a", cooldown=-1.0)
+        with pytest.raises(FlowError, match="max_visits"):
+            Node("a", max_visits=-1)
+        with pytest.raises(FlowError, match="id 不能为空"):
+            Node("")
 
     def test_on_timeout_must_exist(self) -> None:
         graph = small_graph()

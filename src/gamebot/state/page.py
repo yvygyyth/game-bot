@@ -220,6 +220,37 @@ class Page:
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "description", description)
         object.__setattr__(self, "meta", dict(meta or {}))
+        self._validate()
+
+    def _validate(self) -> None:
+        """**构造即校验**：不合法的页面根本造不出来。
+
+        ## 为什么在这儿，而不是一个单独的 ``validate()``
+
+        这些规则只依赖这一个对象自己的字段（id 非空、帧数 >= 1、阈值在 (0,1]、
+        roi 非空）。放构造期有两个好处：
+
+        * **报错位置就是写错的那一行** —— ``Page(...)`` 那行直接抛，而不是等
+          整个树建完、再调一次校验才发现"某一页的阈值不对"；
+        * 非法对象**根本不存在**，下游不用再怀疑"手上这个 Page 有没有问题"。
+
+        跨对象的规则（子页面 roi 落在父页面内、分类节点必须有子页面、节点认领
+        状态）留在 ``PageTree.validate()`` / ``Graph.validate()`` /
+        ``validate_binding()`` —— 那些**原理上**要看到全部数据才能判断。
+
+        :raises StateError: 任一条件不满足，message 里带页面 id 便于定位。
+        """
+        label = repr(self.id) if self.id else "<空 id>"
+        if not self.id or not self.id.strip():
+            raise StateError("页面的 id 不能为空")
+        if self.min_stable_frames < 1:
+            raise StateError(f"页面 {label} 的 min_stable_frames 必须 >= 1")
+        if not 0.0 < self.confidence <= 1.0:
+            raise StateError(f"页面 {label} 的 confidence 必须在 (0, 1] 之间")
+        if self.roi is not None and self.roi.is_empty:
+            raise StateError(f"页面 {label} 的 roi 是空区域: {self.roi.to_tuple()}")
+        if self.timeout is not None and self.timeout <= 0:
+            raise StateError(f"页面 {label} 的 timeout 必须 > 0 或留空")
 
     @property
     def display(self) -> str:
@@ -372,12 +403,26 @@ class PageTree:
         """加一个页面。
 
         :param parent: 父页面 id；None 表示顶层。
-        :raises StateError: id 重复，或父页面不存在。
+        :raises StateError: id 重复、父页面不存在、或**子页面的 roi 伸出父页面**。
+
+        ## 为什么 roi 越界在这里报，而不是等 ``validate()``
+
+        "子页面的 roi 必须落在父页面的有效 roi 内"是**跨两个对象**的规则，
+        所以只能等到知道父页面时才能判 —— 而那一刻就是 ``add()``。
+        在这里报，写错的那一行立刻炸；等 ``validate()`` 的话，报错点离写错的地方
+        隔了整个树的构建过程。
+
+        这条规则的由来：roi 是**整棵子树**的搜索范围（不只是这一页自己的）。
+        子页面伸到父页面框外，就意味着它会在"父页面根本不存在"的地方去找自己的
+        特征 —— 那正是"偶尔认错页面"这类最难查的 bug 的温床。
         """
         if page.id in self._pages:
             raise StateError(f"页面 id 重复: {page.id!r}")
         if parent is not None and parent not in self._pages:
             raise StateError(f"页面 {page.id!r} 的父页面不存在: {parent!r}")
+
+        if parent is not None and page.roi is not None:
+            self._check_roi_within_parent(page, self._pages[parent])
 
         self._pages[page.id] = page
         self._parent[page.id] = parent
@@ -388,6 +433,35 @@ class PageTree:
         else:
             self._children[parent].append(page.id)
         return page
+
+    def _check_roi_within_parent(self, page: Page, parent: Page) -> None:
+        """子页面的 roi 必须落在父页面的**有效 roi** 内。
+
+        ## 坐标系（这里踩过一次）
+
+        ``effective_roi`` 要沿祖先链叠，所以它是树的方法（不是 Page 的属性）。
+        它叠出来的是**绝对**（相对整帧）坐标；而 ``page.roi`` 是**相对父页面
+        原点**的。两者不能直接比大小 —— 那样一个合法的 ``Region(10, 20, ...)``
+        会被判成"越出父页面 (1180, 620, ...)"。
+
+        所以先把子的 roi 平移到父坐标系里（加上父 roI 的原点），再比。
+        """
+        outer = self.effective_roi(parent.id)
+        if outer is None or page.roi is None:
+            return
+        inner = page.roi.offset(outer.x, outer.y)
+        if (
+            inner.x < outer.x
+            or inner.y < outer.y
+            or inner.right > outer.right
+            or inner.bottom > outer.bottom
+        ):
+            raise StateError(
+                f"页面 {page.id!r} 的 roi {inner.to_tuple()} 超出了父页面 "
+                f"{parent.id!r} 的有效 roi {outer.to_tuple()} —— "
+                "roi 是整棵子树的搜索范围，伸到父页面框外会在'父页面不存在'的"
+                "地方去找自己的特征（表现为偶尔认错页面）"
+            )
 
     def add_many(self, pages: Iterable[tuple[Page, PageId | None]]) -> None:
         """批量加。**按父先子后的顺序**给（loader 解析嵌套结构时天然满足）。"""

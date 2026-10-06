@@ -319,33 +319,62 @@ class TestPageTreeValidate:
         with pytest.raises(StateError):
             tree.validate()
 
-    def test_bad_confidence_and_stable_frames_raise(self) -> None:
-        tree = PageTree()
-        tree.add(Page("root", queries=(ImageQuery("r.png"),), min_stable_frames=0))
-        with pytest.raises(StateError):
-            tree.validate()
+    def test_bad_stable_frames_raises_at_construction(self) -> None:
+        """``min_stable_frames=0`` 在 **``Page(...)`` 那一行**就报。
 
-    def test_empty_roi_raises(self) -> None:
-        tree = PageTree()
-        tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(0, 0, 0, 10)))
-        with pytest.raises(StateError):
-            tree.validate()
+        原来要等 ``tree.validate()`` —— 报错点离写错的地方隔了整个建树过程。
+        "只依赖自己字段"的规则现在都在构造期（见 ``Page._validate``）。
+        """
+        with pytest.raises(StateError, match="min_stable_frames"):
+            Page("root", queries=(ImageQuery("r.png"),), min_stable_frames=0)
+
+    def test_bad_confidence_raises_at_construction(self) -> None:
+        with pytest.raises(StateError, match="confidence"):
+            Page("root", queries=(ImageQuery("r.png"),), confidence=0.0)
+
+    def test_empty_roi_raises_at_construction(self) -> None:
+        with pytest.raises(StateError, match="空区域"):
+            Page("root", queries=(ImageQuery("r.png"),), roi=Region(0, 0, 0, 10))
+
+    def test_empty_id_raises_at_construction(self) -> None:
+        with pytest.raises(StateError, match="id 不能为空"):
+            Page("")
 
     def test_from_nested_is_a_stub(self) -> None:
         with pytest.raises(NotImplementedError):
             PageTree.from_nested({})
 
-    def test_child_roi_outside_parent_raises(self) -> None:
-        """roi 是**整棵子树**的搜索范围，伸出父页面框外就等于在别处瞎找。"""
+    def test_child_roi_outside_parent_raises_at_add(self) -> None:
+        """roi 是**整棵子树**的搜索范围，伸出父页面框外就等于在别处瞎找。
+
+        这条是**跨两个对象**的，所以只能等到知道父页面时才能判 ——
+        那一刻就是 ``add()``。原来要等 ``validate()``，现在写错的那一行就炸。
+        """
         tree = PageTree()
         tree.add(Page("root", queries=(ImageQuery("r.png"),), roi=Region(0, 0, 100, 100)))
+        with pytest.raises(StateError, match="超出了父页面"):
+            tree.add(
+                Page("root/kid", queries=(ImageQuery("k.png"),), roi=Region(50, 50, 100, 100)),
+                parent="root",
+            )
+
+    def test_child_roi_is_relative_to_parent_origin(self) -> None:
+        """**相对坐标不能和绝对坐标直接比**（这条测试是为了钉住那次搞混）。
+
+        父页面的有效 roi 是绝对坐标（比如从 (1180, 620) 开始），而子页面的
+        roi 是**相对父页面原点**的。所以子页面写 ``Region(10, 20, 100, 30)``
+        是完全合法的（落在父页面左上角附近），不能因为 "10 < 1180" 就判越界。
+        """
+        tree = build_tree()
         tree.add(
-            Page("root/kid", queries=(ImageQuery("k.png"),), roi=Region(50, 50, 100, 100)),
-            parent="root",
+            Page(
+                "home/qianli/battle/ready/hp",
+                roi=Region(10, 20, 100, 30),
+                queries=(ImageQuery("hp.png"),),
+            ),
+            parent="home/qianli/battle/ready",
         )
-        with pytest.raises(StateError) as excinfo:
-            tree.validate()
-        assert "超出了父页面" in str(excinfo.value)
+        assert tree.effective_roi("home/qianli/battle/ready/hp") == Region(1190, 640, 100, 30)
 
     def test_child_roi_inside_parent_passes(self) -> None:
         tree = PageTree()

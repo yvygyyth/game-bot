@@ -142,6 +142,23 @@ class Node:
     description: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """**构造即校验**：只依赖自己字段的规则在这儿报（理由同 ``Page._validate``）。
+
+        剩下的（``on_timeout`` 指向的节点存不存在、从 initial 走不走得到）
+        是跨对象的，留在 :meth:`Graph.validate`。
+
+        :raises FlowError: 任一条件不满足。
+        """
+        if not self.id or not self.id.strip():
+            raise FlowError("节点的 id 不能为空")
+        if self.max_visits < 0:
+            raise FlowError(f"节点 {self.id!r} 的 max_visits 不能为负（0 = 不限）")
+        if self.cooldown < 0:
+            raise FlowError(f"节点 {self.id!r} 的 cooldown 不能为负")
+        if self.timeout is not None and self.timeout <= 0:
+            raise FlowError(f"节点 {self.id!r} 的 timeout 必须 > 0 或留空")
+
     @classmethod
     def of(cls, node_id: NodeId, *steps: Step, **kwargs: Any) -> Node:
         """只做一件事的节点的简写：``Node.of("battle", ClickImageStep("skill.png"))``。"""
@@ -203,6 +220,23 @@ class Edge:
     max_times: int = 0
     kind: EdgeKind = EdgeKind.NORMAL
     meta: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """**构造即校验**：只依赖自己字段的规则在这儿报。
+
+        剩下的是跨对象的（``source`` / ``target`` 指向的节点存不存在），
+        留在 :meth:`Graph.validate`。
+
+        :raises FlowError: 任一条件不满足。
+        """
+        if not self.source or not self.source.strip():
+            raise FlowError("边的 source 不能为空")
+        if not self.target or not self.target.strip():
+            raise FlowError("边的 target 不能为空")
+        if self.cooldown < 0:
+            raise FlowError(f"边 {self.display} 的 cooldown 不能为负")
+        if self.max_times < 0:
+            raise FlowError(f"边 {self.display} 的 max_times 不能为负（0 = 不限）")
 
     @property
     def display(self) -> str:
