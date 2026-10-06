@@ -224,6 +224,15 @@ class _FakeWindow:
 class TestTargetWindowPreflight:
     """开跑前确认"要抓的那个窗口**现在**还在"。
 
+    ## 这一组里有个陷阱
+
+    预检会**弹模态框**，而测试要转事件循环（跨线程信号）—— 模态框一弹就真
+    等人点，整套挂在那儿，表现只是"慢"，不像失败。
+
+    所以每条走到"窗口不在"的用例都**必须**挡住 ``_ask_re_detect``。
+    产品里那个方法是模态框，测试里换成返回值即可（这也是它单独成为一个
+    方法而不是内联的原因）。
+
     ## 为什么值得单独一组用例
 
     窗口下拉框是**枚举当时**的快照。选完之后那个窗口关掉了的话，原来那条路
@@ -249,25 +258,43 @@ class TestTargetWindowPreflight:
         )
         return win_mod
 
+    @pytest.fixture(autouse=True)
+    def _never_show_a_real_dialog(self, ui, monkeypatch):
+        """**默认挡住模态框。**
+
+        预检走到"窗口不在"就会弹框，而测试要转事件循环 —— 模态框一弹就真等人点，
+        整套挂在那儿。表现只是"慢"（实测一个用例让全套 4.6s -> 59s），
+        不像失败，所以很容易漏。
+
+        默认答案给 ``False``（什么都不做）。要验"点了 Yes 会怎样"的用例
+        自己再覆盖一次 :meth:`_ask_re_detect`。
+        """
+        main, _entry, _ = ui
+        monkeypatch.setattr(main, "_ask_re_detect", lambda wanted, source: False)
+
     def test_missing_window_is_caught_before_anything_else(
         self, qt_app, ui, monkeypatch
     ) -> None:
-        """窗口不在时**当场拦下**，而且引擎不许起来。"""
+        """窗口不在时**当场拦下**，而且不许走"枚举不到"那条分支。"""
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
         shown: list[tuple[str, str]] = []
         monkeypatch.setattr(
             main, "_info_box", lambda title, body: shown.append((title, body))
         )
+        asked: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            main, "_ask_re_detect", lambda wanted, source: asked.append((wanted, source)) or False
+        )
         main.controls.window.setCurrentText("README.md - game-bot - Cursor")
 
         assert main._target_window_ok(entry) is False
         assert shown == [], "枚举得到别的窗口时不该走'枚举不到'那条分支"
+        assert asked and asked[0][0] == "README.md - game-bot - Cursor"
+        assert asked[0][1] == "上面选的软件", "要写清是在找哪个来源的标题"
 
     def test_missing_window_offers_to_redetect(self, qt_app, ui, monkeypatch) -> None:
         """要问一句，而且点了「Yes」就重新枚举。"""
-        from PySide6.QtWidgets import QMessageBox
-
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
         main.controls.window.setCurrentText("已经关掉的窗口")
@@ -276,22 +303,18 @@ class TestTargetWindowPreflight:
         monkeypatch.setattr(
             main.controls, "refresh_windows", lambda keyword="": refreshed.append(True) or []
         )
-        asked: list[str] = []
-
-        def fake_question(parent, title, body, *args, **kwargs):
-            asked.append(body)
-            return QMessageBox.StandardButton.Yes
-
-        monkeypatch.setattr(QMessageBox, "question", staticmethod(fake_question))
+        asked: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            main,
+            "_ask_re_detect",
+            lambda wanted, source: asked.append((wanted, source)) or True,
+        )
 
         assert main._target_window_ok(entry) is False
         assert refreshed == [True], "点了 Yes 应该重新枚举窗口列表"
-        assert "已经关掉的窗口" in asked[0], "提示里要写出到底在找哪个窗口"
-        assert "重新枚举" in asked[0], "要告诉用户下一步做什么"
+        assert asked and asked[0][0] == "已经关掉的窗口", "问的时候要说出在找哪个标题"
 
     def test_declining_does_not_refresh(self, qt_app, ui, monkeypatch) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
         main.controls.window.setCurrentText("关掉的")
@@ -299,11 +322,7 @@ class TestTargetWindowPreflight:
         monkeypatch.setattr(
             main.controls, "refresh_windows", lambda keyword="": refreshed.append(True) or []
         )
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
-        )
+        monkeypatch.setattr(main, "_ask_re_detect", lambda wanted, source: False)
 
         assert main._target_window_ok(entry) is False
         assert refreshed == []
@@ -342,13 +361,9 @@ class TestTargetWindowPreflight:
         self._stub_windows(monkeypatch, ["别的窗口"])
         main.controls.window.setCurrentText("关掉的窗口")
         monkeypatch.setattr(main, "_info_box", lambda title, body: None)
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
-        )
+        # **必须挡掉弹窗**：模态框会阻塞，而测试在转事件循环 —— 忘了这一句
+        # 整套会挂在这儿等人点，表现只是"慢"（实测 4.6s -> 59s），不像失败。
+        monkeypatch.setattr(main, "_ask_re_detect", lambda wanted, source: False)
 
         main._on_start()
 

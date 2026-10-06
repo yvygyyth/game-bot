@@ -425,6 +425,24 @@ class MainWindow(QMainWindow):
             return False
 
         source = "上面选的软件" if chosen else "配置文件里的 window_title"
+        if self._ask_re_detect(wanted, source):
+            self.controls.refresh_windows()
+        return False
+
+    def _ask_re_detect(self, wanted: str, source: str) -> bool:
+        """问"要不要重新枚举窗口列表"。返回用户是否点了 Yes。
+
+        ## 为什么单独一个方法
+
+        模态框会**阻塞**，所以测试必须能换掉它。测试直接 monkeypatch
+        ``QMessageBox.question`` 也能work，但那是**换 Qt 的内部**，
+        Qt 一改签名测试就静默失效；而且只要有一个用例忘了挡，整个套件就会
+        挂在那儿**等人点**（实测踩过：一个用例让全套从 4.6 秒变成 59 秒，
+        而且看起来只是"慢"，不像失败）。
+
+        所以把"问一句"这件事收成一个方法：产品里是模态框，测试里换掉它，
+        两边都只依赖这一个名字。
+        """
         answer = QMessageBox.question(
             self,
             "要操作的窗口不在了",
@@ -436,9 +454,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
-        if answer == QMessageBox.StandardButton.Yes:
-            self.controls.refresh_windows()
-        return False
+        return answer == QMessageBox.StandardButton.Yes
 
     def _on_start(self) -> None:
         """装配 -> 交给工作线程跑。
