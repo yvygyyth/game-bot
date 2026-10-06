@@ -131,6 +131,19 @@ class Session(ABC):
     ``session.sleep()``，**完全不需要知道 Cancelled 这个异常类型存在**。
     """
 
+    dry_run: bool = False
+    """空跑：**动作层**照常被调用，但不下发真实输入（返回成功 + ``dry_run`` 标记）。
+
+    为什么放在 Session 上（而不是 ``RunContext``）：动作函数
+    （:mod:`gamebot.atomic.actions`）只拿得到 ``session``，拿不到 ctx ——
+    而"别真的动游戏"这件事恰恰要在**动作下发那一刻**拦住，
+    不是靠上层判断"这个步骤像不像动作"（那种判断要么靠类型名、要么靠注册表，
+    两条路都要额外维护一份元数据）。
+
+    默认 False。查询类方法（``capture`` / ``find_*``）**照常真跑** ——
+    空跑要验的是"流程走不走得通"，那必须看到真实的识别结果。
+    """
+
     # -- 截图（设计文档 L1 的 1~3 号方法）-------------------------------------
     @abstractmethod
     def capture(self) -> Frame:

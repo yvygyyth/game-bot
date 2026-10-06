@@ -176,6 +176,8 @@ def click_point(
     :return: ``success(value=实际点击的源坐标, logic_point=传入的逻辑坐标)``。
              返回换算后的坐标，方便日志和录屏回放对齐。
     """
+    if (blocked := _dry_run_ok(session, "click_point")) is not None:
+        return blocked
     started = perf_counter()
     source, failure = _to_source(session, point, started)
     if failure is not None:
@@ -203,6 +205,8 @@ def click_image(
              没找到返回 ``not_found``（**不会乱点**，这是安全边界）；
              模板缺失之类的底层错误原样透传 ``error``。
     """
+    if (blocked := _dry_run_ok(session, "click_image")) is not None:
+        return blocked
     started = perf_counter()
     frame = session.capture()
     found = frame.find_image(template, region=region, confidence=confidence)
@@ -248,6 +252,8 @@ def click_logic_point(
 
     :return: ``success(value=换算后的源坐标, logic_point=传入的逻辑坐标)``。
     """
+    if (blocked := _dry_run_ok(session, "click_logic_point")) is not None:
+        return blocked
     started = perf_counter()
     source, failure = _to_source(session, point, started)
     if failure is not None:
@@ -281,6 +287,8 @@ def click_source_point(
     配了 ``logic_size`` 缩放时会二次换算，点偏。这也是它单独存在的原因 ——
     两个坐标系必须有各自的入口，混用是这类脚本最常见的坐标 bug。
     """
+    if (blocked := _dry_run_ok(session, "click_source_point")) is not None:
+        return blocked
     return _click_source(session, point, button=button, clicks=clicks, interval=interval)
 
 
@@ -292,6 +300,8 @@ def click_text(
     confidence: float = 0.8,
 ) -> ActionResult[Point]:
     """查文本并点击。用于"开始游戏""确认"这类按钮，避免为每个按钮截模板图。"""
+    if (blocked := _dry_run_ok(session, "click_text")) is not None:
+        return blocked
     started = perf_counter()
     frame = session.capture()
     found = frame.find_text(text, region=region, lang=lang, confidence=confidence)
@@ -320,11 +330,15 @@ def double_click(
     :param interval: 两次点击之间的间隔。**给太大游戏会认成两次单击**，
         一般 0.05~0.12 之间。
     """
+    if (blocked := _dry_run_ok(session, "double_click")) is not None:
+        return blocked
     return click_point(session, point, clicks=2, interval=interval)
 
 
 def right_click(session: Session, point: Point) -> ActionResult[Point]:
     """右键点击。"""
+    if (blocked := _dry_run_ok(session, "right_click")) is not None:
+        return blocked
     return click_point(session, point, button="right")
 
 
@@ -341,6 +355,8 @@ def move_to(
     :param duration: 移动耗时。**不要总是给 0** —— 很多游戏检测瞬时跳变，
         而且 hover 类 UI 不会触发。
     """
+    if (blocked := _dry_run_ok(session, "move_to")) is not None:
+        return blocked
     started = perf_counter()
     source, failure = _to_source(session, point, started)
     if failure is not None:
@@ -364,6 +380,8 @@ def drag(
 
     :return: ``success(value=(起点源坐标, 终点源坐标))``。
     """
+    if (blocked := _dry_run_ok(session, "drag")) is not None:
+        return blocked
     started = perf_counter()
     source_start, failure = _to_source(session, start, started)
     if failure is not None:
@@ -390,6 +408,8 @@ def drag_image(
     :param target: **逻辑坐标**。而拖拽起点是识图命中点（源坐标）——
         这是刻意的：目标点通常来自配置，起点来自画面。
     """
+    if (blocked := _dry_run_ok(session, "drag_image")) is not None:
+        return blocked
     started = perf_counter()
     frame = session.capture()
     found = frame.find_image(source_template, confidence=confidence)
@@ -432,6 +452,8 @@ def scroll(
     :param point: **逻辑坐标**；先移到该点再滚（很多列表需要指针悬停在上面才响应）。
     :return: ``success(value=实际滚动格数)``。
     """
+    if (blocked := _dry_run_ok(session, "scroll")) is not None:
+        return blocked
     started = perf_counter()
     source: Point | None = None
     if point is not None:
@@ -466,6 +488,8 @@ def type_text(
 
     :return: ``success(value=输入的文本)``。
     """
+    if (blocked := _dry_run_ok(session, "type_text")) is not None:
+        return blocked
     started = perf_counter()
     try:
         session.input.type_text(text, interval=interval)
@@ -488,6 +512,8 @@ def press_key(
         由后端映射到平台键码。自定义映射放 ``config``，不要写死在业务脚本里。
     :return: ``success(value=键名)``。
     """
+    if (blocked := _dry_run_ok(session, "press_key")) is not None:
+        return blocked
     started = perf_counter()
     try:
         session.input.press_key(key, presses=presses, interval=interval)
@@ -506,6 +532,8 @@ def hotkey(session: Session, keys: list[str]) -> ActionResult[list[str]]:
 
     :return: ``success(value=按键列表)``。
     """
+    if (blocked := _dry_run_ok(session, "hotkey")) is not None:
+        return blocked
     started = perf_counter()
     combo = list(keys)
     try:
@@ -523,6 +551,23 @@ def hotkey(session: Session, keys: list[str]) -> ActionResult[list[str]]:
 # --------------------------------------------------------------------------- #
 # 等待
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# 空跑拦截
+# --------------------------------------------------------------------------- #
+def _dry_run_ok(session: Session, what: str, **meta: Any) -> ActionResult[Any] | None:
+    """空跑时**在动作下发那一刻**拦下，返回假装成功；否则返回 None（照常执行）。
+
+    为什么拦在这里（而不是让执行层判断这一步像不像动作）：
+    判断像不像动作要么看类型名、要么维护一张注册表 —— 两条路都要额外一份
+    元数据，而且漏了就会在空跑时真的去点游戏。放在下发那一刻，
+    **拦住是必然的**（所有动作都走这里）。
+
+    `sleep` 不拦：空跑也要能等，否则空跑一遍会把流程跑成完全不同的节奏。
+    """
+    if not getattr(session, "dry_run", False):
+        return None
+    return ActionResult.success(None, message=f"空跑，未执行: {what}", dry_run=True, **meta)
+
 def sleep(seconds: float, session: Session | None = None) -> ActionResult[float]:
     """固定等待。
 

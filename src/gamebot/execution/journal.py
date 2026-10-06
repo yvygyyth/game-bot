@@ -42,7 +42,6 @@ class JournalEntry:
     status: str
     ts: float
     tick: int = 0
-    attempts: int = 1
     elapsed: float = 0.0
     action: dict[str, Any] = field(default_factory=dict)
     frame_path: str = ""
@@ -55,7 +54,6 @@ class JournalEntry:
             "tick": self.tick,
             "step": self.step,
             "status": self.status,
-            "attempts": self.attempts,
             "elapsed": round(self.elapsed, 6),
             "action": self.action,
             "frame": self.frame_path,
@@ -89,8 +87,6 @@ class Journal(ABC):
         # ``action`` 是自己的 key（回放和训练数据要拿它当锚点），
         # 留在 meta 里会变成 meta.action.action 这种两层嵌套。
         meta.pop("action", None)
-        if outcome.skipped:
-            meta["skipped"] = True
         if outcome.children:
             meta["children"] = [c.to_dict() for c in outcome.children]
 
@@ -100,7 +96,6 @@ class Journal(ABC):
                 status=outcome.status,
                 ts=perf_counter(),
                 tick=tick,
-                attempts=outcome.attempts,
                 elapsed=outcome.elapsed,
                 action=dict(outcome.action),
                 frame_path=outcome.frame_path,
@@ -140,7 +135,7 @@ class Journal(ABC):
             target = Path(directory)
             target.mkdir(parents=True, exist_ok=True)
             safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in outcome.step)
-            path = target / f"{prefix}t{tick}_{outcome.attempts}_{safe}.png"
+            path = target / f"{prefix}t{tick}_{safe}.png"
             saved = frame.save(str(path))
             path_text = str(path) if saved.ok else ""
         except OSError:

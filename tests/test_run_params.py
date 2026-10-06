@@ -21,7 +21,6 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
 from gamebot.bootstrap import build_context, build_engine
 from gamebot.config.schema import AppConfig, BackendKind
-from gamebot.execution.step import FunctionStep
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
 from gamebot.state.page import Page, PageTree
@@ -60,9 +59,12 @@ class TestRunParams:
     def test_step_reads_a_param(self):
         """步骤通过 ``ctx.param`` 读入参 —— 这是它存在的理由。"""
         seen: list[object] = []
-        scenario = _scenario(
-            FunctionStep(lambda c: (seen.append(c.param("farm.rounds")), ActionResult.success())[1])
-        )
+
+        def read_param(ctx):
+            seen.append(ctx.param("farm.rounds"))
+            return ActionResult.success()
+
+        scenario = _scenario(read_param)
         ctx = _ctx(scenario, params={"farm.rounds": 5})
         engine = build_engine(ctx.config, ctx, scenario)
         try:
@@ -75,11 +77,12 @@ class TestRunParams:
     def test_default_applies_when_param_absent(self):
         """给了默认值就是"可选参数"。"""
         seen: list[object] = []
-        scenario = _scenario(
-            FunctionStep(
-                lambda c: (seen.append(c.param("farm.rounds", 3)), ActionResult.success())[1]
-            )
-        )
+
+        def read_default(ctx):
+            seen.append(ctx.param("farm.rounds", 3))
+            return ActionResult.success()
+
+        scenario = _scenario(read_default)
         ctx = _ctx(scenario)
         engine = build_engine(ctx.config, ctx, scenario)
         try:
@@ -90,16 +93,19 @@ class TestRunParams:
         assert seen == [3]
 
     def test_engine_params_are_merged_with_context_ones(self):
-        """引擎那儿的参数和上下文里已有的合并，不是覆盖。"""
+        """引擎那儿的参数和上下文里已有的合并，不是覆盖。
+
+        （原来这条用 ``ctx.param("from.ctx", ctx.param("from.engine"))``
+        把两件事塞在一个表达式里 —— 读的人得先想清楚求值顺序才知道在验什么。
+        拆成两步读，意图是直的。）
+        """
         seen: list[object] = []
-        scenario = _scenario(
-            FunctionStep(
-                lambda c: (
-                    seen.append((c.param("from.ctx"), c.param("from.engine"))),
-                    ActionResult.success(),
-                )[1]
-            )
-        )
+
+        def read_both(ctx):
+            seen.append((ctx.param("from.ctx"), ctx.param("from.engine")))
+            return ActionResult.success()
+
+        scenario = _scenario(read_both)
         ctx = _ctx(scenario, params={"from.ctx": "a"})
         engine = build_engine(ctx.config, ctx, scenario)
         engine.params = {"from.engine": "b"}  # 装配后再补
@@ -112,7 +118,7 @@ class TestRunParams:
 
     def test_params_survive_reset(self):
         """**参数不被 reset 清掉** —— 它是这次运行的输入，不是产物。"""
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario, params={"keep": 1})
         try:
             ctx.reset()
@@ -122,7 +128,7 @@ class TestRunParams:
 
     def test_params_view_is_read_only(self):
         """``ctx.params`` 是只读视图：改它不该悄悄生效。"""
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario, params={"a": 1})
         try:
             with pytest.raises(TypeError):
@@ -132,7 +138,7 @@ class TestRunParams:
 
     def test_param_names_can_be_dotted(self):
         """点分层级避免撞名（``"farm.rounds"`` vs ``"rounds"``）。"""
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario, params={"farm.rounds": 1, "rounds": 2})
         try:
             assert ctx.param("farm.rounds") == 1
@@ -148,7 +154,7 @@ class TestRunStateReset:
     """
 
     def test_blackboard_is_cleared_between_runs(self):
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario)
         engine = build_engine(ctx.config, ctx, scenario)
         try:
@@ -178,7 +184,7 @@ class TestRunStateReset:
             ctx.blackboard.bump("rounds")
             return ActionResult.success()
 
-        scenario = _scenario(FunctionStep(bump), max_ticks=3)
+        scenario = _scenario(bump, max_ticks=3)
         ctx = _ctx(scenario)
         engine = build_engine(ctx.config, ctx, scenario)
         try:
@@ -199,7 +205,7 @@ class TestRunStateReset:
 
         不清的后果不是报错，而是"跑 3 轮却报了 7 步"，而且越跑越多。
         """
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()), max_ticks=2)
+        scenario = _scenario(lambda c: ActionResult.success(), max_ticks=2)
         ctx = _ctx(scenario)
         engine = build_engine(ctx.config, ctx, scenario)
         try:
@@ -215,7 +221,7 @@ class TestRunStateReset:
 
     def test_reset_does_not_touch_params(self):
         """``reset`` 清运行期状态，但保住入参。"""
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario, params={"target": "battle"})
         try:
             ctx.blackboard.set("junk", 1)
@@ -227,7 +233,7 @@ class TestRunStateReset:
 
     def test_reset_clears_the_stop_flag(self):
         """中止标志也要清 —— 否则第二次运行一开始就自己停了。"""
-        scenario = _scenario(FunctionStep(lambda c: ActionResult.success()))
+        scenario = _scenario(lambda c: ActionResult.success())
         ctx = _ctx(scenario)
         try:
             ctx.request_stop("上一遍点的停止")

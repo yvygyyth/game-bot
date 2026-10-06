@@ -1,894 +1,385 @@
-"""执行层测试：策略对象 / 步骤构造与执行 / 执行器的四件事 / journal。"""
+"""执行层：步骤是函数、执行器不再有策略。
+
+## 这个文件现在测什么
+
+* **步骤就是函数** —— 名字取自 ``__name__``、带参数用 ``partial``；
+* **执行器只做三件事** —— 调函数、记账、失败的步骤存帧；
+* **某步失败就停在那里**（后续步骤的前提没了，继续跑会在错的状态上乱操作）；
+* **空跑在动作下发那一刻被拦**（在原子层，不在执行层判断"像不像动作"）；
+* **journal 能序列化**（那是"日志里排查"的依据）。
+
+## 删掉了什么，为什么
+
+原来这里 99 条里 97 条在测 ``StepPolicy`` / ``RetryPolicy`` / ``ErrorMode``
+（重试次数、退避、超时预算、``skip_if`` / ``precondition`` / ``on_error`` 四种模式）
+以及 ``step_from_dict``（YAML 里的步骤 DSL）。
+
+那些东西**在真实脚本里从来没被用过**：
+
+* ``games/`` 下那两个步骤类只是把 ``policy`` 参数原样转给基类，从没传过有内容的值；
+* YAML 步骤 DSL 只有 ``config/flows/example_flow.yaml`` 在用，而它引用的模板
+  根本没入库（``gamebot check`` 对它一直是失败的）。
+
+而按新的模型（**流程 = 理想的游戏执行状态**），失败（多半是识图没命中）
+应该由**上层拿实测状态去重定位**，而不是在步骤里补重试。
+"""
 
 from __future__ import annotations
 
 import json
+from functools import partial
 
 import pytest
 
-from gamebot.atomic.query import ImageQuery
-from gamebot.exceptions import ConfigError, StepFailed
+from gamebot.execution.builtins import click_image, run_all, sleep
 from gamebot.execution.executor import Executor, ExecutorHooks, StepOutcome
-from gamebot.execution.journal import (
-    JournalEntry,
-    JsonlJournal,
-    MemoryJournal,
-    NullJournal,
-)
-from gamebot.execution.policy import NO_RETRY, ErrorMode, RetryPolicy, StepPolicy
-from gamebot.execution.step import (
-    CaptureStep,
-    ClickImageStep,
-    ClickStep,
-    ClickTextStep,
-    CompositeStep,
-    ConditionalStep,
-    FunctionStep,
-    KeyStep,
-    QueryStep,
-    Step,
-    WaitStep,
-    step_from_dict,
-    step_registry,
-)
-from gamebot.types import ActionResult, ActionStatus, Point, Region
+from gamebot.execution.journal import JsonlJournal, NullJournal
+from gamebot.execution.step import describe_step, step_name
+from gamebot.types import ActionResult, Point, Region
 
 
-@pytest.fixture(autouse=True)
-def _with_executor(ctx):
-    """给本模块的每个用例挂上执行器。
-
-    ``conftest`` 的 ``ctx`` 故意不挂（装配期才由 ``bootstrap`` 挂），
-    但这一整个模块测的就是"执行器怎么跑步骤"，所以在这里统一接上。
-    用 ``if None`` 而不是无条件覆盖：个别用例会自己造一个（比如带 MemoryJournal）。
-    """
-    if ctx.executor is None:
-        ctx.executor = Executor(ctx)
-    return ctx
+def _ok(value=None, **meta):
+    return ActionResult.success(value, **meta)
 
 
-class TestRetryPolicy:
-    def test_single_attempt_is_disabled(self) -> None:
-        policy = RetryPolicy()
-        assert policy.enabled is False
-        assert policy.should_retry(1, ActionStatus.NOT_FOUND) is False
-
-    def test_delay_is_constant_by_default(self) -> None:
-        policy = RetryPolicy(max_attempts=3, interval=0.5)
-        assert policy.delay_for(1) == 0.5
-        assert policy.delay_for(2) == 0.5
-
-    def test_backoff(self) -> None:
-        policy = RetryPolicy(max_attempts=4, interval=0.2, backoff=2.0)
-        assert policy.delay_for(1) == pytest.approx(0.2)
-        assert policy.delay_for(2) == pytest.approx(0.4)
-        assert policy.delay_for(3) == pytest.approx(0.8)
-
-    def test_should_retry_respects_max_and_status(self) -> None:
-        policy = RetryPolicy(max_attempts=3)
-        assert policy.should_retry(1, ActionStatus.NOT_FOUND) is True
-        assert policy.should_retry(2, ActionStatus.TIMEOUT) is True
-        assert policy.should_retry(3, ActionStatus.NOT_FOUND) is False
-
-    def test_retry_on_filter(self) -> None:
-        policy = RetryPolicy(max_attempts=3, retry_on=(ActionStatus.TIMEOUT,))
-        assert policy.should_retry(1, ActionStatus.TIMEOUT) is True
-        assert policy.should_retry(1, ActionStatus.NOT_FOUND) is False
-
-    def test_no_retry_constant(self) -> None:
-        assert NO_RETRY.max_attempts == 1
+def _miss(message="没找到", **meta):
+    return ActionResult.not_found(message, **meta)
 
 
-class TestStepPolicy:
-    def test_defaults_are_gentle(self) -> None:
-        policy = StepPolicy()
-        assert policy.on_error is ErrorMode.CONTINUE
-        assert policy.require_success is False
-        assert policy.timeout is None
-        assert policy.precondition is None
+class TestStepName:
+    """步骤名来自 ``__name__`` —— 少一处能写歪的地方。"""
 
-    def test_must_raises_on_failure(self) -> None:
-        policy = StepPolicy.must()
-        assert policy.on_error is ErrorMode.RAISE
-        assert policy.require_success is True
+    def test_plain_function(self):
+        def click_skill(ctx):
+            """点技能。"""
+            return _ok()
 
-    def test_patient_retries(self) -> None:
-        policy = StepPolicy.patient(attempts=5, interval=1.0)
-        assert policy.retry.max_attempts == 5
-        assert policy.retry.interval == 1.0
+        assert step_name(click_skill) == "click_skill"
+        assert describe_step(click_skill) == "点技能。"
 
-    def test_once_is_single_shot(self) -> None:
-        assert StepPolicy.once().retry.max_attempts == 1
+    def test_partial_looks_inside(self):
+        """``partial`` 自己没有 ``__name__``，不往里看就会显示成 "partial"。"""
 
-    def test_error_modes(self) -> None:
-        assert {m.value for m in ErrorMode} == {"raise", "continue", "stop_flow", "abort_tick"}
+        def click_named(ctx, template):
+            return _ok()
 
+        bound = partial(click_named, template="skill.png")
+        assert step_name(bound) == "click_named", "partial 的名字要从里面那个函数取"
 
-class TestStepConstruction:
-    def test_click_step(self) -> None:
-        step = ClickStep(Point(10, 20))
-        assert step.point == Point(10, 20)
-        assert step.clicks == 1
-        assert "点击" in step.describe()
+    def test_no_docstring_falls_back_to_the_name(self):
+        def plain(ctx):
+            return _ok()
 
-    def test_click_image_step(self) -> None:
-        step = ClickImageStep("a.png", region=Region(0, 0, 5, 5), confidence=0.8)
-        assert step.template == "a.png"
-        assert step.confidence == 0.8
-        assert step.region == Region(0, 0, 5, 5)
-
-    def test_click_text_step(self) -> None:
-        assert ClickTextStep("开始").text == "开始"
-
-    def test_key_step_accepts_str_or_list(self) -> None:
-        assert KeyStep("enter").keys == ["enter"]
-        assert KeyStep(["ctrl", "s"]).keys == ["ctrl", "s"]
-        assert "ctrl+s" in KeyStep(["ctrl", "s"]).describe()
-
-    def test_wait_step_requires_something(self) -> None:
-        with pytest.raises(ValueError):
-            WaitStep()
-        assert WaitStep(seconds=1.0).seconds == 1.0
-
-    def test_wait_step_disappear_label(self) -> None:
-        from gamebot.atomic.query import ImageQuery
-
-        step = WaitStep(query=ImageQuery("a.png"), disappear=True)
-        assert "消失" in step.describe()
-
-    def test_query_step(self) -> None:
-        from gamebot.atomic.query import ImageQuery
-
-        step = QueryStep(ImageQuery("a.png"), save_as="stamina")
-        assert step.save_as == "stamina"
-        assert "查询" in step.describe()
-
-    def test_capture_step_needs_fresh_frame(self) -> None:
-        assert CaptureStep().needs_fresh_frame is True
-
-    def test_function_step_uses_name(self) -> None:
-        step = FunctionStep(lambda ctx: ActionResult.success(1))
-        assert step.name == "<lambda>"
-
-    def test_composite_and_conditional(self) -> None:
-        inner = ClickStep(Point(1, 1))
-        composite = CompositeStep([inner, inner], name="两步")
-        assert len(composite.steps) == 2
-        conditional = ConditionalStep("cond", [inner], [])
-        assert conditional.then_steps == [inner]
-        assert conditional.else_steps == []
-
-    def test_policy_can_be_attached(self) -> None:
-        step = ClickStep(Point(1, 1), policy=StepPolicy.must(timeout=2.0))
-        assert step.policy.require_success is True
-        assert step.policy.timeout == 2.0
-
-    def test_all_steps_are_registered(self) -> None:
-        registry = step_registry()
-        for name in (
-            "ClickStep",
-            "ClickImageStep",
-            "ClickTextStep",
-            "KeyStep",
-            "WaitStep",
-            "QueryStep",
-            "CaptureStep",
-            "CompositeStep",
-            "ConditionalStep",
-            "FunctionStep",
-        ):
-            assert name in registry, f"{name} 未登记到 step_registry"
-
-    def test_click_step_runs_directly(self, ctx, input_recorder) -> None:
-        """步骤本体（不经执行器）也能跑：``ClickStep`` 收逻辑坐标、下发源坐标。"""
-        result = ClickStep(Point(1, 1)).run(ctx)
-        assert result.ok is True
-        assert input_recorder.events == [("click", (Point(1, 1), "left", 1))]
+        assert describe_step(plain) == "plain"
 
 
-class TestStepOutcome:
-    def test_success(self) -> None:
-        outcome = StepOutcome("a", ActionResult.success(1), elapsed=0.1)
+class TestExecutorRun:
+    def test_run_returns_an_outcome(self, ctx):
+        executor = Executor(ctx)
+
+        def step(c):
+            return _ok(42, action="click", point="(1, 2)")
+
+        outcome = executor.run(step)
+        assert isinstance(outcome, StepOutcome)
         assert outcome.ok is True
-        assert outcome.status == "success"
-        assert outcome.message == ""
+        assert outcome.step == "step"
+        assert outcome.result.value == 42
+        assert outcome.action == {"action": "click", "point": "(1, 2)"}
+        assert outcome.elapsed >= 0.0
 
-    def test_failure(self) -> None:
-        outcome = StepOutcome("a", ActionResult.not_found("没找到"))
+    def test_failure_is_returned_not_raised(self, ctx):
+        """失败是**返回值** —— 流程层要看到它才能去重定位。"""
+        executor = Executor(ctx)
+        outcome = executor.run(lambda c: _miss("技能没看到"))
         assert outcome.ok is False
         assert outcome.status == "not_found"
-        assert outcome.message == "没找到"
+        assert "技能没看到" in outcome.message
 
-    def test_skip_counts_as_ok(self) -> None:
-        outcome = StepOutcome(
-            "a", ActionResult.not_found("跳过"), skipped=True, skip_reason="条件不满足"
-        )
-        assert outcome.ok is True
-        assert outcome.status == "skipped"
-        assert outcome.message == "条件不满足"
+    def test_cancelled_propagates(self, ctx):
+        """唯一会被当成异常的是**中止**：它表示"别再继续了"，不是"失败了"。"""
+        from gamebot.exceptions import Cancelled
 
-    def test_to_dict_includes_children(self) -> None:
-        child = StepOutcome("child", ActionResult.success(1))
-        parent = StepOutcome("parent", ActionResult.success(2), children=[child])
-        payload = parent.to_dict()
-        assert payload["children"][0]["step"] == "child"
-        assert payload["elapsed"] == 0.0
+        def stop_me(c):
+            raise Cancelled("用户点了停止")
 
+        with pytest.raises(Cancelled):
+            Executor(ctx).run(stop_me)
 
-class TestExecutorAndJournal:
-    def test_executor_attaches_to_context(self, ctx) -> None:
-        executor = Executor(ctx, hooks=ExecutorHooks(), journal=MemoryJournal())
-        ctx.executor = executor
-        assert executor.dry_run is False
-        assert executor.outcomes == []
-        executor.close()
-
-    def test_executor_run_returns_an_outcome(self, ctx) -> None:
-        executor = Executor(ctx)
-        outcome = executor.run(ClickStep(Point(1, 1)))
-        assert outcome.ok is True
-        assert outcome.attempts == 1
-
-    def test_run_many_is_a_plain_loop(self, ctx, input_recorder) -> None:
-        executor = Executor(ctx)
-        outcomes = executor.run_many([ClickStep(Point(1, 1)), ClickStep(Point(2, 2))])
-        assert [o.status for o in outcomes] == ["success", "success"]
-        assert len(input_recorder.events) == 2
-
-    def test_journal_entry_to_dict(self) -> None:
-        entry = JournalEntry(step="点开始", status="success", ts=1.2345678, tick=5, elapsed=0.01)
-        payload = entry.to_dict()
-        assert payload["step"] == "点开始"
-        assert payload["ts"] == 1.234568
-        assert payload["tick"] == 5
-
-    def test_memory_journal_records(self) -> None:
-        journal = MemoryJournal()
-        journal.record(JournalEntry(step="a", status="success", ts=0.0))
-        journal.record(JournalEntry(step="b", status="not_found", ts=1.0))
-        assert [e.step for e in journal.entries] == ["a", "b"]
-        journal.clear()
-        assert journal.entries == []
-
-    def test_null_journal_swallows_everything(self) -> None:
-        journal = NullJournal()
-        journal.record(JournalEntry(step="a", status="success", ts=0.0))
-        journal.close()  # 不应抛异常
-
-    def test_journal_is_a_context_manager(self) -> None:
-        with MemoryJournal() as journal:
-            journal.record(JournalEntry(step="a", status="success", ts=0.0))
-        assert len(journal.entries) == 1
-
-
-# --------------------------------------------------------------------------- #
-# 步骤本体（在假后端上真跑一遍）
-# --------------------------------------------------------------------------- #
-class TestStepsRun:
-    def test_click_step_uses_source_coordinates(self, ctx, input_recorder) -> None:
-        """``ClickStep`` 收的是**逻辑**坐标，但下发的是**源**坐标。
-
-        这个项目最容易搞错的就是这两个基准，所以钉死在测试里：
-        坐标来自配置时才换算，来自截图时绝不二次换算。
-        """
-        outcome = ctx.executor.run(ClickStep(Point(10, 20)))
-        assert outcome.ok is True
-        assert outcome.attempts == 1
-        # 假后端 640x360、没配 logic_size -> 源坐标 == 逻辑坐标
-        assert input_recorder.events == [("click", (Point(10, 20), "left", 1))]
-        assert outcome.action.get("point") == Point(10, 20)
-
-    def test_image_click_uses_hit_point_as_source(self, ctx, input_recorder, matcher) -> None:
-        """命中点（源坐标）直接下发，**不能再换算一次**。"""
-        matcher.matches = {"a.png": (Point(100, 50), 0.99)}
-        outcome = ctx.executor.run(ClickImageStep("a.png", offset=(5, -5)))
-        assert outcome.ok is True
-        assert input_recorder.events == [("click", (Point(105, 45), "left", 1))]
-
-    def test_image_click_does_not_click_when_missing(self, ctx, input_recorder) -> None:
-        """找不到图就绝不下发 —— 识图脚本最危险的就是"就近点一下试试"。"""
-        outcome = ctx.executor.run(ClickImageStep("nope.png"))
-        assert outcome.status == "not_found"
-        assert input_recorder.events == []
-
-    def test_image_click_invalidates_the_frame(self, ctx) -> None:
-        """点完画面就变了：当前帧必须作废，否则后续步骤看的是旧图。"""
-        ctx.frame()
-        assert ctx.current_frame is not None
-        ctx.executor.run(ClickImageStep("a.png"))
-        assert ctx.current_frame is None
-
-    def test_query_step_writes_blackboard(self, ctx) -> None:
-        outcome = ctx.executor.run(QueryStep(ImageQuery("a.png"), save_as="found"))
-        assert outcome.ok is True
-        assert ctx.blackboard.get("found") is not None
-
-    def test_query_step_saves_none_when_missing(self, ctx) -> None:
-        """没命中也要写黑板：那里存的是"这一轮看到的值"，没看到也是信息。"""
-        ctx.executor.run(QueryStep(ImageQuery("nope.png"), save_as="found"))
-        assert ctx.blackboard.get("found") is None
-        assert "found" in ctx.blackboard
-
-    def test_query_step_is_not_blocked_by_dry_run(self, ctx) -> None:
-        """空跑只拦**动作**步骤，查询照跑 —— 否则流程决策就没依据了。"""
-        ctx.executor.dry_run = True
-        outcome = ctx.executor.run(QueryStep(ImageQuery("a.png"), save_as="v"))
-        assert outcome.ok is True
-        assert ctx.blackboard.get("v") is not None
-
-    def test_capture_step_forces_a_new_frame(self, ctx) -> None:
-        before = ctx.frame()
-        captured = ctx.capture_count
-        outcome = ctx.executor.run(CaptureStep())
-        assert outcome.ok is True
-        assert ctx.capture_count == captured + 1
-        assert ctx.current_frame is not before
-
-    def test_key_step_single_and_combo(self, ctx, input_recorder) -> None:
-        ctx.executor.run(KeyStep("enter"))
-        ctx.executor.run(KeyStep(["ctrl", "s"]))
-        assert input_recorder.events == [
-            ("press_key", ("enter", 1)),
-            ("hotkey", ["ctrl", "s"]),
-        ]
-
-    def test_wait_step_seconds(self, ctx) -> None:
-        assert ctx.executor.run(WaitStep(seconds=0.0)).ok is True
-
-    def test_wait_step_for_query(self, ctx) -> None:
-        outcome = ctx.executor.run(
-            WaitStep(query=ImageQuery("a.png"), timeout=0.05, interval=0.01)
-        )
-        assert outcome.ok is True
-
-    def test_wait_step_timeout_is_a_failure(self, ctx) -> None:
-        outcome = ctx.executor.run(
-            WaitStep(query=ImageQuery("nope.png"), timeout=0.05, interval=0.01)
-        )
-        assert outcome.status == "timeout"
-        assert outcome.ok is False
-
-    def test_wait_step_disappear(self, ctx) -> None:
-        outcome = ctx.executor.run(
-            WaitStep(query=ImageQuery("nope.png"), disappear=True, timeout=0.05, interval=0.01)
-        )
-        assert outcome.ok is True, "本来就不在屏幕上，就算已经消失了"
-
-    def test_composite_step_runs_children_through_executor(self, ctx, input_recorder) -> None:
-        """子步骤要走 executor：否则它们各自的 policy / 记账全失效。"""
-        composite = CompositeStep(
-            [ClickStep(Point(1, 1), name="第一下"), ClickStep(Point(2, 2), name="第二下")]
-        )
-        outcome = ctx.executor.run(composite)
-        assert outcome.ok is True
-        assert [c.step for c in outcome.children] == ["第一下", "第二下"]
-        assert [c.step for c in composite.child_outcomes()] == ["第一下", "第二下"]
-        assert len(input_recorder.events) == 2
-        assert all(c.attempts == 1 for c in outcome.children)
-
-    def test_composite_aborts_on_failure(self, ctx, input_recorder) -> None:
-        composite = CompositeStep([ClickImageStep("nope.png"), ClickStep(Point(1, 1))])
-        outcome = ctx.executor.run(composite)
-        assert outcome.ok is False
-        assert len(outcome.children) == 1, "abort_on_failure 时后面的子步骤不该跑"
-        assert input_recorder.events == []
-
-    def test_composite_continues_when_asked(self, ctx, input_recorder) -> None:
-        composite = CompositeStep(
-            [ClickImageStep("nope.png"), ClickStep(Point(1, 1))], abort_on_failure=False
-        )
-        outcome = ctx.executor.run(composite)
-        assert outcome.ok is False
-        assert len(outcome.children) == 2
-        assert len(input_recorder.events) == 1
-
-    def test_conditional_step_picks_then(self, ctx, input_recorder) -> None:
-        step = ConditionalStep(
-            ImageQuery("a.png"), [ClickStep(Point(1, 1))], [ClickStep(Point(9, 9))]
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is True
-        assert outcome.result.meta.get("branch") == "then"
-        assert input_recorder.events == [("click", (Point(1, 1), "left", 1))]
-
-    def test_conditional_step_picks_else(self, ctx, input_recorder) -> None:
-        step = ConditionalStep(
-            ImageQuery("nope.png"), [ClickStep(Point(1, 1))], [ClickStep(Point(9, 9))]
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.result.meta.get("branch") == "else"
-        assert input_recorder.events == [("click", (Point(9, 9), "left", 1))]
-
-    def test_conditional_step_with_empty_branch(self, ctx) -> None:
-        outcome = ctx.executor.run(ConditionalStep(ImageQuery("a.png"), []))
-        assert outcome.ok is True
-        assert "分支为空" in outcome.message
-
-    def test_function_step_receives_context(self, ctx) -> None:
-        seen: list[object] = []
-
-        def probe(context):
-            seen.append(context)
-            return ActionResult.success("ok")
-
-        outcome = ctx.executor.run(FunctionStep(probe, name="探针"))
-        assert outcome.ok is True
-        assert seen == [ctx]
-
-
-# --------------------------------------------------------------------------- #
-# 执行器的四件事：跳过 / 重试 / 超时 / 失败处理
-# --------------------------------------------------------------------------- #
-class TestExecutorPolicy:
-    def test_retries_until_success(self, ctx) -> None:
-        calls: list[int] = []
-
-        def flaky(context):
-            calls.append(1)
-            return ActionResult.success(1) if len(calls) >= 3 else ActionResult.not_found("还没好")
-
-        step = FunctionStep(
-            flaky, policy=StepPolicy(retry=RetryPolicy(max_attempts=5, interval=0.0))
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is True
-        assert outcome.attempts == 3
-
-    def test_stops_after_max_attempts(self, ctx) -> None:
-        calls: list[int] = []
-
-        def always_missing(context):
-            calls.append(1)
-            return ActionResult.not_found("一直没有")
-
-        step = FunctionStep(
-            always_missing, policy=StepPolicy(retry=RetryPolicy(max_attempts=3, interval=0.0))
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is False
-        assert outcome.attempts == 3
-        assert len(calls) == 3
-
-    def test_retry_on_filter_is_respected(self, ctx) -> None:
-        """``retry_on`` 是枚举而不是"非成功即可重试"：不在名单里的状态不重试。"""
-        calls: list[int] = []
-
-        def errored(context):
-            calls.append(1)
-            return ActionResult.error("后端炸了")
-
-        step = FunctionStep(
-            errored,
-            policy=StepPolicy(
-                retry=RetryPolicy(max_attempts=5, interval=0.0, retry_on=(ActionStatus.TIMEOUT,))
+    def test_hooks_fire_in_order(self, ctx):
+        seen: list[str] = []
+        executor = Executor(
+            ctx,
+            hooks=ExecutorHooks(
+                before_step=lambda c, s: seen.append("before"),
+                after_step=lambda c, o: seen.append("after"),
+                on_failure=lambda c, s, o: seen.append("failure"),
             ),
         )
-        outcome = ctx.executor.run(step)
-        assert outcome.attempts == 1
-        assert len(calls) == 1
+        executor.run(lambda c: _ok())
+        assert seen == ["before", "after"], "成功时不该触发 failure"
 
-    def test_timeout_budget_caps_retries(self, ctx) -> None:
-        """``policy.timeout`` 是这一整步（含等待）的总预算。"""
-        calls: list[int] = []
+        seen.clear()
+        executor.run(lambda c: _miss())
+        assert seen == ["before", "after", "failure"]
 
-        def slow_failure(context):
-            calls.append(1)
-            context.sleep(0.02)
-            return ActionResult.not_found("慢失败")
-
-        step = FunctionStep(
-            slow_failure,
-            policy=StepPolicy(timeout=0.05, retry=RetryPolicy(max_attempts=99, interval=0.02)),
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is False
-        assert outcome.attempts < 99
-        assert len(calls) == outcome.attempts
-
-    def test_precondition_unsatisfied_skips(self, ctx, input_recorder) -> None:
-        step = ClickStep(Point(1, 1), policy=StepPolicy(precondition=ImageQuery("nope.png")))
-        outcome = ctx.executor.run(step)
-        assert outcome.skipped is True
-        assert outcome.ok is True
-        assert "precondition" in outcome.skip_reason
-        assert input_recorder.events == []
-
-    def test_precondition_error_does_not_skip(self, ctx, input_recorder) -> None:
-        """条件求值出错时**不跳过**：配置坏了该让它按正常路径失败并留痕，
-        而不是静默跳过 —— 跳过在报告里长得像"本来就不需要做"。"""
-
-        class Boom:
-            def run(self, frame):
-                raise RuntimeError("炸")
-
-        step = ClickStep(Point(1, 1), policy=StepPolicy(precondition=Boom()))
-        outcome = ctx.executor.run(step)
-        assert outcome.skipped is False
-        assert len(input_recorder.events) == 1
-
-    def test_precondition_satisfied_runs(self, ctx, input_recorder) -> None:
-        step = ClickStep(Point(1, 1), policy=StepPolicy(precondition=ImageQuery("a.png")))
-        assert ctx.executor.run(step).skipped is False
-        assert len(input_recorder.events) == 1
-
-    def test_skip_if_satisfied_skips(self, ctx, input_recorder) -> None:
-        step = ClickStep(Point(1, 1), policy=StepPolicy(skip_if=ImageQuery("a.png")))
-        outcome = ctx.executor.run(step)
-        assert outcome.skipped is True
-        assert input_recorder.events == []
-
-    def test_skipped_outcomes_are_journalled(self, ctx) -> None:
-        """跳过也要留痕：报告里看不到某一步时，"它跑没跑"是最要紧的问题。"""
-        journal = MemoryJournal()
-        ctx.executor.journal = journal
-        ctx.executor.run(ClickStep(Point(1, 1), policy=StepPolicy(skip_if=ImageQuery("a.png"))))
-        assert journal.entries[-1].status == "skipped"
-        assert "skip_if" in journal.entries[-1].message
-
-    def test_abort_tick_does_not_raise(self, ctx) -> None:
-        step = FunctionStep(
-            lambda context: ActionResult.not_found("没成"),
-            policy=StepPolicy(on_error=ErrorMode.ABORT_TICK),
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is False
-        assert ctx.stop_requested is False
-
-    def test_raise_mode_raises_step_failed(self, ctx) -> None:
-        step = FunctionStep(
-            lambda context: ActionResult.not_found("没成"), policy=StepPolicy.must()
-        )
-        with pytest.raises(StepFailed):
-            ctx.executor.run(step)
-
-    def test_require_success_upgrades_a_gentle_policy(self, ctx) -> None:
-        step = FunctionStep(
-            lambda context: ActionResult.not_found("没成"),
-            policy=StepPolicy(require_success=True, on_error=ErrorMode.RAISE),
-        )
-        with pytest.raises(StepFailed):
-            ctx.executor.run(step)
-
-    def test_stop_flow_requests_stop(self, ctx) -> None:
-        step = FunctionStep(
-            lambda context: ActionResult.not_found("没成"),
-            policy=StepPolicy(on_error=ErrorMode.STOP_FLOW),
-        )
-        outcome = ctx.executor.run(step)
-        assert outcome.ok is False
-        assert ctx.stop_requested is True
-
-    def test_dry_run_blocks_actions_but_not_queries(self, ctx, input_recorder) -> None:
-        ctx.executor.dry_run = True
-        blocked = ctx.executor.run(ClickStep(Point(1, 1)))
-        allowed = ctx.executor.run(QueryStep(ImageQuery("a.png")))
-        assert blocked.ok is True
-        assert blocked.result.meta.get("dry_run") is True
-        assert input_recorder.events == []
-        assert allowed.ok is True
-
-    def test_dry_run_treats_unknown_steps_as_actions(self, ctx) -> None:
-        """自定义步骤没声明 ``performs_action`` 时默认按"会动手"拦下来 ——
-        宁可多拦一个，也不能让空跑真的去点游戏。"""
-
-        class Custom(Step):
-            def run(self, context):
-                return ActionResult.success("真的执行了")
-
-        ctx.executor.dry_run = True
-        outcome = ctx.executor.run(Custom(name="自定义"))
-        assert outcome.result.meta.get("dry_run") is True
-
-    def test_hooks_fire_in_order(self, ctx) -> None:
-        seen: list[str] = []
-        ctx.executor.hooks = ExecutorHooks(
-            before_step=lambda c, s: seen.append(f"before:{s.name}"),
-            after_step=lambda c, o: seen.append(f"after:{o.step}"),
-        )
-        ctx.executor.run(ClickStep(Point(1, 1), name="点一下"))
-        assert seen == ["before:点一下", "after:点一下"]
-
-    def test_on_failure_hook_only_on_failure(self, ctx) -> None:
-        seen: list[str] = []
-        ctx.executor.hooks = ExecutorHooks(on_failure=lambda c, s, o: seen.append(o.step))
-        ctx.executor.run(ClickImageStep("nope.png", name="找不到"))
-        ctx.executor.run(ClickStep(Point(1, 1), name="能找到"))
-        assert seen == ["找不到"]
-
-    def test_missing_executor_skips_steps(self, ctx) -> None:
-        """没有执行器时不炸、也不假装跑了 —— 这个分支只该出现在临时脚本里。"""
-        from gamebot.flow import FlowEngine
-
-        ctx.executor = None
-        scenario = _tiny_scenario()
-        engine = FlowEngine(scenario, ctx)
-        assert engine._run_steps(scenario.graph.nodes["home"].steps, "home") == []
+    def test_outcomes_accumulate(self, ctx):
+        executor = Executor(ctx)
+        executor.run(lambda c: _ok())
+        executor.run(lambda c: _ok())
+        assert len(executor.outcomes) == 2
 
 
-# --------------------------------------------------------------------------- #
-# YAML -> Step
-# --------------------------------------------------------------------------- #
-class TestStepFromDict:
-    def test_click_image_step(self) -> None:
-        step = step_from_dict(
-            {"type": "ClickImageStep", "template": "a.png", "region": [1, 2, 3, 4]}
-        )
-        assert isinstance(step, ClickImageStep)
-        assert step.region == Region(1, 2, 3, 4)
+class TestRunManyStopsAtFailure:
+    """**某步失败就停在那里** —— 后续步骤的前提（"前一步成功了"）已经没了。
 
-    def test_click_step_point_list(self) -> None:
-        assert step_from_dict({"type": "ClickStep", "point": [10, 20]}).point == Point(10, 20)
-
-    def test_policy_subdict(self) -> None:
-        step = step_from_dict(
-            {
-                "type": "ClickStep",
-                "point": [1, 1],
-                "policy": {
-                    "on_error": "stop_flow",
-                    "retry": {"max_attempts": 3, "interval": 0.5, "retry_on": ["not_found"]},
-                },
-            }
-        )
-        assert step.policy.on_error is ErrorMode.STOP_FLOW
-        assert step.policy.retry.max_attempts == 3
-        assert step.policy.retry.retry_on == (ActionStatus.NOT_FOUND,)
-
-    def test_precondition_query_subdict(self) -> None:
-        step = step_from_dict(
-            {
-                "type": "ClickStep",
-                "point": [1, 1],
-                "policy": {"precondition": {"type": "ImageQuery", "template": "a.png"}},
-            }
-        )
-        assert isinstance(step.policy.precondition, ImageQuery)
-
-    def test_composite_nested_steps(self) -> None:
-        step = step_from_dict(
-            {
-                "type": "CompositeStep",
-                "steps": [
-                    {"type": "KeyStep", "key": "enter"},
-                    {"type": "ClickStep", "point": [1, 1]},
-                ],
-            }
-        )
-        assert isinstance(step, CompositeStep)
-        assert [type(s).__name__ for s in step.steps] == ["KeyStep", "ClickStep"]
-
-    def test_conditional_nested(self) -> None:
-        step = step_from_dict(
-            {
-                "type": "ConditionalStep",
-                "when": {"type": "ImageQuery", "template": "a.png"},
-                "then_steps": [{"type": "ClickStep", "point": [1, 1]}],
-            }
-        )
-        assert isinstance(step, ConditionalStep)
-        assert isinstance(step.when, ImageQuery)
-        assert len(step.then_steps) == 1
-
-    def test_wait_step_with_query(self) -> None:
-        step = step_from_dict(
-            {"type": "WaitStep", "query": {"type": "ImageQuery", "template": "a.png"}}
-        )
-        assert isinstance(step.query, ImageQuery)
-
-    def test_missing_type_raises(self) -> None:
-        with pytest.raises(ConfigError) as excinfo:
-            step_from_dict({"template": "a.png"})
-        assert "缺少 type" in str(excinfo.value)
-
-    def test_unknown_type_raises(self) -> None:
-        with pytest.raises(ConfigError) as excinfo:
-            step_from_dict({"type": "NoSuchStep"})
-        assert "未登记" in str(excinfo.value)
-
-    def test_unknown_field_raises(self) -> None:
-        with pytest.raises(ConfigError) as excinfo:
-            step_from_dict({"type": "ClickStep", "point": [1, 1], "点点点": 1})
-        assert "未知字段" in str(excinfo.value)
-
-    def test_bad_region_raises(self) -> None:
-        with pytest.raises(ConfigError):
-            step_from_dict({"type": "ClickImageStep", "template": "a.png", "region": [1, 2]})
-
-    def test_bad_on_error_value_raises(self) -> None:
-        with pytest.raises(ConfigError):
-            step_from_dict({"type": "ClickStep", "point": [1, 1], "policy": {"on_error": "瞎写"}})
-
-
-# --------------------------------------------------------------------------- #
-# 失败帧：上限 + 写进 journal
-# --------------------------------------------------------------------------- #
-class TestFailureFrames:
-    """``save_frames_on_error`` 的两个坑。
-
-    这条路径原来是"存了一堆图但 journal 里没有文件名"（帧在写 journal
-    **之后**才存），而且**没有留存上限**（跑一晚上就是几千张全尺寸 PNG）。
-    两者都不报错，只是慢慢变难受 —— 所以用测试钉住。
+    这条以前是反的：默认策略下失败会**继续跑后面的步骤**，
+    于是"点技能没看到按钮"之后仍然会去点结算确认 —— 在错的状态上操作。
     """
 
-    def _failing(self, ctx):
-        return FunctionStep(lambda c: ActionResult.error("故意失败"), name="会失败的步骤")
+    def test_all_success(self, ctx):
+        executor = Executor(ctx)
+        calls: list[str] = []
 
-    def _arm(self, ctx, tmp_path, journal=None):
-        """准备好"有当帧 + 开了存帧 + 有 journal"的状态。
+        def first(c):
+            calls.append("first")
+            return _ok()
 
-        **必须先 ``ctx.capture()`` 造一帧**：``ctx`` 这个 fixture 不抓帧，
-        而存失败帧的前提就是"有当前帧"。忘了这一步的话整条路径会静默跳过 ——
-        测试会"通过"但什么都没验到，那比失败更糟。
-        """
-        ctx.config.paths.screenshots = tmp_path
-        ctx.capture()
-        ctx.executor.journal = journal or MemoryJournal()
-        ctx.executor.save_frames_on_error = True
+        def second(c):
+            calls.append("second")
+            return _ok()
 
-    def test_frame_path_lands_in_the_journal_entry(self, ctx, tmp_path) -> None:
-        journal = MemoryJournal()
-        self._arm(ctx, tmp_path, journal)
+        outcomes = executor.run_many([first, second])
+        assert calls == ["first", "second"]
+        assert all(o.ok for o in outcomes)
 
-        ctx.executor.run(self._failing(ctx))
+    def test_stops_at_the_failing_step(self, ctx):
+        executor = Executor(ctx)
+        calls: list[str] = []
 
-        (entry,) = journal.entries
-        assert entry.status != "success"
-        assert entry.frame_path, "journal 里必须能拿到当帧图的路径"
-        assert entry.frame_path.endswith(".png")
+        def first(c):
+            calls.append("first")
+            return _ok()
 
-    def test_no_frame_when_option_is_off(self, ctx, tmp_path) -> None:
-        """默认关：不存图，也不报错。"""
-        ctx.config.paths.screenshots = tmp_path
-        ctx.capture()
-        journal = MemoryJournal()
-        ctx.executor.journal = journal
-        ctx.executor.save_frames_on_error = False
+        def second(c):
+            calls.append("second")
+            return _miss("第二步没认出来")
 
-        ctx.executor.run(self._failing(ctx))
+        def third(c):
+            calls.append("third")
+            return _ok()
 
-        (entry,) = journal.entries
-        assert entry.frame_path == ""
-        assert list(tmp_path.glob("*.png")) == []
+        outcomes = executor.run_many([first, second, third])
+        assert calls == ["first", "second"], "第三步不该跑"
+        assert [o.ok for o in outcomes] == [True, False]
+        assert outcomes[-1].step == "second"
 
-    def test_successful_steps_do_not_save_frames(self, ctx, tmp_path) -> None:
-        """成功的步骤存图没有诊断价值，只会堆盘。"""
-        ctx.config.paths.screenshots = tmp_path
-        ctx.capture()
-        ctx.executor.journal = MemoryJournal()
-        ctx.executor.save_frames_on_error = True
-
-        ctx.executor.run(ClickStep(Point(1, 1), name="点一下"))
-
-        assert list(tmp_path.glob("*.png")) == []
-
-    def test_old_failure_frames_are_pruned(self, ctx, tmp_path) -> None:
-        """留存上限：留最近的，不无限涨。"""
-        self._arm(ctx, tmp_path)
-
-        for _ in range(30):
-            ctx.executor.run(self._failing(ctx))
-
-        kept = sorted(tmp_path.glob("fail_*.png"))
-        assert 0 < len(kept) <= ctx.executor._frame_keep
-
-    def test_pruning_never_touches_other_files(self, ctx, tmp_path) -> None:
-        """**只删自己写的 ``fail_*.png``** —— 同一个目录里还躺着识图记录
-        （``match_*.png``）和用户手工截的图。"""
-        manual = tmp_path / "manual.png"
-        manual.write_bytes(b"x")
-        match = tmp_path / "match_00001.png"
-        match.write_bytes(b"x")
-
-        self._arm(ctx, tmp_path)
-        for _ in range(30):
-            ctx.executor.run(self._failing(ctx))
-
-        assert manual.is_file(), "手工截的图不能被删"
-        assert match.is_file(), "识图记录不能被删"
-        assert len(list(tmp_path.glob("fail_*.png"))) <= ctx.executor._frame_keep
-
-    def test_keep_limit_follows_the_recorder(self, ctx, tmp_path) -> None:
-        """失败帧的上限跟着识图记录走，不另加一个要用户理解的旋钮。"""
-        ctx.config.paths.screenshots = tmp_path
-
-        class _Recorder:
-            keep = 20
-
-        ctx.recorder = _Recorder()
-        assert ctx.executor._frame_keep == 100
-
-        ctx.recorder = None
-        assert ctx.executor._frame_keep == 20
+    def test_the_failure_keeps_its_original_status(self, ctx):
+        executor = Executor(ctx)
+        outcomes = executor.run_many([lambda c: _miss("没命中")])
+        assert outcomes[0].status == "not_found", "状态要原样保留，别改写成别的"
 
 
-# --------------------------------------------------------------------------- #
-# journal 落盘
-# --------------------------------------------------------------------------- #
-class TestJournalSerialization:
-    def test_record_outcome_maps_fields(self, ctx) -> None:
-        journal = MemoryJournal()
-        ctx.executor.journal = journal
-        ctx.executor.run(ClickStep(Point(3, 4), name="点一下"))
-        ctx.executor.run(ClickStep(Point(1, 1), policy=StepPolicy(skip_if=ImageQuery("a.png"))))
+class TestRunAllBuiltin:
+    """``run_all`` 是同一个语义的内置版本（给步骤内部组合用）。"""
 
-        success, skipped = journal.entries
-        assert success.step == "点一下"
-        assert success.status == "success"
-        assert success.attempts == 1
-        assert success.action.get("point") == Point(3, 4)
-        assert "action" not in success.action, "meta 里的 action 子字典不该被套两层"
-        assert skipped.status == "skipped"
-        assert skipped.meta.get("skipped") is True
+    def test_stops_at_failure_and_marks_where(self, ctx):
+        calls: list[str] = []
 
-    def test_jsonl_journal_round_trip(self, tmp_path) -> None:
-        """``ensure_ascii=False`` —— 中文步骤名不该在文件里变成 \\uXXXX。"""
-        path = tmp_path / "logs" / "run.jsonl"
+        def a(c):
+            calls.append("a")
+            return _ok()
+
+        def b(c):
+            calls.append("b")
+            return _miss()
+
+        result = run_all(ctx, a, b, lambda c: _ok())
+        assert calls == ["a", "b"]
+        assert result.ok is False
+        assert result.meta["stopped_at"] == "b"
+        assert result.meta["stopped_index"] == 1
+
+
+class TestDryRun:
+    """空跑：动作不下发，查询照常。
+
+    拦在**原子层**（``session.dry_run``）而不是执行层判断"这一步像不像动作" ——
+    后者要么看类型名、要么维护注册表，两条路都要额外一份元数据，
+    漏了就会在空跑时真的去点游戏。
+    """
+
+    def test_session_flag_is_set(self, ctx):
+        Executor(ctx, dry_run=True)
+        assert ctx.session.dry_run is True
+        Executor(ctx, dry_run=False)
+        assert ctx.session.dry_run is False
+
+    def test_click_does_not_reach_the_backend(self, ctx, input_recorder):
+        def click(c):
+            from gamebot.atomic import actions
+
+            return actions.click_logic_point(c.session, Point(10, 10))
+
+        outcome = Executor(ctx, dry_run=True).run(click)
+        assert outcome.ok is True, "空跑时动作假装成功"
+        assert outcome.result.meta.get("dry_run") is True
+        assert input_recorder.events == [], "空跑时不能真的下发输入"
+
+    def test_queries_still_run(self, ctx, matcher):
+        """空跑要验"流程走不走得通"，那必须看到真实的识别结果。"""
+        matcher.matches = {"a.png": (Point(5, 5), 0.99)}
+        Executor(ctx, dry_run=True)
+        found = ctx.frame().find_image("a.png")
+        assert found.ok is True
+
+    def test_sleep_still_works(self, ctx):
+        """``sleep`` 不拦 —— 空跑也要能等，否则节奏完全不同。"""
+        outcome = Executor(ctx, dry_run=True).run(lambda c: sleep(c, 0.01))
+        assert outcome.ok is True
+
+
+class TestJournal:
+    def test_null_journal_swallows_everything(self, ctx):
+        executor = Executor(ctx, journal=NullJournal())
+        executor.run(lambda c: _ok())
+        executor.run(lambda c: _miss())
+
+    def test_jsonl_journal_writes_a_line_per_step(self, tmp_path, ctx):
+        path = tmp_path / "run.jsonl"
         with JsonlJournal(path) as journal:
-            journal.record(JournalEntry(step="点击开始", status="success", ts=1.5))
-            journal.record(JournalEntry(step="第二行", status="not_found", ts=2.5, tick=7))
+            executor = Executor(ctx, journal=journal)
+            executor.run(lambda c: _ok(action="click", point="(1, 2)"))
+            executor.run(lambda c: _miss("没命中"))
 
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         assert len(lines) == 2
-        assert "点击开始" in lines[0]
-        assert "\\u" not in lines[0]
-        payload = json.loads(lines[1])
-        assert payload["step"] == "第二行"
-        assert payload["tick"] == 7
-        assert payload["status"] == "not_found"
+        assert lines[0]["status"] == "success"
+        assert lines[0]["action"] == {"action": "click", "point": "(1, 2)"}
+        assert lines[1]["status"] == "not_found"
+        assert "没命中" in lines[1]["message"]
 
-    def test_jsonl_journal_appends(self, tmp_path) -> None:
-        path = tmp_path / "a.jsonl"
-        with JsonlJournal(path) as journal:
-            journal.record(JournalEntry(step="一", status="success", ts=1.0))
-        with JsonlJournal(path) as journal:
-            journal.record(JournalEntry(step="二", status="success", ts=2.0))
-        assert len(path.read_text(encoding="utf-8").splitlines()) == 2
+    def test_outcome_to_dict_is_json_safe(self, ctx):
+        outcome = Executor(ctx).run(lambda c: _ok(1, action="click"))
+        json.dumps(outcome.to_dict())  # 不能抛
 
-    def test_jsonl_journal_serializes_odd_meta(self, tmp_path) -> None:
-        """meta 里混进 Point / Path 不该把 journal 弄崩（``default=str``）。"""
-        path = tmp_path / "b.jsonl"
-        with JsonlJournal(path) as journal:
-            journal.record(
-                JournalEntry(step="x", status="success", ts=1.0, meta={"point": Point(1, 2)})
-            )
-        assert "Point" in path.read_text(encoding="utf-8")
 
-    def test_attach_frame_without_directory_is_a_noop(self, ctx) -> None:
-        journal = MemoryJournal()
-        outcome = StepOutcome("s", ActionResult.success(1))
-        assert journal.attach_frame(outcome, ctx.frame()) == ""
+class TestBuiltins:
+    """内置步骤：只是"常用组合"，不是必须用的 API。"""
+
+    def test_click_image_clicks_the_hit_point(self, ctx, matcher, input_recorder):
+        matcher.matches = {"skill.png": (Point(100, 50), 0.99)}
+        outcome = Executor(ctx).run(
+            partial(click_image, template="skill.png", region=Region(0, 0, 200, 200))
+        )
+
+        assert outcome.ok is True
+        assert input_recorder.events, "该真的点一下"
+        assert outcome.action["template"] == "skill.png"
+
+    def test_click_image_returns_not_found_when_missing(self, ctx, matcher, input_recorder):
+        matcher.matches = {}
+        outcome = Executor(ctx).run(partial(click_image, template="nope.png"))
+
+        assert outcome.status == "not_found"
+        assert input_recorder.events == [], "没看到就不能动手"
+
+    def test_click_image_invalidates_the_frame(self, ctx, matcher):
+        matcher.matches = {"skill.png": (Point(1, 1), 0.99)}
+        before = ctx.frame().frame_id
+        Executor(ctx).run(partial(click_image, template="skill.png"))
+        assert ctx.frame().frame_id > before, "点完必须作废帧，否则下一步看旧图"
+
+
+class TestFailureFrames:
+    def test_failing_step_saves_a_frame(self, ctx, tmp_path):
+        ctx.config.paths.screenshots = tmp_path / "shots"
+        executor = Executor(ctx, save_frames_on_error=True)
+        outcome = executor.run(lambda c: _miss())
+
+        assert outcome.frame_path, "失败的步骤该存一张当帧"
+
+    def test_success_does_not_save(self, ctx, tmp_path):
+        ctx.config.paths.screenshots = tmp_path / "shots"
+        executor = Executor(ctx, save_frames_on_error=True)
+        outcome = executor.run(lambda c: _ok())
         assert outcome.frame_path == ""
 
-    def test_attach_frame_saves_and_records_path(self, ctx, tmp_path) -> None:
-        journal = MemoryJournal()
-        outcome = StepOutcome("步骤/带斜杠", ActionResult.success(1))
-        path = journal.attach_frame(outcome, ctx.frame(), directory=tmp_path / "shots")
-        assert path.endswith(".png")
-        assert outcome.frame_path == path
-        assert (tmp_path / "shots").is_dir()
-
-    def test_step_outcome_to_dict_includes_action_and_frame(self) -> None:
-        outcome = StepOutcome("s", ActionResult.success(1), action={"point": [1, 2]})
-        outcome.frame_path = "logs/a.png"
-        payload = outcome.to_dict()
-        assert payload["action"] == {"point": [1, 2]}
-        assert payload["frame"] == "logs/a.png"
-
-    def test_step_outcome_of_collects_action_meta(self) -> None:
-        result = ActionResult.success(1, template="a.png", score=0.9, point=Point(3, 3))
-        outcome = StepOutcome.of("点 a", result)
-        assert outcome.action["template"] == "a.png"
-        assert outcome.action["point"] == Point(3, 3)
-        assert "score" not in outcome.action
+    def test_saving_is_off_by_default(self, ctx, tmp_path):
+        ctx.config.paths.screenshots = tmp_path / "shots"
+        outcome = Executor(ctx).run(lambda c: _miss())
+        assert outcome.frame_path == ""
 
 
-def _tiny_scenario():
-    """一个只有一个节点的最小场景（给"没有执行器"那条分支用）。"""
-    from gamebot.flow import Graph, Node, Scenario
-    from gamebot.state import Page, PageTree
+class TestBusinessStepsAreThin:
+    """业务层那三个队伍步骤就是 ``click_image`` 的**薄封装**。
 
-    tree = PageTree()
-    tree.add(Page("home", queries=(ImageQuery("a.png"),)))
-    graph = Graph(initial="home")
-    graph.add_node(Node("home", page="home", steps=[ClickStep(Point(1, 1))]))
-    return Scenario(name="tiny", tree=tree, graph=graph)
+    钉住"薄"这件事：它们不该自己重写"找到 → 点 → 作废帧" ——
+    那三个动作已经在 :func:`click_image` 里各有一份实现，重复一遍就会各错各的。
+
+    ## 为什么这几条不用 ``ctx`` 装置
+
+    队伍步骤的 ROI 是 ``(1400, 630, 470, 360)`` —— **真实客户区尺寸下的右下角**
+    （1918x1080）。而 ``ctx`` 装置的假后端只有 640x360，那个框完全落在帧外，
+    于是每次都得到"搜索区域为空"。那是**校验在正确工作**（框和帧不重叠 =
+    这个页面永远认不出来），不是被测代码有问题。
+
+    所以这里自己建一个真实尺寸的帧。顺带说明一件事：**假后端尺寸和脚本声明的
+    分辨率必须一致**，否则会得到一堆"永远找不到"的假失败。
+    """
+
+    SIZE = (1918, 1080)
+
+    def _make_ctx(self, tmp_path, matcher):
+        from gamebot.atomic.backends.fake import build_fake_backends
+        from gamebot.atomic.session import BaseSession
+        from gamebot.config.schema import AppConfig, BackendKind
+        from gamebot.context import RunContext
+
+        config = AppConfig.defaults()
+        config.screen.backend = BackendKind.FAKE
+        config.paths.root = tmp_path
+        config.paths.logs = tmp_path / "logs"
+        config.paths.screenshots = tmp_path / "logs" / "screenshots"
+        config.paths.journals = tmp_path / "logs" / "journals"
+        config.vision.record = False
+        session = BaseSession(build_fake_backends(size=self.SIZE), matcher=matcher)
+        return RunContext(session, config, frame_ttl=0.5)
+
+    def test_create_team_reads_params_and_delegates(self, tmp_path, matcher):
+        from games.mingjiangsha.jingji.steps import create_team
+
+        matcher.matches = {"jingji/create_team.png": (Point(1500, 700), 0.95)}
+        run_ctx = self._make_ctx(tmp_path, matcher)
+        run_ctx.set_params({"jingji.confidence": 0.8, "jingji.settle": 0.0})
+        try:
+            outcome = Executor(run_ctx).run(create_team)
+        finally:
+            run_ctx.close()
+
+        assert outcome.ok is True, outcome.message
+        assert outcome.action["template"] == "jingji/create_team.png"
+
+    def test_threshold_comes_from_the_param(self, tmp_path, matcher):
+        """阈值来自运行参数 —— 分数低于它就找不到（不是硬编码在函数里）。"""
+        from games.mingjiangsha.jingji.steps import create_team
+
+        matcher.matches = {"jingji/create_team.png": (Point(1500, 700), 0.7)}
+        run_ctx = self._make_ctx(tmp_path, matcher)
+        try:
+            run_ctx.set_params({"jingji.confidence": 0.9, "jingji.settle": 0.0})
+            assert Executor(run_ctx).run(create_team).ok is False
+
+            run_ctx.set_params({"jingji.confidence": 0.5, "jingji.settle": 0.0})
+            assert Executor(run_ctx).run(create_team).ok is True
+        finally:
+            run_ctx.close()
+
+    def test_all_three_are_plain_functions(self):
+        """它们必须是**函数**（有 __name__），不是类的实例。"""
+        from games.mingjiangsha.jingji import steps
+
+        for name in ("create_team", "add_pet", "start_match", "enter_jingji"):
+            func = getattr(steps, name)
+            assert callable(func), f"{name} 该是可调用的"
+            assert getattr(func, "__name__", "") == name, f"{name} 的名字就是它自己"

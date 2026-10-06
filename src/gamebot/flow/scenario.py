@@ -178,10 +178,6 @@ class Scenario:
         self.graph.validate()
         validate_binding(self.graph, self.tree)
 
-        for node in self.graph.nodes.values():
-            if node.on_timeout and node.on_timeout not in self.graph.nodes:
-                problems.append(f"节点 {node.id!r} 的 on_timeout 指向不存在的节点")
-
         if self.options.recovery_node and self.options.recovery_node not in self.graph.nodes:
             problems.append(
                 f"recovery_node 指向不存在的节点: {self.options.recovery_node!r}"

@@ -32,10 +32,13 @@ from .test_ui_run import _entry
 
 @pytest.fixture
 def ui(qt_app, tmp_path, monkeypatch):
-    """一个真实主窗口，脚本假、后端假、模板检查放行。"""
+    """一个真实主窗口，脚本假、后端假。
+
+    （以前还要 monkeypatch ``check_templates`` —— 那个预检已经删掉了，
+    见 ``tests/test_ui_run.py`` 里的说明。）
+    """
     entry = _entry()
     monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
-    monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: [])
 
     main = win_mod.MainWindow()
     main._target_window_ok = lambda e: True
@@ -418,36 +421,26 @@ class TestNoCheckButton:
         assert main._check_page is not None
         assert main.workspace.indexOf(main._check_page) >= 0
 
-    def test_missing_templates_block_start(self, qt_app, monkeypatch, ui) -> None:
-        """**缺模板要拦住开始**，并说清缺哪些 —— 这是原来那个按钮提供的信息。"""
+    def test_there_is_no_template_preflight_anymore(self, qt_app, ui) -> None:
+        """**不再有"启动前查模板齐不齐"这一步。**
+
+        它要靠"哪一步用哪张图"的声明，而步骤现在是普通函数、没有那个属性。
+        缺图的报错由识图本身给出（**带模板路径**），重复出现在日志里同样看得见 ——
+        为它维护一套反射 + 声明机制不划算（用户的原话："反正识图失败了，会报错，
+        传导上来"）。
+        """
+        assert not hasattr(bs, "check_templates")
+
+    def test_start_does_not_ask_about_templates(self, qt_app, monkeypatch, ui) -> None:
+        """所以「开始」不该因为模板的事被拦下。"""
         main, _ = ui
-        monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: ["a.png", "b.png"])
         shown: list[tuple[str, str]] = []
         monkeypatch.setattr(main, "_info_box", lambda title, body: shown.append((title, body)))
 
         main._on_start()
 
-        assert main._engine_running is False, "缺模板时不该跑起来"
-        assert shown, "要弹一个框告诉用户"
-        title, body = shown[0]
-        assert "模板" in title
-        assert "a.png" in body and "b.png" in body, "缺哪些要说出来"
-
-    def test_missing_templates_are_reported_before_anything_else(
-        self, qt_app, monkeypatch, ui
-    ) -> None:
-        """缺模板的检查要在**建 Session 之前** —— 否则会白抓一次屏。"""
-        main, _ = ui
-        order: list[str] = []
-        monkeypatch.setattr(
-            bs, "check_templates", lambda cfg, sc: order.append("check") or ["a.png"]
-        )
-        monkeypatch.setattr(main, "_info_box", lambda *_: None)
-
-        main._on_start()
-
-        assert order == ["check"]
-        assert main._run_ctx is None, "没通过检查就不该建 Session"
+        assert not any("模板" in title for title, _ in shown), "不再做模板预检了"
+        assert main._run_ctx is not None, "该照常装起来"
 
 
 class TestScriptSelectionBookkeeping:

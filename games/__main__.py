@@ -106,16 +106,9 @@ def cmd_check(args: argparse.Namespace) -> int:
         label = root.relative_to(_ROOT) if root.is_relative_to(_ROOT) else root
         print(f"    {index + 1}. {label}（{exists}）")
 
-    from gamebot.bootstrap import check_templates
-
-    missing = check_templates(config, scenario)
-    if missing:
-        print(f"\n✗ 缺 {len(missing)} 个模板文件（截好图放到上面的模板根里）:")
-        for name in missing:
-            print(f"    - {name}")
-        return 1
-
-    print("\n✓ 模板文件齐全")
+    # **不再检查"模板齐不齐"** —— 那要靠"哪一步用哪张图"的声明，
+    # 而步骤现在是普通函数、没有那个属性。缺图的报错由识图本身给出
+    # （带模板路径），重复出现在日志里同样看得见。
     return 0
 
 
@@ -213,19 +206,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"✗ 没有这个节点: {args.node!r}", file=sys.stderr)
         return 2
 
-    # 装配期就把能查的错查掉：配置 + 定义 + 模板文件。
-    # **别把"模板少一张"拖到跑起来之后** —— 那时它表现为"跑到某个分支就卡住"，
-    # 排查成本高得多。
+    # 装配期就把能查的错查掉：配置 + 定义。
     scenario.validate()
     config.paths.ensure()
-    from gamebot.bootstrap import check_templates
-
-    missing = check_templates(config, scenario)
-    if missing:
-        print(f"✗ 缺 {len(missing)} 个模板文件，先跑 check 看看:", file=sys.stderr)
-        for name in missing[:5]:
-            print(f"    - {name}", file=sys.stderr)
-        return 1
 
     setup_logging(config.logging.level)
 

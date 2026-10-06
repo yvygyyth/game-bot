@@ -186,7 +186,6 @@ class TestEndToEnd:
         from gamebot.atomic.session import BaseSession
         from gamebot.bootstrap import build_context, build_engine
         from gamebot.config.schema import AppConfig, BackendKind
-        from gamebot.execution.step import FunctionStep
         from gamebot.flow.graph import Graph, Node
         from gamebot.flow.scenario import Scenario
         from gamebot.state.page import Page, PageTree
@@ -203,7 +202,7 @@ class TestEndToEnd:
         tree = PageTree()
         tree.add(Page("home", queries=(ImageQuery("home.png"),)))
         graph = Graph(initial="home")
-        graph.add_node(Node("home", page="home", steps=[FunctionStep(step)]))
+        graph.add_node(Node("home", page="home", steps=[step]))
         scenario = Scenario(name="form", tree=tree, graph=graph)
         scenario.options.tick_interval = 0.001
         scenario.options.max_ticks = 2

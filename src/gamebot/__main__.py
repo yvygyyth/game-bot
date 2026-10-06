@@ -96,8 +96,12 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    """校验配置 + 脚本定义 + 模板存在性。CI 里跑这个能挡住大部分低级错误。"""
-    from .bootstrap import check_templates
+    """校验配置 + 脚本定义。CI 里跑这个能挡住大部分低级错误。
+
+    **不再检查模板文件齐不齐** —— 那要靠哪一步用哪张图的声明，
+    而步骤现在是普通函数、没有那个属性。缺图的报错由识图本身给出
+    （带模板路径），重复出现在日志里同样看得见。
+    """
     from .config.loader import load_config
     from .flow.loader import load_scenario
 
@@ -117,13 +121,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     if unclaimed:
         print(f"· 以下状态没有节点认领（不会出现在定位结果里）: {', '.join(unclaimed)}")
 
-    missing = check_templates(config, scenario)
-    if missing:
-        print(f"✗ 缺失 {len(missing)} 个模板文件:")
-        for name in missing:
-            print(f"    - {name}")
-        return 1
-    print("✓ 模板文件齐全")
     return 0
 
 

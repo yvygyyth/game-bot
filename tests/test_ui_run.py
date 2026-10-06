@@ -127,12 +127,9 @@ def ui(qt_app, tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(bs, "build_session_from_config", fake_session)
-    # 「开始」在缺模板时会**拒绝启动**（刻意的：模板少一张的表现是"跑到某个
-    # 分支卡住"，早炸早好）。假脚本没有真模板文件，所以把那个检查也换掉 ——
-    # 否则测的就不是"开始这条路"，而是"我给假脚本配齐模板没有"。
-    # 注意要打在 bootstrap 上：window 里是**函数内**导入的（`from ..bootstrap
-    # import check_templates`），打在 window 模块上会 AttributeError。
-    monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: [])
+    # （以前这里还要替掉 ``check_templates`` —— 「开始」会在缺模板时拒绝启动。
+    # 那个预检已经删掉了：它要靠"哪一步用哪张图"的声明，而步骤现在是普通函数、
+    # 没有那个属性。缺图的报错由识图本身给出，带模板路径。）
 
     main = win_mod.MainWindow()
     main.resize(900, 700)
@@ -173,7 +170,6 @@ def ui_long(qt_app, tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(bs, "build_session_from_config", fake_session)
-    monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: [])
 
     main = win_mod.MainWindow()
     main.resize(900, 700)

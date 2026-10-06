@@ -442,7 +442,7 @@ class MainWindow(QMainWindow):
     def _on_start(self) -> None:
         """装配 -> 交给工作线程跑。
 
-        **装配在界面线程做完**（读配置、建 Session、校验定义、检查模板），
+        **装配在界面线程做完**（读配置、建 Session、校验定义），
         原因是这些步骤失败时要能立刻弹给人看；而 ``run()`` 那个阻塞循环
         才交给工作线程。分成两半的界线就是"会不会长时间阻塞"。
         """
@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         if not self._target_window_ok(entry):
             return
 
-        from ..bootstrap import build_context, build_engine, check_templates
+        from ..bootstrap import build_context, build_engine
 
         try:
             config = entry.spec.build_config()
@@ -483,15 +483,6 @@ class MainWindow(QMainWindow):
             return
         if params:
             log.info("运行参数: %s", params)
-
-        missing = check_templates(config, scenario)
-        if missing:
-            self._info_box(
-                "缺模板文件",
-                f"缺 {len(missing)} 个：\n  " + "\n  ".join(missing[:8])
-                + "\n\n先跑「检查」看看，把图补齐再开始。",
-            )
-            return
 
         config.paths.ensure()
         node_id = getattr(self.controls.current_node, "node_id", "") or ""

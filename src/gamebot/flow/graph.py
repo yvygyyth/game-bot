@@ -56,7 +56,7 @@ from ..utils.logging import get_logger
 if TYPE_CHECKING:
     from ..atomic.query import Query
     from ..context import RunContext
-    from ..execution.step import Step
+    from ..execution.step import StepFunc
 
 log = get_logger("flow.graph")
 
@@ -126,7 +126,6 @@ class Transition:
     :param priority: 数字大的先判断。多条边同时成立时靠它定胜负 ——
         **不要靠列表顺序**，那样挪一行就会静默改变行为。
     :param label: 人类可读说明，会写进日志和报告。
-    :param cooldown: 触发后多少秒内不允许再次触发。防止识别抖动导致来回横跳。
     :param max_times: 一轮运行里最多触发几次；``0`` = 不限。用于"重试 3 次就放弃"。
     :param kind: 转移类型，见 :class:`EdgeKind`。
     :param meta: 任意附加信息。
@@ -186,27 +185,15 @@ class Node:
     :param priority: 多个节点声明同一个 ``page`` 时谁是**主节点**。
         重定位必须落到唯一一个节点上，所以同状态多节点时要能选出主节点：
         取 ``priority`` 最大者，并列时取先声明的。
-    :param on_enter: 进入该节点时执行一次（进入 = 从别的节点切过来）。
-    :param on_exit: 离开该节点时执行一次。
-    :param max_visits: 一轮运行中最多执行几次；``0`` = 不限。
         防止"原地死循环刷同一个界面"。
-    :param cooldown: 两次执行之间的最小间隔（秒）。防止空转打满 CPU / adb。
-    :param timeout: 在该节点停留的时间预算（秒）；超了走 ``on_timeout``。
-    :param on_timeout: 超时后跳到哪个节点；空串 = 交给引擎的通用兜底。
     :param description: 说明。
     :param meta: 任意附加信息。
     """
 
     id: NodeId
-    steps: list[Step] = field(default_factory=list)
+    steps: list[StepFunc] = field(default_factory=list)
     page: PageId | None = None
     priority: int = 0
-    on_enter: list[Step] = field(default_factory=list)
-    on_exit: list[Step] = field(default_factory=list)
-    max_visits: int = 0
-    cooldown: float = 0.0
-    timeout: float | None = None
-    on_timeout: NodeId = ""
     description: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -233,15 +220,9 @@ class Node:
         """
         if not self.id or not self.id.strip():
             raise FlowError("节点的 id 不能为空")
-        if self.max_visits < 0:
-            raise FlowError(f"节点 {self.id!r} 的 max_visits 不能为负（0 = 不限）")
-        if self.cooldown < 0:
-            raise FlowError(f"节点 {self.id!r} 的 cooldown 不能为负")
-        if self.timeout is not None and self.timeout <= 0:
-            raise FlowError(f"节点 {self.id!r} 的 timeout 必须 > 0 或留空")
 
     @classmethod
-    def of(cls, node_id: NodeId, *steps: Step, **kwargs: Any) -> Node:
+    def of(cls, node_id: NodeId, *steps: StepFunc, **kwargs: Any) -> Node:
         """只做一件事的节点的简写：``Node.of("battle", ClickImageStep("skill.png"))``。"""
         return cls(id=node_id, steps=list(steps), **kwargs)
 
@@ -252,7 +233,7 @@ class Node:
     @property
     def is_passive(self) -> bool:
         """只识别不动作的节点。"""
-        return not self.steps and not self.on_enter and not self.on_exit
+        return not self.steps
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -260,12 +241,6 @@ class Node:
             "page": self.page,
             "priority": self.priority,
             "steps": len(self.steps),
-            "on_enter": len(self.on_enter),
-            "on_exit": len(self.on_exit),
-            "max_visits": self.max_visits,
-            "cooldown": self.cooldown,
-            "timeout": self.timeout,
-            "on_timeout": self.on_timeout,
         }
 
     def __repr__(self) -> str:
@@ -698,14 +673,6 @@ class Graph:
             if edge.max_times < 0:
                 problems.append(f"边 {edge.display} 的 max_times 不能为负")
 
-        for node in self.nodes.values():
-            if node.cooldown < 0:
-                problems.append(f"节点 {node.id!r} 的 cooldown 不能为负")
-            if node.max_visits < 0:
-                problems.append(f"节点 {node.id!r} 的 max_visits 不能为负")
-            if node.on_timeout and node.on_timeout not in self.nodes:
-                problems.append(f"节点 {node.id!r} 的 on_timeout 指向不存在的节点")
-
         if self.initial in self.nodes:
             orphans = sorted(set(self.nodes) - self.reachable_from())
             if orphans:
@@ -782,35 +749,6 @@ class GraphCursor:
     def next(self, ctx: RunContext, *, now: float = 0.0) -> NodeId | None:
         """评估下一步并返回目标；``None`` = 原地不动。"""
         return self.evaluate(ctx, now=now).target
-
-    def should_run(self, ctx: RunContext, *, now: float = 0.0) -> tuple[bool, str]:
-        """当前节点这一轮该不该执行 steps。返回 ``(该执行?, 原因)``。
-
-        两个拦截条件，都是**这个节点自己的运行期计数**：
-
-        * ``max_visits`` 用尽 —— 防止原地死循环刷同一个界面；
-        * ``cooldown`` 还没过 —— 防止空转打满 CPU 和 adb。
-
-        ## 状态校验**不在这里**
-
-        早期它还会比一次 ``node.page`` 和实测状态。那条检查现在归引擎，走
-        :class:`~gamebot.flow.binding.StateBinding`：
-
-        * 关联表才说得清"期望什么、实测什么、不一致时该去哪"；
-          这里比一下只能给出一句"不符"，而且会**绕开关联表**变成第二份实现；
-        * 引擎的顺序是"先校验（可能重定位）、再问该不该跑"，位置不对时根本
-          走不到这里。
-
-        留着它会让同一件事有两个出处 —— 那是这套设计一直在避免的东西。
-        """
-        node = self.graph.node(self.current)
-        if node is None:
-            return False, f"当前节点不存在: {self.current!r}"
-
-        if node.max_visits and self.visits_of(node.id) >= node.max_visits:
-            return False, f"已达最大访问次数 {node.max_visits}"
-
-        return True, ""
 
     def advance(self, target: NodeId, *, now: float = 0.0) -> bool:
         """移动到目标节点，并记录一次触发。返回是否真的移动了。"""

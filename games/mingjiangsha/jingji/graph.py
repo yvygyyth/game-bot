@@ -44,7 +44,7 @@ from gamebot.scenario_spec import ScenarioSpec
 from games import on_page
 
 from .pages import FEATURE_TREE
-from .steps import AddPetStep, CreateTeamStep, EnterJingjiStep, StartMatchStep
+from .steps import add_pet, create_team, enter_jingji, start_match
 
 #: 这个功能的流程声明。**只有数据** —— 组装交给框架。
 #:
@@ -65,8 +65,7 @@ SCENARIO = ScenarioSpec(
             # **注意是 home/lobby，不是 home** —— home 是分类容器，不记录信息。
             # 把节点挂在容器上会被 validate_binding 拦住（那是对的）。
             page="home/lobby",
-            steps=[EnterJingjiStep()],
-            cooldown=0.5,
+            steps=[enter_jingji],
             description="在首页点竞技入口",
             transitions=[
                 Transition(
@@ -80,8 +79,7 @@ SCENARIO = ScenarioSpec(
         Node(
             "jingji/before_create",
             page="home/jingji/before_create",
-            steps=[CreateTeamStep()],
-            cooldown=0.8,
+            steps=[create_team],
             description="建队前：点「创建队伍」",
             transitions=[
                 Transition(
@@ -95,8 +93,7 @@ SCENARIO = ScenarioSpec(
         Node(
             "jingji/after_create",
             page="home/jingji/after_create",
-            steps=[AddPetStep()],
-            cooldown=0.8,
+            steps=[add_pet],
             description="建队后：点「添加伙伴」",
             transitions=[
                 Transition(
@@ -110,8 +107,7 @@ SCENARIO = ScenarioSpec(
         Node(
             "jingji/after_add",
             page="home/jingji/after_add",
-            steps=[StartMatchStep()],
-            cooldown=0.8,
+            steps=[start_match],
             description="加完伙伴：点「开始匹配」",
             # 没有出边 —— 见模块开头"没有通往匹配中的边"那一节
         ),

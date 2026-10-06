@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from ..atomic.frame import Frame
     from ..context import RunContext
     from ..execution.executor import Executor, StepOutcome
-    from ..execution.step import Step
+    from ..execution.step import StepFunc
 
 log = get_logger("flow.engine")
 
@@ -288,7 +288,6 @@ class FlowEngine:
         self._unknown_since: float | None = None
         #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _note_stall）
         self._stall_rounds = 0
-        self._entered_nodes: set[NodeId] = set()
         self._recovery_warned: set[tuple[NodeId, PageId]] = set()
         self.params: dict[str, Any] = dict(params or {})
         """运行参数（入参）的**引擎侧**那一份，开跑时合进上下文。
@@ -358,7 +357,6 @@ class FlowEngine:
         self._stop_message = ""
         self._unknown_since = None
         self._stall_rounds = 0
-        self._entered_nodes.clear()
         self._recovery_warned.clear()
 
         # 2) 清运行期上下文：跟踪器（当前状态 + 变更历史）、黑板、中止标志、
@@ -540,15 +538,6 @@ class FlowEngine:
             self._note_advance(now=now)
             return None
 
-        # 状态停太久了：给它声明的出路（on_timeout / recovery_node）
-        self._check_node_timeout(node, now)
-
-        run_ok, run_why = self.cursor.should_run(self.ctx, now=now)
-        if not run_ok:
-            log.debug("本轮不执行 %r: %s", node.id, run_why)
-            self._note_advance(now=now)
-            return None
-
         outcomes = self._run_node(node.id)
         # 转移决策：**没走成的也记**（"为什么它不动"要靠这个回答）
         self._note_advance(now=now)
@@ -600,7 +589,6 @@ class FlowEngine:
             return None
 
         self.cursor.advance(target.id, now=now)
-        self._entered_nodes.discard(target.id)
         self._note_recovery(node.id, expected, anchor, target.id, recovered.value)
         log.info(
             "状态自检不符：节点 %r 期望 %r，实测 %r -> 重定位到节点 %r",
@@ -655,10 +643,7 @@ class FlowEngine:
 
         节点声明了 cooldown 时取较大者 —— 防止"某个界面原地空转刷屏"的第一道闸。
         """
-        node = self.scenario.graph.node(self.cursor.current)
         base = self.scenario.options.tick_interval
-        if node is not None and node.cooldown > 0:
-            return max(base, node.cooldown)
         return base
 
     def _handle_unknown(self, now: float) -> None:
@@ -709,51 +694,33 @@ class FlowEngine:
         node = self.scenario.graph.require(state_id)
         outcomes: list[StepOutcome] = []
 
-        if state_id not in self._entered_nodes:
-            self._entered_nodes.add(state_id)
-            if node.on_enter:
-                log.debug("节点 %r 首次进入，执行 on_enter", state_id)
-                outcomes.extend(self._run_steps(node.on_enter, state_id))
-
+        # 步骤是普通函数，没有"首次进入"这种两段式钩子 —— 一个节点就是一件事。
         outcomes.extend(self._run_steps(node.steps, state_id))
         return outcomes
 
-    def _run_steps(self, steps: list[Step], node_id: NodeId) -> list[StepOutcome]:
-        """按顺序跑一串步骤，逐个记账。"""
-        collected: list[StepOutcome] = []
-        for step in steps:
-            if step.needs_fresh_frame:
-                # 步骤显式声明要新图 —— 由引擎兑现，而不是让步骤自己截图。
-                # 这样"我看到了新画面"永远是一个显式事件，不藏在副作用里。
-                self.ctx.frame(fresh=True)
-            if self.executor is None:  # pragma: no cover - 装配期必然有执行器
-                log.warning("没有执行器，跳过步骤 %r", step.name)
-                continue
-            outcome = self.executor.run(step)
-            self._note_outcome(outcome)
-            collected.append(outcome)
-        return collected
+    def _run_steps(self, steps: list[StepFunc], node_id: NodeId) -> list[StepOutcome]:
+        """按顺序跑一串步骤。**某一步失败就停在那里**。
 
-    def _check_node_timeout(self, node: Node, now: float) -> None:
-        """节点停留超预算时按 ``on_timeout`` 走出去。
+        停下来而不是继续：一步失败（多半是识图没命中）意味着它的前提没成立，
+        而后面步骤的前提正是"前一步成功了"。继续跑只会在错的状态上乱操作。
 
-        只在**确实超过了**才动游标，而且只走一次：超时后节点的 ``since``
-        会在下一次进这个节点时重置（那是跟踪层的职责），所以这里不需要
-        额外的"已处理"标记。
+        停下来之后由调用方（:meth:`tick`）拿实测状态去**重定位**。
+
+        ``node_id`` 只用于日志（说清是哪一步、在哪个节点上失败）。
         """
-        if node.timeout is None or self.tracker.elapsed(now) < node.timeout:
-            return
-        target = node.on_timeout or self.scenario.options.recovery_node
-        if not target or target == node.id:
-            return
-        log.warning(
-            "节点 %r 停留超过 %.1fs，按超时出路跳到 %r",
-            node.id,
-            node.timeout,
-            target,
-        )
-        self.cursor.advance(target, now=now)
-        self._entered_nodes.discard(target)
+        if self.executor is None:  # pragma: no cover - 装配期必然有执行器
+            return []
+        outcomes = self.executor.run_many(list(steps))
+        for outcome in outcomes:
+            self._note_outcome(outcome)
+        if outcomes and not outcomes[-1].ok:
+            log.debug(
+                "节点 %r 的步骤 %r 失败（%s），这一轮剩下的步骤不跑了",
+                node_id,
+                outcomes[-1].step,
+                outcomes[-1].message,
+            )
+        return outcomes
 
     def _check_terminal(self, page_id: PageId, *, now: float) -> bool:
         """终态判断：stop_pages 或状态的 terminal 标记。"""
@@ -827,13 +794,13 @@ class FlowEngine:
         ``_stall_rounds = 0`` —— 于是计数永远到不了阈值，"流程走完"永远不触发。
         计数器的读改写别跨函数边界，这类错误还特别难看出来（代码看着挺对）。
         """
-        node = self.scenario.graph.node(self.cursor.current)
+        current = self.scenario.graph.node(self.cursor.current)
         stuck = (
             not outcome.ok
             and outcome.status == "not_found"
             # 有出边说明它还有下一步可走 —— 那就不是"干完了"，别停
-            and node is not None
-            and not self.scenario.graph.out_edges(node.id)
+            and current is not None
+            and not self.scenario.graph.out_edges(current.id)
         )
         self._stall_rounds = self._stall_rounds + 1 if stuck else 0
         threshold = self.scenario.options.dead_end_rounds

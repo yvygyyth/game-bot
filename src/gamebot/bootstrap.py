@@ -30,7 +30,7 @@ from .atomic.vision import Matcher, TextReader, UnavailableTextReader
 from .config.loader import load_config, load_regions
 from .config.schema import AppConfig, BackendKind
 from .context import RunContext
-from .exceptions import ConfigError, GameBotError, TemplateNotFoundError
+from .exceptions import ConfigError, GameBotError
 from .execution.executor import Executor, ExecutorHooks
 from .execution.journal import Journal, JsonlJournal, NullJournal
 from .flow.engine import FlowEngine, RunReport
@@ -50,7 +50,6 @@ __all__ = [
     "build_recorder",
     "build_session_from_config",
     "check_config_paths",
-    "check_templates",
     "run_scenario",
 ]
 
@@ -199,67 +198,6 @@ def build_session_from_config(
 # --------------------------------------------------------------------------- #
 # 装配期检查
 # --------------------------------------------------------------------------- #
-def check_templates(config: AppConfig, scenario: Scenario) -> list[str]:
-    """检查脚本引用的模板文件是否都存在，返回缺失列表。
-
-    **这是装配期最有价值的一个检查**。模板名拼错、导出时忘了放进 assets、
-    大小写不一致……这些问题在运行期表现为"莫名其妙找不到图"（而且是在
-    某个分支才出现，跑了十分钟才撞上），排查成本极高；
-    在这里只是一行路径比较。
-
-    查两个来源：
-
-    1. **状态树**里所有 Query 的 ``template``（含嵌套组合查询）——
-       决定"能不能认出来是哪一页"；
-    2. **流程图**里所有 Step 的 :meth:`Step.used_templates` ——
-       决定"点不点得动"。
-
-    第 2 条容易漏：状态条件用的图往往就那几张，真正多的是各种按钮。
-    只查第 1 条会让检查给出"模板齐全"的假安全感。
-    自定义步骤请覆写 ``used_templates()``，否则查不到（漏报，不误伤）。
-    """
-    missing: list[str] = []
-    roots = config.template_roots()
-
-    for template in sorted(_collect_templates(scenario)):
-        # 任何一个模板根里有就算找到（附加根优先，但对"存在性"检查无所谓顺序）
-        if not any((root / template).is_file() for root in roots):
-            missing.append(template)
-    return missing
-
-
-def _collect_templates(scenario: Scenario) -> set[str]:
-    """提取整份脚本会用到的模板名：状态查询 + 步骤。"""
-    found: set[str] = set()
-
-    def walk_query(obj: Any, depth: int = 0) -> None:
-        if depth > 8:  # 组合查询最多嵌几层，防手滑写出环
-            return
-        template = getattr(obj, "template", None)
-        if isinstance(template, str) and template:
-            found.add(template)
-        for attr in ("queries", "query", "exclude"):
-            nested = getattr(obj, attr, None)
-            if nested is None:
-                continue
-            if isinstance(nested, (list, tuple)):
-                for item in nested:
-                    walk_query(item, depth + 1)
-            else:
-                walk_query(nested, depth + 1)
-
-    for page in scenario.tree.walk():
-        walk_query(page)
-
-    for node in scenario.graph.nodes.values():
-        for step in (*node.steps, *node.on_enter, *node.on_exit):
-            used = getattr(step, "used_templates", None)
-            if callable(used):
-                found.update(t for t in used() if t)
-
-    return found
-
-
 def check_config_paths(config: AppConfig) -> None:
     """确保运行期目录存在。"""
     config.paths.ensure()
@@ -358,12 +296,6 @@ def bootstrap(
         log.debug("已加载 %d 个命名区域", len(regions))
 
     scenario = load_scenario(config.paths.resolve(config.flow_file))
-    missing = check_templates(config, scenario)
-    if missing:
-        raise TemplateNotFoundError(
-            "以下模板图不存在（检查 assets/templates 与状态树里的路径）:\n  - "
-            + "\n  - ".join(missing)
-        )
 
     ctx = build_context(
         config,

@@ -1,4 +1,4 @@
-﻿"""末梢节点"没活儿干了"的判定 —— 流程走完之后必须自己结束。
+"""末梢节点"没活儿干了"的判定 —— 流程走完之后必须自己结束。
 
 ## 为什么要这块
 
@@ -17,7 +17,6 @@ from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
 from gamebot.bootstrap import build_context, build_engine
-from gamebot.execution.step import FunctionStep
 from gamebot.flow.engine import DEAD_END_STALL_ROUNDS, StopReason
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
@@ -96,7 +95,7 @@ def _run(**kwargs):
 class TestStopsWhenOutOfWork:
     def test_dead_end_with_not_found_stops_itself(self):
         """没有出边的末梢 + 一直 not_found = 流程走完了。"""
-        report = _run(steps=[FunctionStep(_not_found, name="推进队伍流程")])
+        report = _run(steps=[_not_found])
 
         assert report.stop_reason is StopReason.NO_MORE_WORK
         # 关键：**只跑了几轮**，不是空转到 max_ticks
@@ -104,27 +103,31 @@ class TestStopsWhenOutOfWork:
         assert report.ticks < 40
 
     def test_stop_message_says_which_node_and_why(self):
-        """报告里要说清是哪个节点、最后一步是什么 —— 否则用户不知道去补什么。"""
-        report = _run(steps=[FunctionStep(_not_found, name="推进队伍流程")])
+        """报告里要说清是哪个节点、最后一步是什么 —— 否则用户不知道去补什么。
+
+        （步骤名来自 ``__name__`` —— 以前要传 ``FunctionStep(fn, name="…")``，
+        现在函数自己叫什么就叫什么，少一处能写歪的地方。）
+        """
+        report = _run(steps=[_not_found])
 
         assert "leaf" in report.stop_message
-        assert "推进队伍流程" in report.stop_message
+        assert "_not_found" in report.stop_message
 
     def test_it_is_not_a_failure(self):
         """活儿干完了不是失败：退出码和报告都该算正常。"""
-        report = _run(steps=[FunctionStep(_not_found, name="推进队伍流程")])
+        report = _run(steps=[_not_found])
         assert report.ok is True
 
     def test_threshold_is_configurable(self):
         """过渡慢的游戏可以把轮数调大。"""
-        report = _run(steps=[FunctionStep(_not_found, name="推进")], dead_end_rounds=6)
+        report = _run(steps=[_not_found], dead_end_rounds=6)
         assert report.stop_reason is StopReason.NO_MORE_WORK
         assert report.ticks > 6
 
     def test_zero_disables_the_rule(self):
         """0 = 关掉这条判定（"我就想让它一直转着等"）。"""
         report = _run(
-            steps=[FunctionStep(_not_found, name="推进")], dead_end_rounds=0, max_ticks=12
+            steps=[_not_found], dead_end_rounds=0, max_ticks=12
         )
         assert report.stop_reason is StopReason.MAX_TICKS
 
@@ -135,13 +138,13 @@ class TestDoesNotStopWhenThereIsStillWork:
     def test_node_with_out_edges_keeps_going(self):
         """还有出边 = 还有下一步可走，不能因为"这轮没找到"就收工。"""
         report = _run(
-            steps=[FunctionStep(_not_found, name="推进")], extra_edge=True, max_ticks=15
+            steps=[_not_found], extra_edge=True, max_ticks=15
         )
         assert report.stop_reason is StopReason.MAX_TICKS, report.stop_reason
 
     def test_error_is_not_treated_as_out_of_work(self):
         """``error`` 是识别/配置坏了，不能被"流程正常结束"掩盖掉。"""
-        report = _run(steps=[FunctionStep(_boom, name="推进")], max_ticks=12)
+        report = _run(steps=[_boom], max_ticks=12)
         assert report.stop_reason is StopReason.MAX_TICKS, report.stop_reason
 
     def test_counter_resets_after_a_success(self):
@@ -155,7 +158,7 @@ class TestDoesNotStopWhenThereIsStillWork:
                 return ActionResult.success("点了")
             return ActionResult.not_found("这轮没找到")
 
-        report = _run(steps=[FunctionStep(flaky, name="推进")], max_ticks=20)
+        report = _run(steps=[flaky], max_ticks=20)
         assert report.stop_reason is StopReason.MAX_TICKS, report.stop_reason
         assert calls["n"] > DEAD_END_STALL_ROUNDS
 

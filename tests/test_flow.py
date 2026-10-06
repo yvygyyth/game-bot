@@ -20,7 +20,7 @@ from gamebot.flow import (
     StopReason,
     UnknownPolicy,
 )
-from gamebot.state import Page, PageGroup, PageMatch, PageTracker, PageTree
+from gamebot.state import Page, PageGroup, PageTracker, PageTree
 from gamebot.types import ActionResult, Point
 
 
@@ -58,14 +58,12 @@ class TestNode:
         node = Node("a")
         assert node.steps == []
         assert node.page is None
-        assert node.max_visits == 0
-        assert node.cooldown == 0.0
+        assert node.transitions == []
 
     def test_of_shorthand(self) -> None:
-        node = Node.of("a", page="home", max_visits=3)
+        node = Node.of("a", page="home")
         assert node.id == "a"
         assert node.page == "home"
-        assert node.max_visits == 3
 
     def test_display_and_passive(self) -> None:
         assert Node("a", description="打怪").display == "打怪"
@@ -280,19 +278,14 @@ class TestGraphValidate:
         with pytest.raises(FlowError, match="source"):
             Edge("", "b")
 
-    def test_negative_node_values_raise_at_construction(self) -> None:
-        with pytest.raises(FlowError, match="cooldown"):
-            Node("a", cooldown=-1.0)
-        with pytest.raises(FlowError, match="max_visits"):
-            Node("a", max_visits=-1)
+    def test_empty_node_id_raises_at_construction(self) -> None:
+        """节点只剩一条自己的规则:id 不能空。
+
+        ``cooldown`` / ``max_visits`` / ``timeout`` 那些节流旋钮已经删掉了 ——
+        节奏由 tick 间隔和状态识别（连续 N 帧才算成立）负责,
+        出问题看日志。"""
         with pytest.raises(FlowError, match="id 不能为空"):
             Node("")
-
-    def test_on_timeout_must_exist(self) -> None:
-        graph = small_graph()
-        graph.nodes["a"].on_timeout = "ghost"
-        with pytest.raises(FlowError):
-            graph.validate()
 
     def test_terminal_edge_to_node_with_out_edges_raises(self) -> None:
         graph = Graph(initial="a")
@@ -374,60 +367,6 @@ class TestGraphCursor:
         decision = cursor.evaluate(ctx, now=3.0)
         assert decision.target is None
         assert "最大次数" in decision.attempts[0].reason
-
-    def test_should_run_respects_max_visits(self, ctx) -> None:
-        graph = Graph(initial="x")
-        graph.add_node(Node("x", max_visits=1))
-        cursor = GraphCursor(graph)
-        assert cursor.should_run(ctx) == (True, "")
-        cursor.visits["x"] = 1
-        ok, why = cursor.should_run(ctx)
-        assert ok is False
-        assert "最大访问次数" in why
-
-    def test_should_run_ignores_state(self, ctx) -> None:
-        """状态校验**不在这里** —— 它归引擎走关联表。
-
-        这条用例钉的是"同一件事只有一个出处"：状态不符时该不该动手、
-        以及该去哪儿，都由 ``StateBinding`` 回答（见 ``TestEngineRealign``）。
-        ``should_run`` 只管这个节点自己的运行期计数（冷却 / 访问次数）。
-        """
-        tree = PageTree()
-        tree.add(Page("home", queries=(ImageQuery("h.png"),)))
-        tree.add(Page("battle", queries=(ImageQuery("b.png"),)))
-        ctx.pages = PageTracker(tree)
-
-        graph = Graph(initial="battle")
-        graph.add_node(Node("battle", page="battle"))
-        cursor = GraphCursor(graph)
-
-        ctx.pages.update(PageMatch(id="home", path=("home",)), now=1.0)
-        assert cursor.should_run(ctx) == (True, ""), "状态不符不归它管"
-
-        ctx.pages.update(PageMatch(id="battle", path=("battle",)), now=2.0)
-        assert cursor.should_run(ctx) == (True, "")
-
-    def test_should_run_enforces_max_visits(self, ctx) -> None:
-        graph = Graph(initial="a")
-        graph.add_node(Node("a", max_visits=2))
-        cursor = GraphCursor(graph)
-        assert cursor.should_run(ctx) == (True, "")
-        cursor.visits["a"] = 2
-        ok, why = cursor.should_run(ctx)
-        assert ok is False
-        assert "最大访问次数" in why
-
-    def test_should_run_without_page_declaration(self, ctx) -> None:
-        graph = Graph(initial="x")
-        graph.add_node(Node("x"))
-        assert GraphCursor(graph).should_run(ctx) == (True, "")
-
-    def test_should_run_unknown_node(self, ctx) -> None:
-        cursor = GraphCursor(small_graph())
-        cursor.current = "ghost"
-        ok, why = cursor.should_run(ctx)
-        assert ok is False
-        assert "不存在" in why
 
     def test_reset(self) -> None:
         cursor = GraphCursor(small_graph())
@@ -693,12 +632,6 @@ class TestFlowEngine:
         with pytest.raises(ConfigError):
             FlowEngine(scenario, ctx).run()
 
-    def test_tick_interval_respects_node_cooldown(self, ctx) -> None:
-        scenario = build_scenario()
-        scenario.graph.nodes["home"].cooldown = 2.0
-        engine = FlowEngine(scenario, ctx)
-        assert engine._tick_interval() == 2.0
-
     def test_repr(self, ctx) -> None:
         assert "home" in repr(FlowEngine(build_scenario(), ctx))
 
@@ -905,7 +838,6 @@ class TestEngineRealign:
     def test_recovery_does_not_execute_this_tick(self, ctx, matcher) -> None:
         """重定位只是"把位置摆正"，干活留给下一轮 —— 避免位置刚变就动手。"""
         from gamebot.execution.executor import Executor
-        from gamebot.execution.step import FunctionStep
 
         # 这个用例要真的执行步骤，所以给它一个执行器（conftest 的 ctx 故意不挂：
         # 装配期才由 bootstrap 挂）。
@@ -913,9 +845,12 @@ class TestEngineRealign:
         scenario, _tree = build_live()
 
         calls: list[str] = []
-        scenario.graph.nodes["battle"].steps = [
-            FunctionStep(lambda c: calls.append("battle") or ActionResult.success(1))
-        ]
+
+        def battle_step(c):
+            calls.append("battle")
+            return ActionResult.success(1)
+
+        scenario.graph.nodes["battle"].steps = [battle_step]
         engine = FlowEngine(scenario, ctx)
         engine.tracker.set_initial("home/lobby", now=0.0)
         matcher.matches = {"battle.png": (Point(1, 1), 0.99)}

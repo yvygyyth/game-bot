@@ -54,12 +54,12 @@ nodes:
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any
 
 from ..atomic.query import query_from_dict
 from ..exceptions import ConfigError
-from ..execution.step import step_from_dict
 from ..state.page import PageGroup, PageKind, PageLeaf, PageNode, PageTree
 from ..types import Region
 from .graph import Edge, EdgeKind, Graph, Node
@@ -98,18 +98,17 @@ _PAGE_KEYS = {
 }
 
 #: 节点定义允许的字段。
+#:
+#: **只剩这几个了** —— 节流旋钮（`cooldown` / `max_visits` / `timeout` /
+#: `on_timeout`）和两段式钩子（`on_enter` / `on_exit`）都删了：
+#: 节奏由 tick 间隔和状态识别负责，一个节点就是一件事。
+#: `steps` 留在表里**只是为了给出那句清楚的报错**（见 `_add_node`）。
 _NODE_KEYS = {
-    "cooldown",
     "description",
-    "max_visits",
     "meta",
-    "on_enter",
-    "on_exit",
-    "on_timeout",
     "page",
     "priority",
     "steps",
-    "timeout",
 }
 
 #: 边定义允许的字段。
@@ -305,9 +304,13 @@ def _node_from_config(node_id: str, spec: Any) -> Node:
         raise ConfigError(f"节点 {node_id!r} 的定义必须是映射(mapping)")
     payload = dict(spec)
     _reject_unknown(payload, _NODE_KEYS, f"节点 {node_id!r}")
-    for field in ("steps", "on_enter", "on_exit"):
-        payload[field] = _steps_from_config(payload.get(field), f"节点 {node_id!r} 的 {field}")
-    payload.setdefault("on_timeout", "")
+    unsupported = [f for f in ("steps", "on_enter", "on_exit") if payload.get(f)]
+    if unsupported:
+        raise ConfigError(
+            f"节点 {node_id!r} 写了 {unsupported} —— **YAML 里不支持写步骤**。"
+            "步骤是普通函数（(ctx) -> ActionResult），只能写在 Python 里："
+            "在功能目录的 steps/ 下定义，然后在 graph.py 的 Node(steps=[...]) 里引用。"
+        )
     return Node(id=node_id, **payload)
 
 
@@ -334,20 +337,6 @@ def _edge_from_config(spec: Any, index: int) -> Edge:
     payload.setdefault("label", "")
     payload.setdefault("meta", {})
     return Edge(**payload)
-
-
-def _steps_from_config(raw: Any, where: str) -> list[Any]:
-    if raw is None:
-        return []
-    if not isinstance(raw, (list, tuple)):
-        raise ConfigError(f"{where} 必须是列表")
-    steps = []
-    for item in raw:
-        try:
-            steps.append(step_from_dict(item))
-        except ConfigError as exc:
-            raise ConfigError(f"{where} 解析失败: {exc}") from exc
-    return steps
 
 
 def parse_options(data: dict[str, Any]) -> EngineOptions:
@@ -408,13 +397,25 @@ def _region_from_config(value: Any, where: str) -> Region:
 
 
 def _resolve_function(path: Any, where: str) -> Any:
-    """逃生舱：``"包.模块.函数"`` -> 可调用对象（复用执行层那套解析）。"""
-    from ..execution.step import _resolve_function as resolve
+    """逃生舱：``"包.模块.函数"`` -> 可调用对象。
 
+    用来把**边条件**写成 Python 函数（``{func: games.xxx.my_condition}``）——
+    查询表达不了的复杂逻辑走这条路。
+
+    （**节点步骤不走这里**：步骤是普通函数，必须写在 Python 里，
+    见上面 ``_add_node`` 对 ``steps`` 的报错。）
+    """
+    if not isinstance(path, str) or "." not in path:
+        raise ConfigError(f"{where} 要写成 '包.模块.函数' 的形式，收到 {path!r}")
+    module_path, _, attr = path.rpartition(".")
     try:
-        return resolve(path)
-    except ConfigError as exc:
-        raise ConfigError(f"{where} 解析失败: {exc}") from exc
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ConfigError(f"{where} 导入 {module_path!r} 失败: {exc}") from exc
+    func = getattr(module, attr, None)
+    if not callable(func):
+        raise ConfigError(f"{where} 里 {attr!r} 不是可调用的（{module_path}）")
+    return func
 
 
 def _reject_unknown(payload: dict[str, Any], allowed: set[str], where: str) -> None:

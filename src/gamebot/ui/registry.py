@@ -175,7 +175,7 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
             id=node.id,
             title=node.display,
             page=node.page,
-            steps=len(node.steps) + len(node.on_enter) + len(node.on_exit),
+            steps=len(node.steps),
             out_edges=len(scenario.graph.out_edges(node.id)),
             is_initial=(node.id == scenario.graph.initial),
         )

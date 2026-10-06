@@ -74,39 +74,26 @@ states:
 # ---------- 流程图：做什么 ----------
 # page 可以不写：不写 = 这一步不校验状态，流程直着走（低心智负担的写法）。
 # 写了 page = 动前校验 + 重定位到它 + 动后预期跟着变 —— 三件事同一个字段。
+#
+# ⚠️ **步骤不写在 YAML 里。** 一个步骤就是一个普通函数
+#    （`(ctx) -> ActionResult`），写在功能目录的 steps/ 下、由 Node(steps=[...])
+#    引用 —— 那样能拿到编辑器的补全和类型检查，而 YAML 里的 `{type: ...}`
+#    字符串什么也检查不了。
+#
+#    所以下面这些节点只有 page（"我该在哪个状态"），没有 steps。
+#    真脚本请看 games/mingjiangsha/jingji/graph.py。
 nodes:
   lobby:
     page: home/lobby
-    steps:
-      - {type: ClickImageStep, template: qianli/entry.png, name: 进入千里单骑}
 
   qianli:
     page: home/qianli
-    steps:
-      - {type: ClickImageStep, template: qianli/start.png, name: 开始战斗}
 
   battle:
     page: home/qianli/battle
-    cooldown: 0.5              # 两次点技能之间至少隔 0.5s
-    steps:
-      - type: ClickImageStep
-        template: battle/skill.png
-        name: 点技能
-        policy:
-          retry: {max_attempts: 2, interval: 0.2}
-          on_error: continue
 
   result:
     page: home/qianli/result
-    on_enter:
-      - {type: WaitStep, seconds: 0.5, name: 等结算动画}
-    steps:
-      - type: ClickImageStep
-        template: result/confirm.png
-        name: 点确认
-        policy:
-          retry: {max_attempts: 5, interval: 0.5}
-          on_error: raise       # 这一步点不掉，继续跑没意义
 
   closed:
     page: closed

@@ -1,59 +1,59 @@
-"""执行层 —— 把"意图"变成"可靠的一次尝试"。
+"""执行层 —— 跑步骤，把结果记下来。
 
-上游（流程层）说"现在该去点开始按钮了"，执行层负责：
+## 一个步骤是什么
 
-* 检查前提条件（按钮出现了吗）
-* 重试（没点到再点一次）
-* 计时（这次花了多久，超预算了吗）
-* 记账（成功 / 失败 / 重试几次，落盘）
-* 决定失败的代价（抛异常 / 跳过 / 停下）
+**就是一个函数**：`(ctx: RunContext) -> ActionResult`。没有基类、没有 `self`。
+要带参数就用 `functools.partial`。见 :mod:gamebot.execution.step。
 
-下游（原子层）只负责"点一下"这一件事，不管对错。
+## 这层负责什么
 
-本层不判断游戏状态 —— 那是状态层的事；也不决定下一步做什么 —— 那是流程层的事。
+* 按顺序调步骤（:class:Executor）；
+* 把每一步的结果记成 :class:StepOutcome（journal + 报告的依据）；
+* 失败的步骤存一张当帧（可选）。
+
+## 这层**不**负责什么
+
+* **不重试** —— 失败意味着前提没成立，上层拿实测状态去**重定位**；
+* 不做状态判断、不跳流程、不识别游戏；
+* 不做 `skip_if` / `precondition` —— 要判断条件就在函数里写 `if`。
 """
 
 from __future__ import annotations
 
-from .executor import Executor, ExecutorHooks, StepOutcome
-from .journal import Journal, JournalEntry, JsonlJournal, MemoryJournal, NullJournal
-from .policy import NO_RETRY, ErrorMode, RetryPolicy, StepPolicy
-from .step import (
-    CaptureStep,
-    ClickImageStep,
-    ClickStep,
-    ClickTextStep,
-    CompositeStep,
-    ConditionalStep,
-    FunctionStep,
-    KeyStep,
-    QueryStep,
-    Step,
-    WaitStep,
+from .builtins import (
+    click_image,
+    click_point,
+    click_text,
+    press,
+    run_all,
+    sequence,
+    shoot,
+    sleep,
+    wait_for,
+    wait_gone,
 )
+from .executor import Executor, ExecutorHooks, StepOutcome
+from .journal import Journal, JsonlJournal, NullJournal
+from .step import StepFunc, describe_step, step_name
 
 __all__ = [
-    "NO_RETRY",
-    "CaptureStep",
-    "ClickImageStep",
-    "ClickStep",
-    "ClickTextStep",
-    "CompositeStep",
-    "ConditionalStep",
-    "ErrorMode",
     "Executor",
     "ExecutorHooks",
-    "FunctionStep",
     "Journal",
-    "JournalEntry",
     "JsonlJournal",
-    "KeyStep",
-    "MemoryJournal",
     "NullJournal",
-    "QueryStep",
-    "RetryPolicy",
-    "Step",
+    "StepFunc",
     "StepOutcome",
-    "StepPolicy",
-    "WaitStep",
+    "click_image",
+    "click_point",
+    "click_text",
+    "describe_step",
+    "press",
+    "run_all",
+    "sequence",
+    "shoot",
+    "sleep",
+    "step_name",
+    "wait_for",
+    "wait_gone",
 ]
