@@ -1,4 +1,9 @@
-"""竞技场 —— 本功能的流程。
+"""竞技场 —— 本功能的流程声明。
+
+**这里只有数据**：两个节点各自做什么、什么条件下从首页走到竞技场。
+组装（建树、加节点、连边、校验）由框架在
+:meth:`gamebot.scenario_spec.ScenarioSpec.materialize` 里做 —— 那是每份声明
+都一样的事，不该在每个功能里重写一遍。
 
 ```
 home  ──竞技场标题出现──▶  jingji
@@ -33,43 +38,56 @@ home  ──竞技场标题出现──▶  jingji
 
 from __future__ import annotations
 
-from gamebot.flow import Graph, Node
+from gamebot.flow import EngineOptions, Node, UnknownPolicy
+from gamebot.scenario_spec import ScenarioSpec
 from games import on_page
 
+from .pages import FEATURE_PAGES
 from .steps import AdvanceTeamStep, EnterJingjiStep
 
-
-def build_graph() -> Graph:
-    """竞技场的流程图。"""
-    graph = Graph(initial="home")
-
-    graph.add_node(
+#: 这个功能的流程声明。**只有数据** —— 组装交给框架。
+#:
+#: 注意两处"为什么这么写"：
+#:
+#: * ``cooldown`` 是**节点自己的**节流：``jingji`` 给 0.8 是因为那一步会连点三个
+#:   按钮、界面每次都有过渡，太密容易在同一个状态上点两下；
+#: * 边的 ``condition`` 用 ``on_page("home/jingji")``：**竞技场标题出现**才换节点，
+#:   而不是"点完就换" —— 点下去到渲染出来有个过渡，靠画面说话比靠时间可靠。
+SCENARIO = ScenarioSpec(
+    name="jingji",
+    initial="home",
+    pages=tuple(FEATURE_PAGES),
+    nodes=(
         Node(
             "home",
             page="home",
             steps=[EnterJingjiStep()],
             cooldown=0.5,
             description="在首页点竞技入口",
-        )
-    )
-    graph.add_node(
+        ),
         Node(
             "jingji",
             page="home/jingji",
             steps=[AdvanceTeamStep()],
-            # 冷却给大一点：这一步会连点三个按钮，界面每次都有个过渡，
-            # 太密容易在同一个状态上点两下。
             cooldown=0.8,
             description="创建队伍 → 添加伙伴 → 开始匹配",
-        )
-    )
-
-    graph.connect(
-        "home",
-        "jingji",
-        condition=on_page("home/jingji"),
-        priority=10,
-        label="竞技场标题出现",
-    )
-
-    return graph
+        ),
+    ),
+    edges=(
+        (
+            "home",
+            "jingji",
+            {
+                "condition": on_page("home/jingji"),
+                "priority": 10,
+                "label": "竞技场标题出现",
+            },
+        ),
+    ),
+    options=EngineOptions(
+        tick_interval=0.4,
+        max_runtime=180.0,
+        on_unknown=UnknownPolicy.WAIT,
+        unknown_grace=1.5,
+    ),
+)

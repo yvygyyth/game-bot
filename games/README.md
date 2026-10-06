@@ -76,8 +76,9 @@ class AdvanceTeamStep(Step):                 # 它的逻辑
 脚本包的 `__init__.py` 导出**一个** `SPEC`，注册表就会**自动发现**它：
 
 ```python
-# games/<游戏>/<功能>/__init__.py
+# games/<游戏>/<功能>/__init__.py —— 这里**只有数据**，没有一行组装代码
 from gamebot.feature import FeatureSpec
+from .graph import SCENARIO
 
 SPEC = FeatureSpec(
     name="mingjiangsha/qianli",              # "<游戏>/<功能>"，命令行和界面用它标识
@@ -85,13 +86,53 @@ SPEC = FeatureSpec(
     slug="qianli",                           # 功能目录名（进 journal 文件名）
     description="自动刷本，连胜就继续",         # 可选
     templates_dir="games/mingjiangsha/qianli/templates",
-    build_config=build_config,               # 无参可调用对象
-    build_scenario=build_scenario,
+    scenario=SCENARIO,                       # 状态树 + 流程图 + 引擎选项（见下）
+    base_config=game.base_config,            # 游戏级基础配置（可调用对象）
+    base_tree=game.new_tree,                 # 可选：游戏级公共页面
     form=FORM,                               # 可选：运行参数表单
 )
 ```
 
-### 为什么是"一个 typed 对象"，而不是几个函数
+`scenario` 是另一个纯数据对象：
+
+```python
+# games/<游戏>/<功能>/graph.py
+from gamebot.scenario_spec import ScenarioSpec
+from gamebot.flow import EngineOptions, Node
+
+SCENARIO = ScenarioSpec(
+    initial="home",                          # 必选：流程从哪开始
+    pages=(                                  # (页面, 父页面 id)，**父在前**
+        (Page("home", queries=(...)), None),
+        (Page("home/jingji", ...), "home"),
+    ),
+    nodes=(
+        Node("home", page="home", steps=[EnterJingjiStep()], cooldown=0.5),
+        Node("jingji", page="home/jingji", steps=[AdvanceTeamStep()]),
+    ),
+    edges=(                                  # (source, target, Edge 的参数)
+        ("home", "jingji", {"condition": on_page("home/jingji"), "priority": 10}),
+    ),
+    options=EngineOptions(tick_interval=0.4, max_runtime=180.0),
+)
+```
+
+### 声明是数据，**组装是框架的事**
+
+这一点是刻意的：建树、按顺序加节点、连边、跑完整校验 —— 这些**对每份声明都
+一个样**。让每个功能各写一遍，等于把"会不会写错"复制到每个脚本里
+（忘了 `add_node` 就连边，是运行期事故，而且报错点离写错的地方很远）。
+
+框架在 `ScenarioSpec.materialize()` 里做，顺序有讲究：
+
+1. 先建树（`pages` 父先子后，`add()` 才能算出路径 id 与 ROI 继承）；
+2. 再加**全部**节点，**然后**才连边 —— 反过来的话"边指向还没加的节点"会变成假错误；
+3. 连完边跑 `Scenario.validate()`：悬空引用、从 initial 走不到的节点、
+   每个记录信息的状态有没有节点认领，一次全报出来。
+
+所以你写声明时只需要回答"这个脚本**是什么**"，不用想"怎么把它拼成一个对象"。
+
+### 为什么是"一个 typed 对象"
 
 **字段全必选 + 类型明确 ⇒ 编辑器替你查错。** 这几种写法在写的时候就有反馈，
 不用跑起来、也不用点一个"检查"按钮：
@@ -101,14 +142,21 @@ SPEC = FeatureSpec(
 | 漏掉 `templates_dir` | `Missing positional argument "templates_dir"` |
 | 把 `form` 拼成 `from_` | `Unexpected keyword argument "from_" ... did you mean "form"?` |
 | `templates_dir` 传了 `Path` 而不是 `str` | `Argument "templates_dir" ... has incompatible type "Path"; expected "str"` |
-| `build_config` 传了**配置对象**而不是函数 | 运行期 `ConfigError`（这条类型上看不出来，所以构造期也查一遍） |
+| `base_config` 传了**配置对象**而不是函数 | 运行期 `ConfigError`（这条类型上看不出来，所以构造期也查一遍） |
 
 以前是散装几个名字（`TITLE` / `build_config` / `build_scenario`），框架靠
 ``getattr(module, "build_config", None)`` 去捞 —— 于是"必须有哪些、叫什么"
 这条契约**只存在于框架的字符串里**，编辑器和类型检查都看不见。
 
-**`build_config` / `build_scenario` 必须是"造一份新的"的函数，不是对象本身。**
-每次运行都要一份新的：共享一个 `AppConfig` 会让一次运行改到的东西泄漏到下一次。
+### 有两处**必须**是函数，不是数据
+
+| 字段 | 为什么是函数 |
+|---|---|
+| `base_config` | 里面含 `PROJECT_ROOT` 这类**环境推导值**（"怎么跑"），而且每次运行要一份新的 |
+| `build_config` | 同上 —— 共享一个 `AppConfig` 会让一次运行改到的东西**泄漏到下一次** |
+
+`build_config` 是可选的：模板根、名字、tick 间隔框架都会从声明里填好。
+留这个口子是为了"这个脚本真要拧某个框架级旋钮"。
 
 ### 还需要导出的常量
 
