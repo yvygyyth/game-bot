@@ -67,7 +67,7 @@ else:  # pragma: no cover - 非 Windows 上这个模块只用于"降级"
 
 log = logging.getLogger(__name__)
 
-__all__ = ["GlobalHotkeys", "Hotkey", "is_supported", "parse_hotkey"]
+__all__ = ["GlobalHotkeys", "Hotkey", "HotkeyPlan", "is_supported", "parse_hotkey"]
 
 # ---------------------------------------------------------------- Win32 常量
 _WM_HOTKEY = 0x0312
@@ -242,6 +242,23 @@ def is_supported() -> bool:
     return sys.platform == "win32"
 
 
+@dataclass(frozen=True, slots=True)
+class HotkeyPlan:
+    """一个动作的**候选键**，首选在前。
+
+    ``RegisterHotKey`` 对已被占用的组合返回 False，所以"首选不行就用备选"
+    是唯一的办法 —— 而备选必须**预先声明**（而不是运行时瞎凑一个组合：
+    那样帮助里显示的键和实际生效的键就对不上了）。
+    """
+
+    action: str
+    candidates: tuple[Hotkey, ...]
+
+    @property
+    def preferred(self) -> Hotkey:
+        return self.candidates[0]
+
+
 if sys.platform == "win32":
 
     def _declare_win32() -> None:
@@ -289,35 +306,49 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
 
 
 class GlobalHotkeys(QObject):
-    """注册全局热键，命中就发 :attr:`triggered`。"""
+    """注册全局热键，命中就发 :attr:`triggered`。
+
+    ## 每个动作可以带**备选键**
+
+    ``RegisterHotKey`` 对**已经被别的软件占用的组合**返回 False，而裸键
+    （``F5`` / ``Esc``）被占很常见 —— 实测某台机器上 ``F5`` / ``F9`` / ``F12`` /
+    ``Esc`` **全都被占**，``Ctrl+Alt+*`` 全可用。
+
+    所以这里收的是"每个动作一串候选"（首选在前），逐个试到成功为止。
+    注册不上一声不响是**最糟**的失败方式 —— 外部表现和"代码写错了"一模一样。
+    现在实际生效的键可以从 :attr:`registered` 读出来，界面会显示它。
+    """
 
     #: 命中了哪条快捷键（参数是 ``action``）。本来就在界面线程，直接投递。
     triggered = Signal(str)
 
-    #: 注册失败的键（原始写法）。界面据此提示"这个键被别的软件占了"。
+    #: 一条候选键注册失败（参数是原始写法）。界面可以据此说明"这个键被占了"。
     failed = Signal(str)
 
-    def __init__(self, hotkeys: list[Hotkey], parent: QObject | None = None) -> None:
+    def __init__(self, plans: list[HotkeyPlan], parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._hotkeys = list(hotkeys)
+        self._plans = list(plans)
         self._registered: list[Hotkey] = []
         self._failed: list[Hotkey] = []
         self._filter: _HotkeyFilter | None = None
         #: 注册用的窗口句柄（0 = 退回绑线程）。注销时必须用它，见 stop()。
         self._hwnd = 0
+        #: `WM_HOTKEY` 的 id → 动作。**不能靠下标算**（见 _on_hotkey）。
+        self._id_to_action: dict[int, str] = {}
 
     # ------------------------------------------------------------------ #
     @property
-    def hotkeys(self) -> list[Hotkey]:
-        return list(self._hotkeys)
+    def plans(self) -> list[HotkeyPlan]:
+        return list(self._plans)
 
     @property
     def registered(self) -> list[Hotkey]:
-        """真注册成功的那些。注册失败的键多半被别的软件占了。"""
+        """**实际生效**的那些键（每个动作最多一个）。界面用它显示真实按键。"""
         return list(self._registered)
 
     @property
     def failed_keys(self) -> list[Hotkey]:
+        """试过但被占的那些。"""
         return list(self._failed)
 
     @property
@@ -344,7 +375,7 @@ class GlobalHotkeys(QObject):
         （第一版换过来时我起了后台线程建消息窗口自己泵，结果进程退出时
         access violation。原因写在模块开头的 docstring 里。）
         """
-        if not is_supported() or not self._hotkeys or self._registered:
+        if not is_supported() or not self._plans or self._registered:
             return False
         from PySide6.QtWidgets import QApplication
 
@@ -361,19 +392,38 @@ class GlobalHotkeys(QObject):
         hwnd = self._pick_hwnd(app)
         self._hwnd = hwnd
         log.debug("全局快捷键注册到 %s", f"窗口 {hwnd}" if hwnd else "主线程消息队列（兜底）")
-        for index, hotkey in enumerate(self._hotkeys, start=1):
-            ok = u.RegisterHotKey(hwnd, index, hotkey.mods | _MOD_NOREPEAT, hotkey.vk)
-            if ok:
-                self._registered.append(hotkey)
-                log.info("全局快捷键已注册: %s -> %s", hotkey.keys, hotkey.action)
-            else:
-                self._failed.append(hotkey)
-                log.warning(
-                    "全局快捷键注册失败（多半被别的软件占了）: %s (err=%s)",
-                    hotkey.keys,
-                    ctypes.get_last_error(),
+
+        # **id 的分配和"哪个动作"的对应关系必须记住。**
+        # 一个动作可能有多个候选键，但只有第一个注册成功的那个会拿到一个 id。
+        # 所以这里是"边注册边发 id、边记下 id → action"，而不是"下标就是 id"。
+        self._id_to_action = {}
+        next_id = 1
+        for plan in self._plans:
+            for candidate in plan.candidates:
+                ok = u.RegisterHotKey(
+                    hwnd, next_id, candidate.mods | _MOD_NOREPEAT, candidate.vk
                 )
-                self.failed.emit(hotkey.keys)
+                if ok:
+                    self._id_to_action[next_id] = plan.action
+                    next_id += 1
+                    self._registered.append(candidate)
+                    log.info(
+                        "全局快捷键已注册: %s -> %s",
+                        candidate.keys,
+                        plan.action,
+                    )
+                    break
+                self._failed.append(candidate)
+                log.warning(
+                    "全局快捷键 %s 注册失败（已被别的软件占用，试下一个候选）",
+                    candidate.keys,
+                )
+                self.failed.emit(candidate.keys)
+            else:
+                log.warning(
+                    "动作 %s 的所有候选键都注册不上 —— 它没有全局快捷键了",
+                    plan.action,
+                )
 
         if not self._registered:
             return False
@@ -391,8 +441,9 @@ class GlobalHotkeys(QObject):
         self._filter = None
         # **注销时 (hwnd, id) 必须和注册时那对完全一致**，否则注销不掉，
         # 键会一直被占着（表现：退出后那个键在别的软件里也不响应）。
-        for index in range(1, len(self._hotkeys) + 1):
-            ctypes.windll.user32.UnregisterHotKey(self._hwnd, index)
+        for hotkey_id in self._id_to_action:
+            ctypes.windll.user32.UnregisterHotKey(self._hwnd, hotkey_id)
+        self._id_to_action.clear()
         self._hwnd = 0
         self._registered.clear()
 
@@ -413,8 +464,14 @@ class GlobalHotkeys(QObject):
             return 0
 
     def _on_hotkey(self, hotkey_id: int) -> None:
-        """``WM_HOTKEY`` 的 id → 哪条快捷键。id 是注册时给的，从 1 开始。"""
-        if 1 <= hotkey_id <= len(self._hotkeys):
-            hotkey = self._hotkeys[hotkey_id - 1]
-            log.debug("[hotkey] WM_HOTKEY -> %s", hotkey.action)
-            self.triggered.emit(hotkey.action)
+        """``WM_HOTKEY`` 的 id → 哪个动作。
+
+        **不能用下标算。** 一个动作可能有多个候选键，只有注册成功的那个拿到
+        了 id —— 所以 id 和动作的对应关系是注册时记下来的
+        （``_id_to_action``）。用下标算的话，一旦某个首选键被占、退到备选，
+        按备选就会触发**别的动作**（比"没反应"更糟）。
+        """
+        action = self._id_to_action.get(hotkey_id)
+        if action is not None:
+            log.debug("[hotkey] WM_HOTKEY id=%s -> %s", hotkey_id, action)
+            self.triggered.emit(action)

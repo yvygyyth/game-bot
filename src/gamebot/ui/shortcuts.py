@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 
-from .hotkeys import GlobalHotkeys, is_supported, parse_hotkey
+from .hotkeys import GlobalHotkeys, HotkeyPlan, is_supported, parse_hotkey
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -62,23 +62,29 @@ class Shortcut:
     界面在后台"时要按的。切页那几条（``Ctrl+1/2/3``）只在看界面时按，
     占了全局没有意义，还会白白和别的软件抢这几个键。
 
-    全局快捷键有个**必须知道的代价**：那条键从此在整个系统里都归本工具管。
-    对 ``Esc`` 没问题（游戏照常收到，低级钩子只观察不拦）；但 ``F5`` 是很多
-    编辑器／IDE 的"运行/调试"，全局之后你按它就会把脚本跑起来。
-    真被占了就把这里的 ``global_hotkey`` 关掉，界面内照样能按。
+    全局快捷键有个**必须知道的代价**：那条键从此在整个系统里都归本工具管
+    （``RegisterHotKey`` 会**吞键**，游戏自己也收不到它了）。
+    所以 ``F5`` 要留意 —— 它是很多编辑器／IDE 的"运行/调试"，全局之后
+    你按它就会把脚本跑起来。真被占了就把这里的 ``global_hotkey`` 关掉，
+    界面内照样能按。
     """
 
-    alias: bool = False
-    """这是**同一个动作的另一个键**（别名），不是新动作。
+    global_fallback: str = ""
+    """``keys`` 注册不上时退而求其次的那个组合。空 = 不退。
 
-    为什么要区分：:class:`Shortcut` 是"一个键 → 一个动作"的绑定，而
-    ``action`` 在表里默认是唯一的（有测试钉着）。别名会让它出现两次 ——
-    那不是重复定义，是**同一动作的第二个键**，所以用这个字段显式标出来。
+    ## 为什么需要它（这是实测出来的，不是预防性设计）
 
-    实际用途：``stop`` 同时给 ``Esc`` 和 ``F9``。``Esc`` 太常被别的软件占用，
-    而全局钩子在 Windows 上是**链式**的（先装的先拿到，吞掉的后面的就收不到）；
-    给一个几乎没人抢的 ``F9`` 既能救急，也是个诊断手段 ——
-    ``F9`` 有效而 ``Esc`` 无效，就说明是 ``Esc`` 被抢了，而不是钩子没装上。
+    ``RegisterHotKey`` 对**已经被别的软件占用的组合**返回 False。而裸键
+    （``F5`` / ``Esc`` 这种）被占**非常常见** —— 编辑器、输入法、截图工具
+    都爱挂全局裸键。实测这台机器上 ``F5`` / ``F9`` / ``F12`` / ``Esc``
+    **全都注册不上**，而 ``Ctrl+Alt+*` 前缀的组合全都可以。
+
+    原来的行为是：注册不上就记一条 warning，然后**什么都没有**。外部表现
+    和"代码写错了"完全一样（按了没反应），所以极难查。
+
+    现在：``keys`` 不行就退到 ``fallback``，并在界面上把**实际生效的键**
+    显示出来 —— "F5 不行，我用 Ctrl+Alt+F5 替你挂上了"是好消息，
+    比静默失败强得多。
     """
 
     @property
@@ -98,25 +104,52 @@ class Shortcut:
 #: ``global_hotkey=True`` 的只有开始 / 停止 / 帮助 —— 这三条要"游戏在前台、
 #: 本界面在后台"时也能按。理由和代价见 :attr:`Shortcut.global_hotkey`。
 #:
-#: ## 停止为什么有两个键
+#: ## 停止只用一个键
 #:
-#: ``Esc`` 是直觉上最好按的，但**它太常被别的软件占用**（编辑器、输入法、
-#: 各种悬浮工具都会挂全局 ``Esc``）。全局快捷键在 Windows 上是**链式**的：
-#: 先装的先拿到事件，而"先拿到"的那个如果吞掉它（``RegisterHotKey`` 就吞），
-#: 后面的就收不到了。
+#: 曾经给 ``stop`` 配过两个键（``Esc`` + ``F9``），想的是"``Esc`` 被别的软件
+#: 占了还有 ``F9`` 兜底"。**去掉了** —— 一个动作两个键的坏处更实在：
 #:
-#: 所以停止给两个键：``Esc``（顺手）+ ``F9``（几乎没人抢）。
-#: **这也是一个诊断手段**：如果 ``F9`` 全局有效而 ``Esc`` 无效，
-#: 那问题就是"``Esc`` 被别的软件抢了"，而不是本工具的钩子没装上。
+#: * 帮助里两行写着同一件事，看着像两个不同的功能；
+#: * ``RegisterHotKey`` 会**吞键**，多占一个系统级的键就多一份副作用；
+#: * 真被占了，日志里会直接写"注册失败（多半被别的软件占了）"，
+#:   按提示换一个键就行 —— 不需要预先备一个。
+#: ## 全局快捷键为什么要带 fallback
+#:
+#: 实测这台机器上裸 ``F5`` / ``F9`` / ``F12`` / ``Esc`` **全都被别的软件占了**
+#: （``RegisterHotKey`` 返回 False），而 ``Ctrl+Alt+`` 前缀的组合全都可以。
+#: 所以每条全局快捷键都给一个带修饰键的备选 —— 首选顺手，备选一定挂得上。
+#:
+#: **代价**：``RegisterHotKey`` 会**吞键**，所以备选一旦生效，
+#: ``Ctrl+Alt+F5`` 这个组合就归本工具了。这是需要全局热键的必然取舍。
 SHORTCUTS: tuple[Shortcut, ...] = (
-    Shortcut("run", "F5", "开始运行", button="start", global_hotkey=True),
-    Shortcut("stop", "Esc", "停止（毫秒级）", button="stop", global_hotkey=True),
-    Shortcut("stop", "F9", "停止（毫秒级）", button="stop", global_hotkey=True, alias=True),
+    Shortcut(
+        "run",
+        "F5",
+        "开始运行",
+        button="start",
+        global_hotkey=True,
+        global_fallback="Ctrl+Alt+F5",
+    ),
+    Shortcut(
+        "stop",
+        "Esc",
+        "停止（毫秒级）",
+        button="stop",
+        global_hotkey=True,
+        global_fallback="Ctrl+Alt+Esc",
+    ),
     Shortcut("detect", "F7", "重新检测可见软件窗口", button="detect"),
     Shortcut("page_diagram", "Ctrl+1", "切到「状态 / 流程」"),
     Shortcut("page_recognition", "Ctrl+2", "切到「识图日志」"),
     Shortcut("page_check", "Ctrl+3", "切到「检查输出」"),
-    Shortcut("help", "F1", "显示这份快捷键说明", global_hotkey=True),
+    Shortcut(
+        "help",
+        "F1",
+        "显示这份快捷键说明",
+        button="",
+        global_hotkey=True,
+        global_fallback="Ctrl+Alt+F1",
+    ),
 )
 
 
@@ -135,6 +168,9 @@ class Keymap:
         self._global: GlobalHotkeys | None = None
         #: 哪几条真的挂上了全局。给帮助对话框显示用。
         self._global_ok: set[str] = set()
+        #: ``action -> **实际生效**的键``。首选被别的软件占了就会是备选键 ——
+        #: 帮助里显示它，而不是显示"我们想要的键"（那样用户按不出来还找不到原因）。
+        self._global_keys: dict[str, str] = {}
 
         for spec in SHORTCUTS:
             target = bindings.get(spec.action)
@@ -158,31 +194,56 @@ class Keymap:
 
         **界面内那份照挂**（上面那个循环）—— 全局和窗口内是两套并行：
         全局负责"没焦点时也能按"，窗口内那份在界面有焦点时照旧生效。
-        两边同时收到同一次按键是可能的（钩子不吞键），所以动作必须**幂等**：
+        两边同时收到同一次按键是可能的，所以动作必须**幂等**：
         ``stop`` 重复调没事，``run`` 在跑的时候直接 return。这不是巧合，
         是这两条动作本来就该有的性质。
+
+        ## 首选键被占就退到备选
+
+        ``RegisterHotKey`` 对已被占用的组合返回 False，而裸键（``F5`` / ``Esc``）
+        被占很常见。所以每个动作带一串候选（首选在前），逐个试。
+        **实际生效的键记在 :attr:`global_keys`，界面会显示它** ——
+        静默失败（按了没反应但看不出为什么）是最难查的一类问题。
         """
         wanted = [spec for spec in SHORTCUTS if spec.global_hotkey]
         if not wanted:
             return
-        parsed = []
+        plans = []
         for spec in wanted:
             target = self._bindings.get(spec.action)
             if target is None or not callable(target):
                 continue
-            hotkey = parse_hotkey(spec.action, spec.keys)
-            if hotkey is not None:
-                parsed.append(hotkey)
+            wanted_keys = [spec.keys]
+            if spec.global_fallback:
+                wanted_keys.append(spec.global_fallback)
+            parsed = tuple(
+                hotkey
+                for hotkey in (parse_hotkey(spec.action, keys) for keys in wanted_keys)
+                if hotkey is not None
+            )
+            if parsed:
+                plans.append(HotkeyPlan(action=spec.action, candidates=parsed))
 
-        service = GlobalHotkeys(parsed, parent=self.parent)
+        service = GlobalHotkeys(plans, parent=self.parent)
         service.triggered.connect(self._on_global)
         if service.start():
             self._global = service
-            self._global_ok = {h.action for h in parsed}
+            #: ``action -> 实际生效的键写法``。界面显示它，而不是显示"我们想要的键"。
+            self._global_keys = {h.action: h.keys for h in service.registered}
+            self._global_ok = set(self._global_keys)
+            for action, keys in self._global_keys.items():
+                preferred = next((s.keys for s in wanted if s.action == action), "")
+                if preferred and keys != preferred:
+                    log.info(
+                        "全局快捷键 %s 被别的软件占用，已退到 %s（动作 %s）",
+                        preferred,
+                        keys,
+                        action,
+                    )
         else:
             log.info(
-                "全局快捷键没启用（%s）—— 界面内快捷键不受影响",
-                "非 Windows" if not is_supported() else "装钩子失败",
+                "全局快捷键一条都没挂上（%s）—— 界面内快捷键不受影响",
+                "非 Windows" if not is_supported() else "候选键全被占用",
             )
 
     @Slot(str)
@@ -203,6 +264,16 @@ class Keymap:
         """哪几条动作真的挂上了系统级快捷键（空集合 = 这个平台上没有）。"""
         return set(self._global_ok)
 
+    @property
+    def global_keys(self) -> dict[str, str]:
+        """``action -> **实际生效**的键写法``。
+
+        首选键被别的软件占了就会是备选键。界面显示**这个**，而不是
+        ``SHORTCUTS`` 里那个"我们想要的"键 —— 否则帮助里写着一个按不出来的键，
+        用户只会以为程序坏了。
+        """
+        return dict(self._global_keys)
+
     def __len__(self) -> int:
         return len(self._shortcuts)
 
@@ -216,17 +287,29 @@ class Keymap:
 
         ``global_hotkey`` 的那几条标一个 ``*``，并在末尾解释 —— 否则用户
         按不出来时不知道该怀疑"焦点不在界面"还是"这条本来就没挂全局"。
+
+        **全局那几条显示"实际生效的键"**：首选被占用了就显示备选键，
+        并在末尾说明原来那个被谁占了。用户按不出来时最需要的就是这条信息。
         """
         lines = []
         for spec in SHORTCUTS:
-            mark = "*" if spec.action in self._global_ok else " "
-            lines.append(f" {mark}{spec.keys:<12} {spec.label}")
+            active = spec.action in self._global_ok
+            mark = "*" if active else " "
+            # 实际生效的键（没挂全局就用声明的那个）
+            shown = self._global_keys.get(spec.action, spec.keys) if active else spec.keys
+            line = f" {mark}{shown:<12} {spec.label}"
+            if active and shown != spec.keys:
+                line += f"（{spec.keys} 已被别的软件占用）"
+            lines.append(line)
         if self._global_ok:
             lines.append("")
             lines.append("  * = 界面没焦点时也能按（系统级，游戏在前台照样生效）")
         elif any(spec.global_hotkey for spec in SHORTCUTS):
             lines.append("")
-            lines.append("  这个平台上没有系统级快捷键，所有键都要求界面有焦点")
+            lines.append(
+                "  系统级快捷键一条都没挂上（候选键被别的软件占用了）——"
+                "所有键都要求界面有焦点"
+            )
         return lines
 
     def add_tooltips(self, buttons: dict[str, object]) -> None:

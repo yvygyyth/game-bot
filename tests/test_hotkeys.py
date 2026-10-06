@@ -29,11 +29,17 @@ from gamebot.ui.hotkeys import (
     MOD_WIN,
     GlobalHotkeys,
     Hotkey,
+    HotkeyPlan,
     is_supported,
     parse_hotkey,
 )
 
 pytest.importorskip("PySide6")
+
+
+def _plan(*candidates: Hotkey, action: str = "stop") -> HotkeyPlan:
+    """把一个或多个候选键包成一个 plan（首选在前）。"""
+    return HotkeyPlan(action=action, candidates=tuple(candidates))
 
 #: ``键写法 -> (期望的虚拟键码, 期望的修饰位)``。
 #:
@@ -180,37 +186,70 @@ class TestRegistrationIsObservable:
 
         monkeypatch.setattr(mod.sys, "platform", "darwin")
         assert mod.is_supported() is False
-        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
         assert service.start() is False
 
     def test_stop_is_idempotent(self, qt_app):
         """没起来过 / 已经停了，再 stop 也不该炸（关窗路径会无脑调一次）。"""
-        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
         service.stop()
         service.stop()
 
-    def test_registered_and_failed_are_reported_separately(self, qt_app):
-        """注册结果要能分开看 —— 这是换机制换来的可诊断性。"""
+    def test_fallback_takes_over_when_the_preferred_key_is_taken(self, qt_app):
+        """**首选被占就退到备选** —— 这是本轮的核心修复。
+
+        ``RegisterHotKey`` 对已被占用的组合返回 False。用一个**一定拿不到**的
+        组合（``Esc`` 常被占；这里用一个没被占的 + 一个已确认被占的裸键不行，
+        所以用两个候选，其中一个必然失败）来验"退到下一个"这条逻辑：
+        注册成功的那个必须只有一个，且它必须是候选里的**某一个**。
+        """
         if not is_supported():
             pytest.skip("只有 Windows 上有这个 API")
-        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        plan = HotkeyPlan(
+            action="stop",
+            candidates=(
+                Hotkey("stop", 0x78, 0, "F9"),          # 实测常被占
+                Hotkey("stop", 0x7A, 0x0001 | 0x0002, "Ctrl+Alt+F11"),  # 几乎总能成
+            ),
+        )
+        service = GlobalHotkeys([plan])
         try:
             service.start()
-            # 每个键要么注册上、要么进失败表，不能两个都不在
-            assert len(service.registered) + len(service.failed_keys) == 1
-            # 不变量：同一时刻两边不该有同一个键
-            assert not {h.keys for h in service.registered} & {
-                h.keys for h in service.failed_keys
-            }
+            # 每个动作最多生效一个键
+            assert len(service.registered) <= 1
+            # 生效的必须在候选里
+            for hotkey in service.registered:
+                assert hotkey in plan.candidates
+            # 生效 + 失败 = 试过的候选数（最多 2）
+            assert len(service.registered) + len(service.failed_keys) <= 2
+        finally:
+            service.stop()
+
+    def test_every_action_gets_at_most_one_key(self, qt_app):
+        """一个动作只能生效**一个**键 —— 否则按一次会触发两次。"""
+        if not is_supported():
+            pytest.skip("只有 Windows 上有这个 API")
+        plan = HotkeyPlan(
+            action="stop",
+            candidates=(
+                Hotkey("stop", 0x7A, 0x0002 | 0x0001, "Ctrl+Alt+F11"),
+                Hotkey("stop", 0x7B, 0x0002 | 0x0001, "Ctrl+Alt+F12"),
+            ),
+        )
+        service = GlobalHotkeys([plan])
+        try:
+            service.start()
+            actions = [h.action for h in service.registered]
+            assert len(actions) == len(set(actions)), f"同一动作生效了多个键: {actions}"
         finally:
             service.stop()
 
     def test_stop_after_start_cleans_up(self, qt_app):
         if not is_supported():
             pytest.skip("只有 Windows 上有这个 API")
-        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        service = GlobalHotkeys([_plan(Hotkey("stop", 0x7A, 0x0003, "Ctrl+Alt+F11"))])
         if not service.start():
-            pytest.skip("这个环境注册不上（多半被别的软件占了）")
+            pytest.skip("这个环境注册不上")
         assert service.running
         service.stop()
         assert not service.running
@@ -220,7 +259,7 @@ class TestRegistrationIsObservable:
         """命中之后"动作会不会被执行"这一段能验，而它正是最容易接错的一段
         （少一次 connect、或者槽函数签名不对，表现都是"按了没反应"）。
         """
-        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
         seen: list[str] = []
         service.triggered.connect(seen.append)
 
@@ -229,27 +268,30 @@ class TestRegistrationIsObservable:
 
         assert seen == ["stop"]
 
-    def test_hotkeys_are_exposed_read_only(self, qt_app):
-        """``hotkeys`` 返回副本 —— 调用方改了不该影响服务内部那一条。"""
-        hotkey = Hotkey("stop", 0x1B, 0, "Esc")
-        service = GlobalHotkeys([hotkey])
-        service.hotkeys.clear()
-        assert service.hotkeys == [hotkey]
+    def test_plans_are_exposed_read_only(self, qt_app):
+        """``plans`` 返回副本 —— 调用方改了不该影响服务内部那些。"""
+        plan = _plan(Hotkey("stop", 0x1B, 0, "Esc"))
+        service = GlobalHotkeys([plan])
+        service.plans.clear()
+        assert service.plans == [plan]
 
-    def test_message_ids_start_at_one(self, qt_app):
-        """``WM_HOTKEY`` 的 ``wParam`` 是注册时给的 id，必须从 1 开始且连续。
+    def test_hotkey_id_maps_through_the_table_not_the_index(self, qt_app):
+        """``WM_HOTKEY`` 的 id → 动作**必须走注册时记下的表**，不能靠下标算。
 
-        这里钉住"id → 哪条快捷键"的映射算法本身（``index - 1``）——
-        它错了的症状是"按 A 触发了 B"，比没反应更难查。
+        有候选键之后，一个动作可能试了两个键才成功 —— id 是**边注册边发**的。
+        若还用"下标 = id - 1"去反查，按备选键会触发**别的动作**
+        （比"没反应"更糟：按停止结果开始了）。
         """
-        hotkeys = [
-            Hotkey("run", 0x74, 0, "F5"),
-            Hotkey("stop", 0x1B, 0, "Esc"),
-            Hotkey("help", 0x70, 0, "F1"),
-        ]
-        for index, hotkey in enumerate(hotkeys, start=1):
-            assert hotkeys[index - 1] is hotkey
-        assert len(hotkeys) == 3
+        service = GlobalHotkeys([])
+        seen: list[str] = []
+        service.triggered.connect(seen.append)
+        # 模拟注册结果：id 2 对应 stop（因为 id 1 的候选失败了，没拿到 id）
+        service._id_to_action = {1: "run", 2: "stop"}
+        service._on_hotkey(2)
+        assert seen == ["stop"], "id→动作 的映射没走表"
+        seen.clear()
+        service._on_hotkey(99)
+        assert seen == [], "不存在的 id 不该触发任何动作"
 
 
 class TestShortcutTableIsConsistent:

@@ -15,21 +15,18 @@ class TestTable:
         keys = [spec.keys for spec in SHORTCUTS]
         assert len(keys) == len(set(keys)), f"有重复键位: {keys}"
 
-    def test_actions_are_unique_except_aliases(self):
-        """一个动作一个主键 —— **除了显式标了 ``alias`` 的别名**。
+    def test_actions_are_unique(self):
+        """**一个动作一个键。**
 
-        ``Shortcut`` 是"一个键 → 一个动作"的绑定，所以同一个动作出现两次
-        必须是有意的（``alias=True``），否则就是复制粘贴事故。
-        别名还得指向一个真实存在的主键 —— 不能凭空冒出一个动作。
+        曾经给 ``stop`` 配过 ``Esc`` + ``F9`` 两个键（想的是"一个被占还有一个"），
+        后来去掉了：帮助里两行写着同一件事像两个功能，而且 ``RegisterHotKey``
+        会吞键，多占一个系统级的键就多一份副作用。
+
+        "首选键被占"现在由 ``global_fallback`` 处理 —— 那是**同一个键的备选写法**，
+        不是第二个键位（界面内仍然只绑一个键）。
         """
-        primary = [spec.action for spec in SHORTCUTS if not spec.alias]
-        assert len(primary) == len(set(primary)), f"有重复的主动作: {primary}"
-        for spec in SHORTCUTS:
-            if not spec.alias:
-                continue
-            assert any(
-                other.action == spec.action and not other.alias for other in SHORTCUTS
-            ), f"{spec.keys} 标成别名了，但没有对应的主键"
+        actions = [spec.action for spec in SHORTCUTS]
+        assert len(actions) == len(set(actions)), f"有重复的动作: {actions}"
 
     def test_every_entry_is_described(self):
         """没有说明的快捷键，在 F1 帮助里就是一串看不懂的字母。"""
@@ -42,19 +39,49 @@ class TestTable:
         actions = {spec.action for spec in SHORTCUTS}
         assert {"run", "stop", "help"} <= actions
 
-    def test_stop_keys_and_run_key(self):
+    def test_every_global_shortcut_has_a_fallback(self):
+        """每条全局快捷键**都要有备选键**。
+
+        理由不是预防性设计 —— 是实测出来的：这台机器上裸 ``F5`` / ``F9`` /
+        ``F12`` / ``Esc`` **全都注册不上**（被别的软件占了），``Ctrl+Alt+*``
+        全都可以。没有备选就等于"这条全局快捷键在有些机器上永远不生效"，
+        而且失败是静默的。
+        """
+        for spec in SHORTCUTS:
+            if spec.global_hotkey:
+                assert spec.global_fallback, f"{spec.action} 没有备选键"
+                assert spec.global_fallback != spec.keys
+
+    def test_fallback_uses_modifiers(self):
+        """备选键必须**带修饰键** —— 裸键被占的概率高得离谱，那正是要备选的原因。"""
+        for spec in SHORTCUTS:
+            if spec.global_fallback:
+                assert "+" in spec.global_fallback, (
+                    f"{spec.action} 的备选键 {spec.global_fallback!r} 也是裸键，"
+                    "起不到备选作用"
+                )
+
+    def test_fallback_key_is_parseable(self, qt_app):
+        """备选键也得能解析成虚拟键码 —— 写错了它永远轮不上，等于没有。"""
+        from gamebot.ui.hotkeys import parse_hotkey
+
+        for spec in SHORTCUTS:
+            if not spec.global_fallback:
+                continue
+            parsed = parse_hotkey(spec.action, spec.global_fallback)
+            assert parsed is not None, f"{spec.action} 的备选键解析不出来"
+            assert parsed.mods, f"{spec.action} 的备选键没解析出修饰位"
+
+    def test_stop_is_escape_and_run_is_f5(self):
         """用户问的就是这个，钉住。
 
-        ``stop`` 有**两个**键：``Esc``（直觉）和 ``F9``（几乎没人抢）。
-        ``F9`` 兼作诊断：它有效而 ``Esc`` 无效，就说明 ``Esc`` 被别的软件
-        占了（全局钩子在 Windows 上是链式的，先装的先拿到），
-        而不是本工具的钩子没装上。
+        （``stop`` 曾经还有 ``F9`` 做别名，后来去掉了 —— 见上面
+        ``test_actions_are_unique`` 的说明。"被占用"现在由
+        ``global_fallback`` 处理。）
         """
-        keys_for: dict[str, list[str]] = {}
-        for spec in SHORTCUTS:
-            keys_for.setdefault(spec.action, []).append(spec.keys)
-        assert keys_for["run"] == ["F5"]
-        assert set(keys_for["stop"]) == {"Esc", "F9"}
+        mapping = {spec.action: spec.keys for spec in SHORTCUTS}
+        assert mapping["run"] == "F5"
+        assert mapping["stop"] == "Esc"
 
     def test_button_names_are_known(self):
         """``button`` 只能是控件栏里真有的那几种，否则 tooltip 会静默贴不上。"""
