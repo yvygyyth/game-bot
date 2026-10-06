@@ -67,7 +67,6 @@ class ControlsBar(QWidget):
     scriptChanged = Signal(object)  # ScriptEntry | None
     nodeChanged = Signal(object)  # NodeEntry | None
     windowChanged = Signal(str)
-    checkRequested = Signal()
     startRequested = Signal()
     stopRequested = Signal()
 
@@ -130,9 +129,6 @@ class ControlsBar(QWidget):
         self.node.currentIndexChanged.connect(self._on_node_changed)
 
         # ---- 动作 ----
-        self.check_btn = QPushButton("检查", self)
-        self.check_btn.clicked.connect(self.checkRequested.emit)
-
         self.start_btn = QPushButton("▶ 开始", self)
         self.start_btn.clicked.connect(self.startRequested.emit)
         self.stop_btn = QPushButton("■ 停止", self)
@@ -168,7 +164,6 @@ class ControlsBar(QWidget):
         step2.addWidget(self.node, 1)
 
         actions = QHBoxLayout()
-        actions.addWidget(self.check_btn)
         actions.addStretch(1)
         actions.addWidget(self.start_btn)
         actions.addWidget(self.stop_btn)
@@ -371,18 +366,6 @@ class ControlsBar(QWidget):
         鼠标悬停显示的却是旧的一行）。和"键位提示会被动态重设冲掉"是同一类坑。
         """
         self.detect.setToolTip(self._detect_tip())
-        self.check_btn.setToolTip(
-            self._tip(
-                "check",
-                "检查**这份定义本身**和**它要用的模板图在不在**：\n"
-                "  · 定义自洽 —— 每个记录信息的状态都有流程节点认领、父节点是分类节点、\n"
-                "    边两头的节点存在、子页面 ROI 没伸出父页面\n"
-                "  · 模板文件齐不齐 —— 定义里引用到的每张图去模板根里找一遍\n"
-                "  · 模板根都有哪些、在不在（找不到图时最常怀疑这里）\n"
-                "不查识别准不准 —— 那是跑起来看「识图日志」的事。\n"
-                "选完脚本会自动查一次，这个按钮用来手动重查。",
-            )
-        )
 
     def _detect_tip(self) -> str:
         found = len(self._windows)
@@ -423,7 +406,6 @@ class ControlsBar(QWidget):
         """
         for widget in (self.game, self.script, self.node, self.software, self.detect):
             widget.setEnabled(not running)
-        self.check_btn.setEnabled(not running)
         if running:
             self.start_btn.setEnabled(False)
         else:

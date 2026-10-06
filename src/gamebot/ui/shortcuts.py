@@ -87,7 +87,6 @@ class Shortcut:
 SHORTCUTS: tuple[Shortcut, ...] = (
     Shortcut("run", "F5", "开始运行", button="start", global_hotkey=True),
     Shortcut("stop", "Esc", "停止（毫秒级）", button="stop", global_hotkey=True),
-    Shortcut("check", "F6", "检查定义与模板文件", button="check"),
     Shortcut("detect", "F7", "重新检测可见软件窗口", button="detect"),
     Shortcut("page_diagram", "Ctrl+1", "切到「状态 / 流程」"),
     Shortcut("page_recognition", "Ctrl+2", "切到「识图日志」"),

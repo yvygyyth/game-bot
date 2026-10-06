@@ -205,12 +205,12 @@ class TestStartButtonAfterStop:
         main, _ = ui
         main._on_start()
         assert _wait(qt_app, lambda: main._engine_running)
-        for name in ("script", "software", "detect", "check_btn"):
+        for name in ("script", "software", "detect"):
             assert not getattr(main.controls, name).isEnabled(), f"{name} 运行中该锁住"
 
         main._request_engine_stop()
         assert _wait(qt_app, lambda: not main._engine_running)
-        for name in ("script", "software", "detect", "check_btn"):
+        for name in ("script", "software", "detect"):
             assert getattr(main.controls, name).isEnabled(), f"{name} 停止后该解锁"
 
     def test_unlock_does_not_depend_on_call_order(self, qt_app, ui) -> None:
@@ -385,49 +385,69 @@ class TestWindowSelectionRefresh:
         assert controls.window_title == ""
 
 
-class TestCheckIsDiscoverable:
-    """用户报："我不知道 UI 界面的检查按钮在检查什么"。
+class TestNoCheckButton:
+    """「检查」按钮**已经删掉**了（用户要求）。
 
-    根因有两半：tooltip 只说了一句笼统的话，而且**选完脚本不自动查** ——
-    "缺模板"这种事要点了按钮才知道。现在选完脚本自动查一次，结论进状态栏。
+    理由：那些校验该是**自动**的，不该靠一个按钮。
+    * 单对象的规则已挪到构造期（``Page(...)`` 那一行就炸）；
+    * 跨对象的规则在 ``scenario.validate()`` 里，而它**每次 run 都跑**
+      （``FlowEngine.run`` 第一句），所以不需要手动触发；
+    * 模板文件在**加载/开始**时查，缺了直接报错并列出名字。
+
+    「检查输出」那一页保留 —— 运行结论、运行出错也写在那儿。
     """
 
-    def test_tooltip_says_what_is_checked(self, qt_app, ui) -> None:
+    def test_there_is_no_check_button(self, qt_app, ui) -> None:
         main, _ = ui
-        tip = main.controls.check_btn.toolTip()
-        assert "定义自洽" in tip
-        assert "模板文件" in tip
-        assert "不查" in tip, "还要说清它**不**查什么（识别准不准）"
+        assert not hasattr(main.controls, "check_btn"), "检查按钮该删了"
 
-    def test_selecting_a_script_runs_the_check_automatically(self, qt_app, ui) -> None:
-        main, _ = ui
-        main.controls.select_script(main.controls.script.currentData().key)
-        qt_app.processEvents()
+    def test_there_is_no_check_shortcut(self, qt_app, ui) -> None:
+        from gamebot.ui.shortcuts import SHORTCUTS
 
-        assert "检查" in main._status.text(), (
-            f"选完脚本该把检查结论写进状态栏，实际是 {main._status.text()!r}"
+        assert not any(spec.action == "check" for spec in SHORTCUTS), (
+            "F6 那条快捷键也该跟着删 —— 否则帮助里还写着它"
         )
 
-    def test_status_bar_reports_missing_templates(self, qt_app, monkeypatch, ui) -> None:
-        """缺模板要**在状态栏就能看见**，不是只写进「检查输出」页。"""
+    def test_no_check_signal_on_the_controls_bar(self, qt_app, ui) -> None:
+        main, _ = ui
+        assert not hasattr(main.controls, "checkRequested")
+
+    def test_output_page_is_kept(self, qt_app, ui) -> None:
+        """删的是按钮，不是那一页 —— 运行结论还写在那儿。"""
+        main, _ = ui
+        assert main._check_page is not None
+        assert main.workspace.indexOf(main._check_page) >= 0
+
+    def test_missing_templates_block_start(self, qt_app, monkeypatch, ui) -> None:
+        """**缺模板要拦住开始**，并说清缺哪些 —— 这是原来那个按钮提供的信息。"""
         main, _ = ui
         monkeypatch.setattr(bs, "check_templates", lambda cfg, sc: ["a.png", "b.png"])
-        main._run_check(quiet=True)
+        shown: list[tuple[str, str]] = []
+        monkeypatch.setattr(main, "_info_box", lambda title, body: shown.append((title, body)))
 
-        assert "缺 2 个模板文件" in main._status.text()
+        main._on_start()
 
-    def test_quiet_check_does_not_switch_pages(self, qt_app, ui) -> None:
-        """自动那次不切页 —— 否则会打断用户刚选脚本的动作。"""
+        assert main._engine_running is False, "缺模板时不该跑起来"
+        assert shown, "要弹一个框告诉用户"
+        title, body = shown[0]
+        assert "模板" in title
+        assert "a.png" in body and "b.png" in body, "缺哪些要说出来"
+
+    def test_missing_templates_are_reported_before_anything_else(
+        self, qt_app, monkeypatch, ui
+    ) -> None:
+        """缺模板的检查要在**建 Session 之前** —— 否则会白抓一次屏。"""
         main, _ = ui
-        before = main.workspace.currentIndex()
-        main._run_check(quiet=True)
-        assert main.workspace.currentIndex() == before
+        order: list[str] = []
+        monkeypatch.setattr(
+            bs, "check_templates", lambda cfg, sc: order.append("check") or ["a.png"]
+        )
+        monkeypatch.setattr(main, "_info_box", lambda *_: None)
 
-    def test_manual_check_switches_to_output(self, qt_app, ui) -> None:
-        main, _ = ui
-        main._run_check()
-        qt_app.processEvents()
-        assert main.workspace.currentWidget() is main._check_page
+        main._on_start()
+
+        assert order == ["check"]
+        assert main._run_ctx is None, "没通过检查就不该建 Session"
 
 
 class TestScriptSelectionBookkeeping:

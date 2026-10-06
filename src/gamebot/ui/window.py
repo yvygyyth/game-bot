@@ -234,7 +234,6 @@ class MainWindow(QMainWindow):
         self.controls.scriptChanged.connect(self._on_script_changed)
         self.controls.nodeChanged.connect(self._on_node_changed)
         self.controls.windowChanged.connect(self._on_window_changed)
-        self.controls.checkRequested.connect(self._run_check)
         self.controls.startRequested.connect(self._on_start)
         self.controls.stopRequested.connect(self._on_stop)
 
@@ -323,11 +322,6 @@ class MainWindow(QMainWindow):
                 f"{entry.key}: {details.pages} 状态 / {details.nodes} 节点 / "
                 f"{details.edges} 边"
             )
-        # **选完脚本自动查一次**：否则「检查」按钮查了什么、结果如何，
-        # 只有点下去才知道 —— 而"缺模板"是开始前就该知道的事。
-        # 用户反馈"我不知道「检查」在检查什么"，根因就是这个。
-        # 按钮保留（手动重查），但这行会自动跑。
-        self._run_check(quiet=True)
 
     @Slot(object)
     def _on_window_changed(self, title: str) -> None:
@@ -365,62 +359,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # 检查 / 自检
     # ------------------------------------------------------------------ #
-    def _run_check(self, *, quiet: bool = False) -> None:
-        """「检查」：查**这份定义本身 + 它要用的模板图在不在**。
-
-        查三样，都是"开始之前就能知道"的：
-
-        1. **定义自洽** —— ``Scenario.validate()``：每个记录信息的状态都有流程
-           节点认领、父节点是分类节点、边两头的节点存在、子页面 ROI 没伸出父页面；
-        2. **模板文件在不在** —— 走 ``check_templates``，把定义里引用到的每个
-           模板名去模板根里找一遍；
-        3. **模板根都有哪些、在不在** —— 找不到图时最常怀疑的就是这里。
-
-        **不查**识别准不准（那是跑起来看「识图日志」的事）。
-
-        :param quiet: 选脚本时自动跑的那一次 —— 不切到「检查输出」页（那会把用户
-            刚选脚本的动作打断），只把结论写状态栏。
-        """
-        entry = self._entry
-        if entry is None or entry.spec is None:
-            return
-        from ..bootstrap import check_templates
-
-        lines: list[str] = []
-        #: 状态栏那一行要说人话：先给结论，再给细节
-        verdict = "检查未完成"
-        try:
-            config = entry.spec.build_config()
-            scenario = entry.spec.build_scenario()
-            scenario.validate()
-            lines.append(
-                f"✓ 定义校验通过：{len(scenario.tree)} 页面 / "
-                f"{len(scenario.graph.nodes)} 节点 / {len(scenario.graph.edges)} 边"
-            )
-            missing = check_templates(config, scenario)
-            if missing:
-                lines.append(f"✗ 缺 {len(missing)} 个模板文件:")
-                lines.extend(f"    - {name}" for name in missing)
-                verdict = f"缺 {len(missing)} 个模板文件"
-            else:
-                lines.append("✓ 模板文件齐全")
-                verdict = "定义与模板都 OK"
-            for root in config.template_roots():
-                exists = "存在" if root.is_dir() else "目录不存在"
-                lines.append(f"  模板根: {root}（{exists}）")
-        except Exception as exc:
-            lines.append(f"✗ {type(exc).__name__}: {exc}")
-            verdict = f"{type(exc).__name__}: {exc}"
-
-        self._check_verdict = verdict
-        if quiet:
-            # 状态栏加一句，让"检查"的结果不点也看得见
-            self._status.setText(f"{self._status.text()}　| 检查：{verdict}")
-        else:
-            self._show_check_output(f"检查 {entry.key}", lines)
-        for line in lines:
-            log.info("[check] %s", line)
-
     # ------------------------------------------------------------------ #
     # 开始 / 停止
     # ------------------------------------------------------------------ #
@@ -715,7 +653,6 @@ class MainWindow(QMainWindow):
             {
                 "run": self._on_start,
                 "stop": self._on_stop,
-                "check": self._run_check,
                 "detect": self.controls.refresh_windows,
                 "page_diagram": lambda: self.workspace.setCurrentIndex(0),
                 "page_recognition": lambda: self.workspace.setCurrentIndex(1),
@@ -727,7 +664,6 @@ class MainWindow(QMainWindow):
             {
                 "start": self.controls.start_btn,
                 "stop": self.controls.stop_btn,
-                "check": self.controls.check_btn,
                 "detect": self.controls.detect,
             }
         )
