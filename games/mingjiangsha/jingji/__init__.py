@@ -40,10 +40,12 @@ python -m games check  mingjiangsha/jingji    # 静态自检（不需要游戏�
 from __future__ import annotations
 
 from gamebot.config.schema import AppConfig
+from gamebot.feature import FeatureSpec
 from gamebot.flow import EngineOptions, Scenario, UnknownPolicy
 from gamebot.state import PageTree
 
 from .. import game as _game
+from .form import FORM
 from .graph import build_graph
 from .pages import FEATURE_PAGES
 
@@ -82,9 +84,38 @@ def build_scenario() -> Scenario:
     )
 
 
+#: 这个脚本的**唯一导出**。框架读它，编辑器也看它。
+#:
+#: 字段全必选：漏一个 `mypy` 当场报 `Missing positional argument`，
+#: 名字拼错报 `did you mean ...?`。所以"结构对不对"在**写的时候**就有反馈 ——
+#: 不需要跑起来，也不需要点一个"检查"按钮。
+#:
+#: 下面那几个模块级的 ``SLUG`` / ``TITLE`` / ``TEMPLATES_DIR`` 仍然留着：
+#: 它们是**给别人用的常量**（``shortcuts.py`` 里拼路径之类），
+#: 而 ``SPEC`` 是给**框架**用的那份声明。两者不重复 —— ``SPEC`` 里的值是
+#: 从这里取的。
+SPEC = FeatureSpec(
+    name=f"{_game.SLUG}/{SLUG}",
+    title=TITLE,
+    slug=SLUG,
+    description=DESCRIPTION,
+    templates_dir=TEMPLATES_DIR,
+    build_config=build_config,
+    build_scenario=build_scenario,
+    form=FORM,
+)
+"""表单是可选的：不写就是空表单，界面上不显示那一块。
+
+这里直接传 ``FORM`` —— 万一它类型不对，``FeatureSpec.__post_init__`` 会当场报，
+不需要在这里再 `isinstance` 一次（那种"防御式重复检查"正是要避免的东西：
+它掩盖了本该在声明处就报的错）。
+"""
+
+
 __all__ = [
     "DESCRIPTION",
     "SLUG",
+    "SPEC",
     "TEMPLATES_DIR",
     "TITLE",
     "build_config",

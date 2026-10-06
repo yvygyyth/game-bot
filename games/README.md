@@ -13,7 +13,7 @@ games/
     ├── shortcuts.py              游戏级快捷方法（关弹窗、回主界面）
     ├── templates/                游戏级公共模板
     └── <功能>/                    二级：一个脚本功能一个目录
-        ├── __init__.py            ★ build_config() + build_scenario()
+        ├── __init__.py            ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
         ├── form.py                动态表单声明（FORM，没人调参数就不用写）
         ├── pages.py               状态（**一个文件就够**，再复杂也别拆）
         ├── graph.py               流程（同上）
@@ -73,21 +73,51 @@ class AdvanceTeamStep(Step):                 # 它的逻辑
 
 ## 唯一需要记住的规则
 
-脚本包的 `__init__.py` 暴露两个函数，注册表就会**自动发现**它：
+脚本包的 `__init__.py` 导出**一个** `SPEC`，注册表就会**自动发现**它：
 
 ```python
-def build_config() -> AppConfig: ...     # 这个脚本怎么跑（窗口、分辨率、模板根）
-def build_scenario() -> Scenario: ...    # 这个脚本做什么（页面树 + 流程图 + 参数）
+# games/<游戏>/<功能>/__init__.py
+from gamebot.feature import FeatureSpec
+
+SPEC = FeatureSpec(
+    name="mingjiangsha/qianli",              # "<游戏>/<功能>"，命令行和界面用它标识
+    title="千里单骑刷本",                     # 给人看的名字
+    slug="qianli",                           # 功能目录名（进 journal 文件名）
+    description="自动刷本，连胜就继续",         # 可选
+    templates_dir="games/mingjiangsha/qianli/templates",
+    build_config=build_config,               # 无参可调用对象
+    build_scenario=build_scenario,
+    form=FORM,                               # 可选：运行参数表单
+)
 ```
 
-可选再加三样：
+### 为什么是"一个 typed 对象"，而不是几个函数
 
-```python
-TITLE = "千里单骑刷本"          # list 里显示的名字
-DESCRIPTION = "自动刷本……"      # 一句话说明
-```
+**字段全必选 + 类型明确 ⇒ 编辑器替你查错。** 这几种写法在写的时候就有反馈，
+不用跑起来、也不用点一个"检查"按钮：
 
-不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。
+| 写错了什么 | mypy 报什么 |
+|---|---|
+| 漏掉 `templates_dir` | `Missing positional argument "templates_dir"` |
+| 把 `form` 拼成 `from_` | `Unexpected keyword argument "from_" ... did you mean "form"?` |
+| `templates_dir` 传了 `Path` 而不是 `str` | `Argument "templates_dir" ... has incompatible type "Path"; expected "str"` |
+| `build_config` 传了**配置对象**而不是函数 | 运行期 `ConfigError`（这条类型上看不出来，所以构造期也查一遍） |
+
+以前是散装几个名字（`TITLE` / `build_config` / `build_scenario`），框架靠
+``getattr(module, "build_config", None)`` 去捞 —— 于是"必须有哪些、叫什么"
+这条契约**只存在于框架的字符串里**，编辑器和类型检查都看不见。
+
+**`build_config` / `build_scenario` 必须是"造一份新的"的函数，不是对象本身。**
+每次运行都要一份新的：共享一个 `AppConfig` 会让一次运行改到的东西泄漏到下一次。
+
+### 还需要导出的常量
+
+`SPEC` 之外，`SLUG` / `TITLE` / `TEMPLATES_DIR` 这类模块级常量**照旧留着** ——
+它们是给别处用的（比如 `shortcuts.py` 里拼模板路径），而 `SPEC` 是给**框架**用的
+那份声明。两者不重复：`SPEC` 里的值就从这些常量取。
+
+不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。**漏了 `SPEC`
+会被明确报出来**（说清缺什么、约定在哪），而不是让脚本静默消失在列表里。
 
 ## 命令
 

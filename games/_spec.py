@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gamebot.exceptions import ConfigError
+from gamebot.feature import FeatureSpec
 from gamebot.params import FormSpec
 
 if TYPE_CHECKING:
@@ -71,44 +72,7 @@ class ScriptSpec:
         return f"ScriptSpec({self.key!r}, {self.title!r})"
 
 
-def _read_form(module: Any, key: str, errors: list[tuple[str, str]]) -> FormSpec:
-    """读脚本的 ``form.py`` 里的 ``FORM``。
-
-    只在**功能目录**里找 ``form.py`` —— 游戏级不放表单：表单描述的是
-    "这个脚本这次怎么跑"，而游戏级是所有脚本共用的，放那儿语义不对。
-
-    读不到就当"没有表单"（不是错误：绝大多数脚本不需要它）。
-    读到了但类型不对 → 记进 ``errors``，**不抛异常** —— 一个脚本的表单写错，
-    不该让整个列表页打不开（和注册表里其他项的容错策略一致）。
-    """
-    name = f"{module.__name__}.form"
-    try:
-        form_module = importlib.import_module(name)
-    except ModuleNotFoundError as exc:
-        # 只有"form 模块本身不存在"才算没有表单；它内部 import 失败要报出来
-        if exc.name != name:
-            errors.append((key, f"form.py 导入失败: {exc}"))
-        return FormSpec()
-    except Exception as exc:
-        errors.append((key, f"form.py 导入失败: {type(exc).__name__}: {exc}"))
-        return FormSpec()
-
-    form = getattr(form_module, "FORM", None)
-    if form is None:
-        return FormSpec()
-    if not isinstance(form, FormSpec):
-        errors.append(
-            (key, f"form.py 里的 FORM 应该是 FormSpec，实际是 {type(form).__name__}")
-        )
-        return FormSpec()
-    try:
-        form.validate()
-    except ConfigError as exc:
-        errors.append((key, f"表单声明有问题: {exc}"))
-        return FormSpec()
-    return form
-
-
+#: 发现结果缓存。导入模块有副作用，所以只做一次（refresh=True 才重来）。
 _SCRIPTS: dict[str, ScriptSpec] | None = None
 _ERRORS: list[tuple[str, str]] = []
 
@@ -167,11 +131,11 @@ def _misplaced_scripts() -> list[tuple[str, str]]:
             continue
         # 文本粗判就够了：这里只为了给一句人话提示，不值得为它 import 一个坏模块
         text = init.read_text(encoding="utf-8", errors="replace")
-        if "def build_scenario" in text or "def build_config" in text:
+        if "SPEC = FeatureSpec" in text or "def build_scenario" in text:
             found.append(
                 (
                     game_dir.name,
-                    f"games/{game_dir.name}/__init__.py 里有 build_config/build_scenario —— "
+                    f"games/{game_dir.name}/__init__.py 里有 SPEC/build_scenario —— "
                     f"脚本不能直接放在游戏目录下。给它建一个功能目录："
                     f"games/{game_dir.name}/<功能>/，key 就是 "
                     f"'{game_dir.name}/<功能>'",
@@ -184,6 +148,31 @@ def discovery_errors() -> list[tuple[str, str]]:
     """发现过程中出错的地方，``[(key, 错误说明)]``。先调 :func:`list_scripts` 再读。"""
     list_scripts()
     return list(_ERRORS)
+
+
+def read_spec(module: Any, key: str) -> FeatureSpec:
+    """从功能模块里读那个 ``SPEC``。
+
+    **单独一个函数**（而不是内联在发现循环里）是为了它**能被直接测** ——
+    "没有 SPEC 时给出的提示够不够清楚"这种事，用不着真去造一个功能目录、
+    再骗 importlib 去加载它（那条路很绕，而且测的是 import 机制不是这里）。
+
+    :raises ConfigError: 模块没导出 ``SPEC``，或导出的不是 ``FeatureSpec``。
+        message 里**必须**说清约定和现状 —— "脚本没出现在列表里"是最难查的
+        一类问题，所以这里宁可啰嗦。
+    """
+    feature = getattr(module, "SPEC", None)
+    if isinstance(feature, FeatureSpec):
+        return feature
+    if feature is None:
+        detail = "（模块里没有 SPEC 这个名字）"
+    else:
+        detail = f"（SPEC 现在的类型是 {type(feature).__name__}）"
+    raise ConfigError(
+        f"{key}: 这个功能目录没有导出 SPEC（gamebot.feature.FeatureSpec）{detail}。\n"
+        "  约定见 games/README.md：在 __init__.py 里构造一个 FeatureSpec 并命名为 SPEC，\n"
+        "  字段全必选（漏了/拼错了编辑器和 mypy 会直接报）。"
+    )
 
 
 def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
@@ -203,24 +192,22 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
             errors.append((key, f"{type(exc).__name__}: {exc}"))
             continue
 
-        build_config = getattr(module, "build_config", None)
-        build_scenario = getattr(module, "build_scenario", None)
-        if not callable(build_config) or not callable(build_scenario):
-            errors.append(
-                (key, "缺少 build_config() 或 build_scenario() —— 见 games/README.md 的约定")
-            )
+        try:
+            feature = read_spec(module, key)
+        except ConfigError as exc:
+            errors.append((key, str(exc)))
             continue
 
         found[key] = ScriptSpec(
             key=key,
             game=game,
-            slug=slug,
-            title=str(getattr(module, "TITLE", slug)),
-            description=str(getattr(module, "DESCRIPTION", "")),
+            slug=feature.slug or slug,
+            title=feature.title,
+            description=feature.description,
             module=module_name,
-            build_config=build_config,
-            build_scenario=build_scenario,
-            form=_read_form(module, key, errors),
+            build_config=feature.build_config,
+            build_scenario=feature.build_scenario,
+            form=feature.form or FormSpec(),
         )
 
     _SCRIPTS = found
