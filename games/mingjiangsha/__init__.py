@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
-from .game import SLUG, SOURCE_SIZE, TEMPLATES_DIR, TITLE, WINDOW_TITLE, base_config
+from .game import CLIENT_SIZE, SLUG, TEMPLATES_DIR, TITLE, WINDOW_TITLE, base_config
 
 __all__ = [
+    "CLIENT_SIZE",
     "SLUG",
-    "SOURCE_SIZE",
     "TEMPLATES_DIR",
     "TITLE",
     "WINDOW_TITLE",

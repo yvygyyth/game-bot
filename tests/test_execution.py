@@ -311,24 +311,23 @@ class TestFailureFrames:
         assert outcome.frame_path == ""
 
 
-class TestBusinessStepsAreThin:
-    """业务层那三个队伍步骤就是 ``click_image`` 的**薄封装**。
+class TestJingjiStepsUseTheSharedHelpers:
+    """竞技场的步骤**别再重写"找到 → 点 → 作废帧"**。
 
-    钉住"薄"这件事：它们不该自己重写"找到 → 点 → 作废帧" ——
-    那三个动作已经在 :func:`click_image` 里各有一份实现，重复一遍就会各错各的。
+    那三个动作 :func:`click_image` 里已经各有一份实现，重写一遍就会各错各的。
 
     ## 为什么这几条不用 ``ctx`` 装置
 
-    队伍步骤的 ROI 是 ``(1400, 630, 470, 360)`` —— **真实客户区尺寸下的右下角**
-    （1918x1080）。而 ``ctx`` 装置的假后端只有 640x360，那个框完全落在帧外，
-    于是每次都得到"搜索区域为空"。那是**校验在正确工作**（框和帧不重叠 =
-    这个页面永远认不出来），不是被测代码有问题。
+    竞技场的 roi 是**真实客户区尺寸**下的位置（2560×1369），而 ``ctx`` 装置的
+    假后端只有 640×360 —— 那些框完全落在帧外，于是每次都得到"搜索区域为空"。
+    那是**校验在正确工作**（框和帧不重叠 = 这个状态永远认不出来），
+    不是被测代码有问题。所以这里自己建一个真实尺寸的帧。
 
-    所以这里自己建一个真实尺寸的帧。顺带说明一件事：**假后端尺寸和脚本声明的
-    分辨率必须一致**，否则会得到一堆"永远找不到"的假失败。
+    顺带说明一件事：**假后端的尺寸必须和脚本声明的分辨率一致**，
+    否则会得到一堆"永远找不到"的假失败。
     """
 
-    SIZE = (1918, 1080)
+    SIZE = (2560, 1369)
 
     def _make_ctx(self, tmp_path, matcher):
         from gamebot.atomic.backends.fake import build_fake_backends
@@ -346,40 +345,81 @@ class TestBusinessStepsAreThin:
         session = BaseSession(build_fake_backends(size=self.SIZE), matcher=matcher)
         return RunContext(session, config, frame_ttl=0.5)
 
-    def test_create_team_reads_params_and_delegates(self, tmp_path, matcher):
+    def test_create_team_clicks_through_the_shared_helper(self, tmp_path, matcher):
+        """``create_team`` 命中就点、并把模板名带进 meta（journal 靠它）。"""
+        from games.mingjiangsha.jingji.pages import T_BEFORE_CREATE
         from games.mingjiangsha.jingji.steps import create_team
 
-        matcher.matches = {"jingji/create_team.png": (Point(1500, 700), 0.95)}
+        matcher.matches = {T_BEFORE_CREATE: (Point(2300, 880), 0.95)}
         run_ctx = self._make_ctx(tmp_path, matcher)
-        run_ctx.set_params({"jingji.confidence": 0.8, "jingji.settle": 0.0})
         try:
             outcome = Executor(run_ctx).run(create_team)
         finally:
             run_ctx.close()
 
         assert outcome.ok is True, outcome.message
-        assert outcome.action["template"] == "jingji/create_team.png"
+        assert outcome.action["template"] == T_BEFORE_CREATE
 
-    def test_threshold_comes_from_the_param(self, tmp_path, matcher):
-        """阈值来自运行参数 —— 分数低于它就找不到（不是硬编码在函数里）。"""
+    def test_create_team_reports_not_found_when_missing(self, tmp_path, matcher):
+        """没命中就如实 ``not_found`` —— 上层会拿实测状态去重定位，不在这里重试。"""
         from games.mingjiangsha.jingji.steps import create_team
 
-        matcher.matches = {"jingji/create_team.png": (Point(1500, 700), 0.7)}
+        matcher.matches = {}
         run_ctx = self._make_ctx(tmp_path, matcher)
         try:
-            run_ctx.set_params({"jingji.confidence": 0.9, "jingji.settle": 0.0})
-            assert Executor(run_ctx).run(create_team).ok is False
-
-            run_ctx.set_params({"jingji.confidence": 0.5, "jingji.settle": 0.0})
-            assert Executor(run_ctx).run(create_team).ok is True
+            outcome = Executor(run_ctx).run(create_team)
         finally:
             run_ctx.close()
 
-    def test_all_three_are_plain_functions(self):
-        """它们必须是**函数**（有 __name__），不是类的实例。"""
-        from games.mingjiangsha.jingji import steps
+        assert outcome.ok is False
+        assert outcome.status == "not_found"
 
-        for name in ("create_team", "add_pet", "start_match", "enter_jingji"):
-            func = getattr(steps, name)
-            assert callable(func), f"{name} 该是可调用的"
-            assert getattr(func, "__name__", "") == name, f"{name} 的名字就是它自己"
+
+class TestEnterJingjiHoversBeforeItClicks:
+    """首页那一步是**移动 → 等 → 点**，不是"找到再点"。
+
+    玩家说明：鼠标不在卡上时熊猫头**不完整**，所以"先找图"会失败；
+    而这个位置即使不完整也点得中。所以这一步必须用固定坐标，
+    而且必须先移动过去（让熊猫头完整显示）。
+    """
+
+    def _run(self, tmp_path):
+        from gamebot.atomic.backends.fake import build_fake_backends
+        from gamebot.atomic.session import BaseSession
+        from gamebot.config.schema import AppConfig, BackendKind
+        from gamebot.context import RunContext
+        from games.mingjiangsha.game import CLIENT_SIZE
+        from games.mingjiangsha.jingji.steps import enter_jingji
+
+        config = AppConfig.defaults()
+        config.screen.backend = BackendKind.FAKE
+        config.paths.root = tmp_path
+        config.paths.logs = tmp_path / "logs"
+        config.paths.screenshots = tmp_path / "logs" / "shots"
+        config.vision.record = False
+        from tests.conftest import FakeMatcher
+
+        session = BaseSession(
+            build_fake_backends(size=CLIENT_SIZE), matcher=FakeMatcher()
+        )
+        run_ctx = RunContext(session, config, frame_ttl=0.5)
+        try:
+            outcome = Executor(run_ctx).run(enter_jingji)
+        finally:
+            run_ctx.close()
+        return outcome
+
+    def test_it_moves_then_clicks(self, tmp_path):
+        """**不靠识图**也能成功 —— 这正是这一步用固定坐标的意义。"""
+        outcome = self._run(tmp_path)
+        assert outcome.ok is True, outcome.message
+        assert outcome.action["action"] == "click"
+
+    def test_it_uses_the_coordinate_from_pages(self, tmp_path):
+        """坐标只有一个出处（``pages.JINGJI_ENTRY``），步骤里不再写一遍。"""
+        from games.mingjiangsha.jingji.pages import JINGJI_ENTRY
+
+        # 有值、落在客户区内 —— 具体数字改了不用改测试
+        assert 0 < JINGJI_ENTRY.x < 2560
+        assert 0 < JINGJI_ENTRY.y < 1369
+

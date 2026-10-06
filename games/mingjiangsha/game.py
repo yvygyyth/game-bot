@@ -43,11 +43,19 @@ TITLE = "名将杀"
 WINDOW_TITLE = "名将杀"
 """窗口标题关键字。改游戏窗口标题前先 ``gamebot windows``。"""
 
-SOURCE_SIZE = (1918, 1080)
+CLIENT_SIZE = (2560, 1369)
 """**锁定分辨率（客户区）** —— 实测值。
 
-``gamebot capture`` 确认过：窗口在屏幕 (21,49)，客户区 1918x1080，
-标题栏和边框都被 ``client_area_only`` 排除掉了。
+2026 年换分辨率之后重新量的：玩家给的 15 张截图是 **2560×1392**，
+而那是**含标题栏**的整窗（第 0~22 行是标题栏：「名将杀」+ 最小化/关闭按钮）。
+客户区从 **y=23** 开始，所以客户区是 ``2560 × (1392 - 23) = 2560 × 1369``。
+
+⚠️ **模板必须按"客户区左上角"为原点裁。** 玩家截图和客户区**左上角重合**
+（标题栏在上方，不影响 x 和客户区内的 y），所以直接从截图上裁是对的 ——
+但用工具量坐标时，报出来的"整窗坐标"要 **减去 23** 才是客户区坐标。
+（这个坑踩过一次：按 1392 的图估的 y 全部偏了 23px。）
+
+``client_area_only: True`` 时抓出来的帧就是这个尺寸，坐标 1:1，不需要换算。
 """
 
 #: 游戏级模板根（**多个脚本共用**的图放这儿）。
@@ -65,7 +73,7 @@ def base_config() -> AppConfig:
     config.name = SLUG
     config.screen.backend = BackendKind.WINDOWS
     config.screen.window_title = WINDOW_TITLE
-    config.screen.source_size = SOURCE_SIZE
+    config.screen.source_size = CLIENT_SIZE
     config.screen.client_area_only = True
     config.vision.templates_dir = TEMPLATES_DIR
     # 游戏画面一直在动（待机光效、飘落花瓣），但模板匹配对这类的容忍度很高：

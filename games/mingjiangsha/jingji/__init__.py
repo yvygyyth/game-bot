@@ -1,22 +1,29 @@
-"""竞技场（名将杀）。
+"""竞技场（名将杀）—— 刷竞技场：建队 → 匹配 → 选将 → 投降 → 结算，循环 N 局。
 
 ## 这个文件里**没有一行组装代码**
 
-建树、加节点、连边、校验都是框架按 :data:`SCENARIO` 里的**数据**做的
+建树、加节点、展开边、校验都是框架按 :data:`SCENARIO` 里的**数据**做的
 （见 :class:`gamebot.feature.FeatureSpec` 与
 :class:`gamebot.scenario_spec.ScenarioSpec`）。
 
-原来这里有三个函数 —— ``build_config()`` / ``build_tree()`` / ``build_scenario()``
-—— 而它们对每个脚本都长一个样：``for page, parent in ...: tree.add(...)``、
-``graph.add_node(...)``、``graph.connect(...)``。那是把"会不会写错"复制到每个
-脚本里（忘了 ``add_node`` 就连边，是运行期事故）。现在只剩声明。
-
 ## 读代码的顺序
 
-1. 这个文件 —— 脚本叫什么、模板在哪、表单有哪些；
-2. :mod:`.graph` —— 有哪些状态、谁先谁后、什么条件换节点；
-3. :mod:`.pages` —— 每个状态靠什么认出来（ROI + 模板）；
-4. :mod:`.steps` —— 每个节点具体做什么。
+| 想改什么 | 读 |
+|---|---|
+| 脚本叫什么、模板在哪、表单有哪些 | **本文件** |
+| 每个状态靠什么认出来（模板 + roi + 阈值） | :mod:`.pages` |
+| 状态和流程节点怎么对上 | :mod:`.bindings` |
+| 有哪些节点、什么条件换节点、循环在哪 | :mod:`.graph` |
+| 每个节点具体做什么 | :mod:`.steps` |
+| 要裁哪些模板、每张裁什么 | ``templates/README.md`` |
+| 首页那个入口为什么用固定坐标 | :mod:`.steps.enter_jingji` |
+| 提示弹窗为什么不进状态树 | :mod:`.pages` 的模块 docstring |
+
+## 流程一句话
+
+首页点「竞技」（熊猫头）→ 创建队伍 → 添加伙伴 → 开始匹配（可能弹提示框）
+→ 选将（点一张卡 + 确定）→ 战斗里投降 → 结算 → **回到"开始匹配"再刷一局**，
+直到刷满 :data:`~.form.ROUNDS_PARAM` 指定的局数。
 """
 
 from __future__ import annotations
@@ -29,22 +36,21 @@ from .graph import SCENARIO
 
 SLUG = "jingji"
 TITLE = "竞技场"
-DESCRIPTION = "首页点竞技 → 创建队伍 → 添加伙伴 → 开始匹配"
+DESCRIPTION = "刷竞技场：建队 → 匹配 → 选将 → 投降 → 结算，循环 N 局"
 
 TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
 
 #: 这个脚本的**唯一导出**。框架读它，编辑器也看它。
 #:
 #: 字段全必选：漏一个 ``mypy`` 当场报 ``Missing positional argument``，
-#: 名字拼错报 ``did you mean ...?``。所以"结构对不对"在**写的时候**就有反馈 ——
+#: 名字拼错报 ``did you mean ...?`` —— 所以"结构对不对"在**写的时候**就有反馈，
 #: 不需要跑起来，也不需要点一个"检查"按钮。
 #:
-#: ``base_config`` 收的是**游戏级**的东西（窗口标题、分辨率）—— 那是"怎么跑"、
+#: ``base_config`` 是**游戏级**的东西（窗口标题、锁定分辨率）—— 它是"怎么跑"、
 #: 而且与环境相关，所以由游戏级提供，本功能不重复声明。
 #:
-#: **没有 ``base_tree``。** 页面不再分"游戏级公共"和"功能级"——
-#: 那套分层在只有一个功能时只带来负担（理由见 :mod:`games.mingjiangsha.game`）。
-#: 状态树整个在 :mod:`.pages` 里，包括它自己的首页那层。
+#: **没有 ``base_tree``**：页面不分"游戏级公共"和"功能级"了，
+#: 状态树整个在 :mod:`.pages` 里（理由见 :mod:`games.mingjiangsha.game`）。
 SPEC = FeatureSpec(
     name=f"{_game.SLUG}/{SLUG}",
     title=TITLE,

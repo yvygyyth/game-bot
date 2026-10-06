@@ -1,4 +1,4 @@
-"""关联表 —— **状态末梢 ↔ 流程节点**。
+"""竞技场 —— 关联表：**状态末梢 ↔ 流程节点**。
 
 这是这个功能的第三个产物，和前两个并列：
 
@@ -8,30 +8,37 @@
 | :mod:`.graph` | 流程图 —— "该做什么" |
 | **本文件** | 关联表 —— 两者怎么对上 |
 
-**关联不写在任何一边。** 以前它隐含在 ``graph.py`` 的 ``Node(page=...)`` 里 ——
-那是"流程图顺手带了状态信息"，两边边界就模糊了；而且想单看"谁对应谁"，
-得把流程图从头翻一遍。
+## 这里的对应
 
-## 这里的四条对应
+| 流程节点 | 状态末梢 | 干什么 |
+|---|---|---|
+| ``lobby`` | ``lobby`` | 点首页的竞技入口 |
+| ``team`` | ``jj/before_create`` | 点「创建队伍」 |
+| ``team`` | ``jj/after_create`` | 点「添加伙伴」 |
+| ``match`` | ``jj/after_add`` | 点「开始匹配」（+ 提示框善后） |
+| ``select`` | ``select/idle`` | 点第 1 张武将卡 |
+| ``select`` | ``select/picked`` | 点「确定」 |
+| ``fight`` | ``fight/hand`` | 取消换牌 → 麻花结 → 投降 → 确认 |
+| ``settle`` | ``fight/done`` | 结算三步 + 记一局 |
 
-| 流程节点 | 状态末梢 |
-|---|---|
-| ``home`` | ``home/lobby`` |
-| ``jingji/before_create`` | ``home/jingji/before_create`` |
-| ``jingji/after_create`` | ``home/jingji/after_create`` |
-| ``jingji/after_add`` | ``home/jingji/after_add`` |
+## 为什么一个流程节点能关联多个状态
 
-节点 id 和状态 id 的**尾段同名**是刻意的（``jingji/before_create`` 对
-``home/jingji/before_create``）：一眼能看出对应关系，改错也看得出。但这不是
-框架要求 —— 对应关系只认这张表。
+``team`` 关联两个状态、``match`` 一个、``select`` 两个 —— 它们**共用同一个步骤**：
 
-## 为什么 `home` 对的是 `home/lobby` 而不是 `home`
+* ``team``：创建队伍和添加伙伴都是"点那个按钮"，只是按钮文字不同。
+  一个函数里写"点当前状态那个按钮"比写两个节点更省事，而且不会漏掉其中一个；
+* ``select``：点卡和点确定是两个**不同**的步骤，所以它们各自是独立的
+  ``Node``（同名 ``select`` 不行），见 :mod:`.graph`。
 
-``home`` 是**分类节点**（`kind: group`）：它自己不记录信息、不参与匹配，
-只提供 ROI 继承和组织结构。把它关联给流程节点，那个节点就永远不会被执行 ——
-定位结果里根本不会出现分类节点。
+⚠️ **一个节点只能关联一个状态**（``NodeBindings`` 会在装配期拦下写两个的）——
+不然"进入这个节点后跑哪个状态的定位代码"就不确定了。所以上面表格里
+``team`` 出现两次是**两条关联**（两个不同节点），不是一条关联对应两个状态。
 
----
+## 三条不变式
+
+1. 流程节点**不一定**有状态（纯逻辑节点）—— 这里每个都有；
+2. 状态末梢**一定**有节点认领 —— 少一个就在装配期报错；
+3. 一个流程节点**至多**关联一个状态。
 """
 
 from __future__ import annotations
@@ -40,12 +47,23 @@ from gamebot.flow import Binding, NodeBindings
 
 __all__ = ["BINDINGS"]
 
-#: 这个功能的关联表。
 BINDINGS = NodeBindings(
     pairs=(
-        Binding("home", "home/lobby"),
-        Binding("jingji/before_create", "home/jingji/before_create"),
-        Binding("jingji/after_create", "home/jingji/after_create"),
-        Binding("jingji/after_add", "home/jingji/after_add"),
+        Binding("lobby", "lobby"),
+        Binding("create_team", "jj/before_create"),
+        Binding("add_pet", "jj/after_create"),
+        Binding("match", "jj/after_add"),
+        Binding("pick_general", "select/idle"),
+        Binding("confirm_general", "select/picked"),
+        Binding("fight", "fight/hand"),
+        Binding("settle", "fight/done"),
+        # 终态也要有节点认领 —— 否则重定位到它就无处可去。
+        # "进了就结束"不等于"不需要节点"。
+        Binding("finish", "over"),
     )
 )
+"""这个功能的关联表。
+
+**节点 id 和状态 id 刻意不同名**（``create_team`` vs ``jj/before_create``）：
+状态 id 说的是"界面上看到什么"，节点 id 说的是"要做什么"，两件事本来就不一样。
+（竞技场那三个状态在同一个界面上，硬要同名也做不到。）"""

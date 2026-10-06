@@ -1,52 +1,47 @@
-"""竞技场的步骤 —— 一个步骤一个文件。
+"""竞技场 —— 步骤（**一个步骤就是一个函数**）。
 
-## 为什么按步骤分文件，而不是按"用到的图"分
+## 走一遍整个流程
 
-一个步骤的完整定义 = 它的逻辑 + 它用的模板 + 那些模板的阈值和搜索范围。
-把这些**放在一起**，改这个步骤时只动一个文件；按"模板放一起、逻辑放一起"分，
-改一步就要在几个文件之间来回跳。
+| 状态 | 步骤 | 干什么 |
+|---|---|---|
+| `lobby` | :func:`enter_jingji` | 移到熊猫头 → 点它 → 进竞技场 |
+| `jj/before_create` | :func:`create_team` | 点「创建队伍」 |
+| `jj/after_create` | :func:`add_pet` | 点「添加伙伴」 |
+| `jj/after_add` | :func:`start_match` | 点「开始匹配」+ 善后那个可能弹的提示框 |
+| `select/idle` | :func:`pick_general` | 点第 1 张武将卡（→ 变成 `select/picked`） |
+| `select/picked` | :func:`confirm_general` | 点「确定」 |
+| `fight/hand` | :func:`advance_fight` | 取消换牌 → 麻花结 → 投降 → 确认 |
+| `fight/done` | :func:`finish_round` | 点空白区 → 下一步 → 确认（+ 记一局） |
 
-## 队伍流程为什么是**三个**步骤（原来是三个状态用一个步骤）
+## 这些步骤**不做**的三件事
 
-原来三个状态是同一个页面，页面树区分不了，所以只能让一个步骤"按顺序探测三个
-按钮"。现在 :mod:`.pages` 把它们建成了三个并列子状态，于是**一个状态一个步骤**：
+1. **不重试** —— 失败（多半是识图没命中）如实返回，上层拿实测状态去**重定位**；
+2. **不轮询等待** —— "等某个画面出现"是原子层 ``wait_*`` 的事；
+3. **不判断游戏状态** —— ``if ctx.page_id == ...`` 属于流程层（边条件 / 关联表）。
 
-* 每个步骤只判断自己那一个按钮，日志能说清是哪个没认出来；
-* 每个步骤有位置守卫（节点的 ``page`` 声明），不会在错误的阶段点错的按钮；
-* ``describe`` 里能看出走到第几段。
+## 唯一的例外：`start_match` 里那段"可能弹窗"
 
-## 一个必须记住的实测事实
-
-**「开始匹配」在三个状态下都在**（从进竞技场就可见，只是没队伍时是灰的）。
-
-这决定了 :data:`~.advance_team.T_START_MATCH` 那张图**必须是在按钮亮起时截的** ——
-否则"加完伙伴"这个状态永远认不出来（灰按钮和目标图差得太远）。
-这是新页面树正确性的前提，不是可选的细节。
-
-（旧的顺序探测版本里，这条事实的体现是"开始匹配必须排最后"；
-现在体现为"模板必须是亮态"。）
+「开始匹配」点下去**可能**弹一个提示框。它不用状态表达（理由见
+`pages.py` 的模块 docstring），所以那段判断落在步骤里。
+关键是它**不猜**：看不出弹窗就不做任何事，下一步照常按状态机走。
 """
 
 from __future__ import annotations
 
-from .advance_team import (
-    T_ADD_PET,
-    T_CREATE_TEAM,
-    T_START_MATCH,
-    TEAM_ROI,
-    add_pet,
-    create_team,
-    start_match,
-)
+from .advance_fight import advance_fight
 from .enter_jingji import enter_jingji
+from .finish_round import finish_round, noop
+from .pick_general import confirm_general, pick_general
+from .start_match import add_pet, create_team, start_match
 
 __all__ = [
-    "TEAM_ROI",
-    "T_ADD_PET",
-    "T_CREATE_TEAM",
-    "T_START_MATCH",
     "add_pet",
+    "advance_fight",
+    "confirm_general",
     "create_team",
     "enter_jingji",
+    "finish_round",
+    "noop",
+    "pick_general",
     "start_match",
 ]
