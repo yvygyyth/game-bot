@@ -264,6 +264,8 @@ class GlobalHotkeys(QObject):
         #: 当前按住的修饰键（回调里维护）。**每条快捷键各自记一份状态**没必要，
         #: 修饰键是全局的物理状态。
         self._held = 0
+        #: 回调一共收到多少次按键（只用于排查钩子有没有被调用）
+        self._seen = 0
         self._proc: Any = None
 
     # ------------------------------------------------------------------ #
@@ -334,7 +336,17 @@ class GlobalHotkeys(QObject):
                 self._hook = None
 
     def _callback(self, code: int, wparam: int, lparam: int) -> int:
-        """低级键盘钩子的回调。**必须极短** —— 它挂在整个系统的输入路径上。"""
+        """低级键盘钩子的回调。**必须极短** —— 它挂在整个系统的输入路径上。
+
+        ## 为什么这里有一句 debug 日志
+
+        "全局快捷键不生效"最难查的地方是**分不清两种情况**：钩子根本没被调用，
+        还是调用了但没匹配上。两者的修法完全不同，而外部看都是"按了没反应"。
+
+        所以这里在**收到任意按键**时留一条 debug 日志（默认级别不打印，
+        要查的时候开 DEBUG 就行）。代价是每次按键多一次 `isEnabledFor` 判断 ——
+        在钩子回调里可以接受（它不做字符串格式化，日志级别不够就直接返回）。
+        """
         try:
             if code >= 0:
                 info = ctypes.cast(
@@ -342,11 +354,20 @@ class GlobalHotkeys(QObject):
                 ).contents
                 vk = int(info.vkCode)
                 if wparam in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
+                    self._seen += 1
+                    if log.isEnabledFor(logging.DEBUG):
+                        log.debug(
+                            "[hotkey] 钩子收到按键 vk=0x%02X held=%d（累计 %d 次）",
+                            vk,
+                            self._held,
+                            self._seen,
+                        )
                     self._note_modifier(vk, down=True)
                     # 修饰键自己按下时不算触发
                     if vk not in (_VK_SHIFT, _VK_CONTROL, _VK_MENU, _VK_LWIN, _VK_RWIN):
                         for hotkey in self._hotkeys:
                             if matches(hotkey, vk, self._held):
+                                log.debug("[hotkey] 命中 %s -> 发信号", hotkey.action)
                                 # 队列投递到界面线程；这里只发信号，不干活
                                 self.triggered.emit(hotkey.action)
                                 break
