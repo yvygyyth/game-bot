@@ -44,16 +44,20 @@ T_CREATE_TEAM = "jingji/create_team.png"     # 这个步骤用的模板
 TEAM_ROI = Region(1400, 630, 470, 360)       # 它的搜索范围
 CONF_BUTTON = 0.85                           # 它的阈值
 
-class AdvanceTeamStep(Step):                 # 它的逻辑
+class CreateTeamStep(Step):                  # 它的逻辑
     ...
 ```
 
-`steps/__init__.py` **只做转发**（`from .advance_team import AdvanceTeamStep`），
-不要在那里写逻辑 —— 这样 `from .steps import AdvanceTeamStep` 照常能用，
+`steps/__init__.py` **只做转发**（`from .advance_team import CreateTeamStep`），
+不要在那里写逻辑 —— 这样 `from .steps import CreateTeamStep` 照常能用，
 而"这个步骤到底长什么样"永远在一个文件里看得完。
 
 **页面标识放 `pages.py`，不要放 `steps/`。** `T_TITLE` 那种是页面身份，
 不是某个动作的图；混进 steps 之后改页面标识就得在步骤里翻。
+
+**步骤要用的模板/ROI/阈值，写在那一步的模块里；如果页面树也要用同一个值，
+就在 `pages.py` 定义、步骤那边 import**（别两处各写一份 —— 改了页面 ROI
+忘了改步骤，症状是"状态认出来了但按钮找不到"，很难查）。
 
 
 **脚本永远在功能目录里。** 游戏目录是容器，不直接放脚本 ——
@@ -103,19 +107,25 @@ from gamebot.flow import EngineOptions, Node
 SCENARIO = ScenarioSpec(
     initial="home",                          # 必选：流程从哪开始
     pages=(                                  # (页面, 父页面 id)，**父在前**
-        (Page("home", queries=(...)), None),
-        (Page("home/jingji", ...), "home"),
+        (Page("home", kind=PageKind.GROUP), None),      # 分类容器：不记录信息
+        (Page("home/lobby", queries=(...)), "home"),    # 真正记录"我在首页"
+        (Page("home/jingji", kind=PageKind.GROUP), "home"),
+        (Page("home/jingji/before_create", ...), "home/jingji"),
     ),
     nodes=(
-        Node("home", page="home", steps=[EnterJingjiStep()], cooldown=0.5),
-        Node("jingji", page="home/jingji", steps=[AdvanceTeamStep()]),
+        Node("home", page="home/lobby", steps=[EnterJingjiStep()], cooldown=0.5),
+        Node("create", page="home/jingji/before_create", steps=[CreateTeamStep()]),
     ),
     edges=(                                  # (source, target, Edge 的参数)
-        ("home", "jingji", {"condition": on_page("home/jingji"), "priority": 10}),
+        ("home", "create", {"condition": on_page("home/jingji/before_create"), "priority": 10}),
     ),
     options=EngineOptions(tick_interval=0.4, max_runtime=180.0),
 )
 ```
+
+> **节点的 `page` 要写"真正记录信息的那个状态"**，不是分类容器。
+> 上例里是 `home/lobby` 而不是 `home` —— 容器不记录信息，
+> 把节点挂在它上面会被 `validate_binding` 拦住（那是对的）。
 
 ### 声明是数据，**组装是框架的事**
 

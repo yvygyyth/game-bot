@@ -1,100 +1,175 @@
 """竞技场 —— 本功能的页面。
 
-## 页面标识用什么
+## 整棵树
 
-用**左上角的「竞技场」标题**（148x52）。实测它在三种状态下都是 **1.000** ——
-这正是页面标识该有的性质：那三种状态都是同一个页面。
+```
+home                      首页（**分类节点**：不记录信息，只是容器）
+├── home/lobby            主界面：中间那排模式卡
+└── home/jingji           竞技场（**分类节点**：三个并列阶段）
+    ├── home/jingji/before_create   建队前（右下角是「创建队伍」）
+    ├── home/jingji/after_create    建队后（右下角是「添加伙伴」）
+    └── home/jingji/after_add       加完伙伴（右下角是「开始匹配」）
+```
 
-不能用的：**右侧队伍面板**。它在三种状态下长得完全不同
-（空位+创建队伍 / 空位+添加伙伴 / 两个已准备的头像+开始匹配），
-拿它当页面特征会导致"进到第二步就认不出自己在哪一页了"。
+## 为什么 `home` 现在才变成分类节点
 
-也不能用的：**背景**。竞技场背景是活的 —— 那个骑马的角色披风一直在飘，
-三张图里背景像素完全不同。模板一旦框进背景，换一帧就废。
+它原来是**普通页面**（自己记录"我在首页"），用首页上那张**竞技卡**当特征。
+那时只有两个状态，把 `home` 改成分类容器要多一层，不划算 —— 文件末尾原来
+记着这件事（"加新状态时顺手做掉"）。
 
-## ROI 为什么只框左上角
+现在做了，而且**必须做**：`home` 原来是"竞技卡那一小块"，而竞技场是**另一个
+整屏状态**，不是卡里面的一块。于是子页面 `home/jingji` 的 roi 落在 `home`
+的 roi 外面，`add()` 直接报错：
 
-`:data:`JINGJI_PAGE_ROI` 只覆盖标题那一块。除了"更快"，
-更重要的是**排除了中间那个「巅峰竞技场」大横幅** ——
-它也含"竞技场"三个字，不做限制会有误命中的风险。
+    StateError: 页面 'home/jingji' 的 roi ... 超出了父页面 'home' 的有效 roi
 
-## 加新状态时要记住的两条（新模型）
+这条报错是对的（那句话写在 ``docs/state-and-flow.md`` 里：roi 是整棵子树的
+搜索范围，伸到父页面框外会在"父页面不存在"的地方找特征）。它暴露的是**结构错了**：
+"首页"和"竞技场"是**并列的两个状态**，不是包含关系。
 
-1. **父子关系只表达 ROI 与消歧，不表示"祖先必须一直成立"。**
-   所以"从首页进竞技场"之后不需要首页还成立 —— 两者各自写自己的特征就行。
-   （这条在"进竞技场"这个例子上看不出来，因为它本来就是替换式的关系。）
-2. **每个记录信息的状态都必须有流程节点认领**（节点的 ``page`` 写它），
-   否则 ``Scenario.validate()`` 直接报错：重定位到那个状态之后无处可去。
-   分类节点和叠加层没有这个要求。
+所以：`home` 退化成纯分类容器（无 roi、无 queries），
+"首页上排着模式卡"这件事交给 :data:`~.home_lobby` 这个状态节点。
 
-## `home`（首页）为什么在**功能**目录里
+### 为什么 `home` 不写 roi
 
-它原来在游戏级的 ``games/mingjiangsha/pages.py``，用竞技卡当识别特征。
-那是错的：竞技卡是竞技功能的专属入口图（首页上还有「房间 / 战没 / 煮酒」
-三张并列的兄弟卡，各属各自的功能），拿它定义"游戏级的首页"等于把首页的
-身份绑在竞技功能上 —— 别的功能为了认首页，得反过来引用竞技场的资源。
+分类节点的 roi 会**整棵子树继承**。给它一个窄 roi（比如竞技卡那块），
+竞技场那支就全被框死在卡里了 —— 上面那条报错正是这么来的。
+给它 ``None``（= 不限制），每个子状态各自声明自己的范围，这才是对的。
 
-所以首页跟着它那张卡一起下移到这里。**代价是每个功能都声明自己的 `home`**，
-换来的是功能之间零依赖。等真有第二个功能、两边的首页特征确实一样时，再用
-底部导航栏那种共用 UI 把首页提回游戏级（候选和实测分数见
-:mod:`games.mingjiangsha.pages`）。
+## 三个状态靠什么区分
 
-## 这个父节点暂时不是 group
+**靠右下角那个按钮** —— 这是三者唯一的不同：
 
-按规矩，父节点应该一律 ``kind: group``（纯分类、不参与匹配）。但这里
-``home`` **自己记录信息**（"我在首页"），所以它有 ``queries``、是个普通页面。
+| 状态 | 右下角 | 模板 |
+|---|---|---|
+| 建队前 | 创建队伍 | ``create_team.png`` |
+| 建队后 | 添加伙伴 | ``add_pet.png`` |
+| 加完伙伴 | 开始匹配 | ``start_match.png`` |
 
-要把它改成分类节点，得先把"首页"建成 ``home/lobby`` 这样的**状态节点**
-（``home`` 只当分类容器）—— 那是加"匹配中 / 选将 / 结算"这些状态时该做的事，
-现在只有两个状态，改了反而多一层。**加新状态时顺手做掉这件事。**
+阈值 0.85：实测自己图上 1.000，而**按钮之间最高 0.690**（创建队伍 vs 添加伙伴
+—— 位置一样、只有文字不同），所以 0.85 留了很大余量。
+
+> **前提**：点掉一个按钮之后它就从画面上消失了。这是观测到的行为，
+> 但没在三种状态上逐一截图确认过。若不成立，症状是"卡在第一个状态上反复点击"，
+> 那时给后两个状态补一条 ``exclude``（排除前一个按钮）即可。
+
+## 为什么左上角的「竞技场」标题**不再**当页面标识
+
+它原来是对的：标题在三种状态下**都是 1.000**，那时拿它当"我在竞技场"的唯一
+特征。但现在要区分三个状态，**它区分不了** —— 三个状态里它一模一样。
+
+所以它下移到 :data:`T_TITLE` 这个常量，留给真正需要"是不是竞技场"的地方用；
+页面身份改由"右下角是哪个按钮"承担。
+
+## ROI 为什么框右下角
+
+:data:`JINGJI_TEAM_ROI` 只覆盖右下角那块面板。三个按钮都在这儿，而左上角标题、
+左边的三个功能按钮都在框外 —— 收窄搜索范围本身就是最有效的提速手段
+（见 :mod:`games.mingjiangsha.shortcuts` 里那段实测）。
+
+分类节点 ``home/jingji`` 把这个 ROI 传给三个子状态，所以子状态不用各写一遍。
+
+## 每个记录信息的状态都必须有流程节点认领
+
+``home/lobby`` 和三个竞技场子状态都会记录信息，所以 ``graph.py`` 里必须
+**各有一个节点**（节点的 ``page`` 写它）。漏了的话 ``Scenario.validate()``
+直接 ``ConfigError``：重定位到那个状态之后无处可去。分类节点没这个要求。
 """
 
 from __future__ import annotations
 
 from gamebot.atomic.query import ImageQuery
-from gamebot.state import Page
+from gamebot.state import Page, PageKind
 from gamebot.types import Region
 
 from ..shortcuts import CONF_JINGJI, JINGJI_ROI, T_JINGJI
 
-#: 页面标识的搜索区域（客户区坐标）：左上角那一块。
-#: 刻意避开中间的「巅峰竞技场」横幅 —— 它也含"竞技场"三个字。
-#: 页面标识：左上角「竞技场」标题。
-#: **它是页面身份，不是某个步骤的图** —— 所以放这儿，不放 steps/。
+#: 左上角「竞技场」标题。
+#:
+#: **它不再是页面标识** —— 三张图里它都是 1.000，区分不了三个子状态。
+#: 留着这个常量是给"只要判断是不是竞技场"的场合用（叠加层之类）。
 T_TITLE = "jingji/title.png"
 
-JINGJI_PAGE_ROI = Region(40, 0, 240, 90)
+#: 三个状态各自的按钮。**顺序即状态顺序**（建队前 → 建队后 → 加完伙伴）。
+T_CREATE_TEAM = "jingji/create_team.png"
+T_ADD_PET = "jingji/add_pet.png"
+T_START_MATCH = "jingji/start_match.png"
 
-#: 页面标识的阈值。实测三种状态都是 1.000，给 0.90 很宽裕。
-CONF_TITLE = 0.90
+#: 三个按钮的搜索区域（客户区坐标）：右下角那块面板。
+#: 分类节点持有它，三个子状态继承 —— 子状态不用各写一遍。
+JINGJI_TEAM_ROI = Region(1400, 630, 470, 360)
+
+#: 按钮的阈值。实测自己图上 1.000、**按钮之间最高 0.690**
+#: （创建队伍 vs 添加伙伴：位置一样、只有文字不同），所以 0.85 很宽裕。
+CONF_BUTTON = 0.85
+
+#: 首页那个状态。**分类节点 `home` 不记录信息**，真正记录的是它。
+home_lobby = Page(
+    "home/lobby",
+    name="首页",
+    min_stable_frames=2,  # 进首页时那排卡有个滑入动画，等它停稳
+    roi=JINGJI_ROI,
+    queries=(
+        # region 显式给上：页面树定位用它、直接跑 Query 时也用它
+        ImageQuery(T_JINGJI, region=JINGJI_ROI, confidence=CONF_JINGJI),
+    ),
+    description="主界面：中间一排模式卡（竞技 / 房间 / 战没 / 煮酒）",
+)
+"""``home/lobby`` 而不是 ``home`` 自己记录信息。
+
+"首页上排着哪些卡"是**具体状态**，而 `home` 只是"首页这一层"这个容器 ——
+两者分开之后，以后加"房间 / 战没 / 煮酒"这些兄弟状态时不用再动结构。
+"""
 
 FEATURE_PAGES: list[tuple[Page, str | None]] = [
     (
+        # **纯分类容器**：无 queries、无 roi（理由见模块开头）。
         Page(
             "home",
-            name="首页",
-            min_stable_frames=2,  # 进首页时那排卡有个滑入动画，等它停稳
-            roi=JINGJI_ROI,
-            queries=(
-                # region 显式给上：页面树定位用它、直接跑 Query 时也用它
-                ImageQuery(T_JINGJI, region=JINGJI_ROI, confidence=CONF_JINGJI),
-            ),
-            description="主界面：中间一排模式卡（竞技 / 房间 / 战没 / 煮酒）",
+            name="首页（容器）",
+            kind=PageKind.GROUP,
+            description="首页这一层：下面是主界面、竞技场等并列状态",
         ),
         None,
     ),
+    (home_lobby, "home"),
     (
+        # 竞技场也是个分类节点：它自己不记录信息，
+        # 只提供"右下角那块面板"的 ROI 给三个阶段继承。
         Page(
             "home/jingji",
             name="竞技场",
-            roi=JINGJI_PAGE_ROI,
-            queries=(
-                # region 显式给上：页面树定位用它，直接跑 Query 时也用它，
-                # 两条路径都成立（页面 roi 只对前者生效）。
-                ImageQuery(T_TITLE, region=JINGJI_PAGE_ROI, confidence=CONF_TITLE),
-            ),
-            description="竞技场：三张图对应它的三种状态（建队前/建队后/已准备）",
+            kind=PageKind.GROUP,
+            roi=JINGJI_TEAM_ROI,
+            description="竞技场：三个并列阶段（建队前 / 建队后 / 加完伙伴）",
         ),
         "home",
+    ),
+    (
+        Page(
+            "home/jingji/before_create",
+            name="竞技场 · 建队前",
+            queries=(ImageQuery(T_CREATE_TEAM, confidence=CONF_BUTTON),),
+            description="右下角是「创建队伍」",
+        ),
+        "home/jingji",
+    ),
+    (
+        Page(
+            "home/jingji/after_create",
+            name="竞技场 · 建队后",
+            queries=(ImageQuery(T_ADD_PET, confidence=CONF_BUTTON),),
+            description="右下角是「添加伙伴」",
+        ),
+        "home/jingji",
+    ),
+    (
+        Page(
+            "home/jingji/after_add",
+            name="竞技场 · 加完伙伴",
+            queries=(ImageQuery(T_START_MATCH, confidence=CONF_BUTTON),),
+            description="右下角是「开始匹配」",
+        ),
+        "home/jingji",
     ),
 ]

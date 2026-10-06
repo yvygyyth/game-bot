@@ -64,9 +64,9 @@ network_error       [overlay]       ← 顶层叠加层，哪一页都可能出�
 它是**启动期算出来的纯数据**，不是新的配置文件 —— 数据来源就是节点的 `page` 字段：
 
 ```python
-node = graph.node("jingji")          # page="home/jingji"
-binding.state_of(node)               # -> "home/jingji"    我负责哪个状态
-binding.node_for("home/jingji")      # -> node("jingji")   这个状态归谁管
+node = graph.node("jingji")          # page="home/jingji/before_create"
+binding.state_of(node)               # -> "home/jingji/before_create"   我负责哪个状态
+binding.node_for("home/jingji/before_create")  # -> node("jingji")  这个状态归谁管
 binding.check(node, actual)          # -> (True/False, 说明)  动手前校验
 ```
 
@@ -184,8 +184,8 @@ binding.check(node, actual)          # -> (True/False, 说明)  动手前校验
 
 ```
 tick N   : 执行"点竞技入口"，画面在 tick 结束后才变
-tick N+1 : 锚点已经变成 home/jingji，但游标还在 lobby（图里的边这一轮才评估）
-           -> 快路径验 lobby 不成立 -> recover 找到 home/jingji
+tick N+1 : 锚点已经变成 home/jingji/before_create，但游标还在 lobby（图里的边这一轮才评估）
+           -> 快路径验 lobby 不成立 -> recover 找到 home/jingji/before_create
            -> 游标落到 jingji 节点，本轮不执行
 tick N+2 : 校验通过，执行 jingji 的步骤
 ```

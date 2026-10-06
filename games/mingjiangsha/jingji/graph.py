@@ -43,16 +43,28 @@ from gamebot.scenario_spec import ScenarioSpec
 from games import on_page
 
 from .pages import FEATURE_PAGES
-from .steps import AdvanceTeamStep, EnterJingjiStep
+from .steps import AddPetStep, CreateTeamStep, EnterJingjiStep, StartMatchStep
 
 #: 这个功能的流程声明。**只有数据** —— 组装交给框架。
 #:
-#: 注意两处"为什么这么写"：
+#: ## 队伍流程现在是**四个节点**（原来是两个）
 #:
-#: * ``cooldown`` 是**节点自己的**节流：``jingji`` 给 0.8 是因为那一步会连点三个
-#:   按钮、界面每次都有过渡，太密容易在同一个状态上点两下；
-#: * 边的 ``condition`` 用 ``on_page("home/jingji")``：**竞技场标题出现**才换节点，
-#:   而不是"点完就换" —— 点下去到渲染出来有个过渡，靠画面说话比靠时间可靠。
+#: 竞技场的三个阶段从"一个页面里的黑盒步骤"变成了三个真正的状态
+#: （见 :mod:`.pages`），所以每个状态各有一个节点认领它 —— 这是硬要求：
+#: 没有节点认领的状态，``Scenario.validate()`` 会直接报错（重定位过去无处可去）。
+#:
+#: ```
+#: home ──▶ jingji/before_create ──▶ jingji/after_create ──▶ jingji/after_add
+#: （首页）   （点创建队伍）            （点添加伙伴）            （点开始匹配）
+#: ```
+#:
+#: ## 边的条件是"下个状态出现了"，不是"点完了"
+#:
+#: 四条边都用 ``on_page(...)`` 指**下一个状态**。点下去到界面更新有个过渡，
+#: 用画面说话比用时间可靠：状态还没变过来，这一轮就不会换节点，
+#: 下一轮再判 —— 而不会出现"以为换段了、其实还在原状态"的错位。
+#:
+#: ``cooldown`` 每一段都给 0.8：点完按钮界面有过渡动画，太密容易在同一处点两下。
 SCENARIO = ScenarioSpec(
     name="jingji",
     initial="home",
@@ -60,27 +72,61 @@ SCENARIO = ScenarioSpec(
     nodes=(
         Node(
             "home",
-            page="home",
+            # **注意是 home/lobby，不是 home** —— home 是分类容器，不记录信息。
+            # 把节点挂在容器上会被 validate_binding 拦住（那是对的）。
+            page="home/lobby",
             steps=[EnterJingjiStep()],
             cooldown=0.5,
             description="在首页点竞技入口",
         ),
         Node(
-            "jingji",
-            page="home/jingji",
-            steps=[AdvanceTeamStep()],
+            "jingji/before_create",
+            page="home/jingji/before_create",
+            steps=[CreateTeamStep()],
             cooldown=0.8,
-            description="创建队伍 → 添加伙伴 → 开始匹配",
+            description="建队前：点「创建队伍」",
+        ),
+        Node(
+            "jingji/after_create",
+            page="home/jingji/after_create",
+            steps=[AddPetStep()],
+            cooldown=0.8,
+            description="建队后：点「添加伙伴」",
+        ),
+        Node(
+            "jingji/after_add",
+            page="home/jingji/after_add",
+            steps=[StartMatchStep()],
+            cooldown=0.8,
+            description="加完伙伴：点「开始匹配」",
         ),
     ),
     edges=(
         (
             "home",
-            "jingji",
+            "jingji/before_create",
             {
-                "condition": on_page("home/jingji"),
+                "condition": on_page("home/jingji/before_create"),
                 "priority": 10,
-                "label": "竞技场标题出现",
+                "label": "竞技场出现（建队前）",
+            },
+        ),
+        (
+            "jingji/before_create",
+            "jingji/after_create",
+            {
+                "condition": on_page("home/jingji/after_create"),
+                "priority": 10,
+                "label": "建队后（右下角变成「添加伙伴」）",
+            },
+        ),
+        (
+            "jingji/after_create",
+            "jingji/after_add",
+            {
+                "condition": on_page("home/jingji/after_add"),
+                "priority": 10,
+                "label": "加完伙伴（右下角变成「开始匹配」）",
             },
         ),
     ),
