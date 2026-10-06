@@ -72,16 +72,24 @@ class TestTable:
             assert parsed is not None, f"{spec.action} 的备选键解析不出来"
             assert parsed.mods, f"{spec.action} 的备选键没解析出修饰位"
 
-    def test_stop_is_escape_and_run_is_f5(self):
-        """用户问的就是这个，钉住。
+    def test_stop_is_f9_and_run_is_f5(self):
+        """用户点名要的：停止用 ``F9``，不用 ``Esc``。
 
-        （``stop`` 曾经还有 ``F9`` 做别名，后来去掉了 —— 见上面
-        ``test_actions_are_unique`` 的说明。"被占用"现在由
-        ``global_fallback`` 处理。）
+        ``Esc`` 换掉的两个原因（都在 ``SHORTCUTS`` 上面的注释里）：
+        ``Esc`` 是游戏自己也常用的键，全局热键会把它**吞掉**；
+        而且实测它已经被别的软件占走了。
         """
         mapping = {spec.action: spec.keys for spec in SHORTCUTS}
         assert mapping["run"] == "F5"
-        assert mapping["stop"] == "Esc"
+        assert mapping["stop"] == "F9"
+
+    def test_stop_is_not_escape(self):
+        """``Esc`` 不该再出现在任何一条快捷键上。
+
+        全局 ``Esc`` 会把游戏自己的 ``Esc`` 吞掉（关弹窗、取消都不响应了），
+        那跟"帮你打游戏"是矛盾的。
+        """
+        assert all(spec.keys != "Esc" for spec in SHORTCUTS)
 
     def test_button_names_are_known(self):
         """``button`` 只能是控件栏里真有的那几种，否则 tooltip 会静默贴不上。"""
@@ -132,7 +140,7 @@ class TestKeymap:
         keymap = Keymap(QWidget(), {})
         text = "\n".join(keymap.help_lines())
         assert "F5" in text
-        assert "Esc" in text
+        assert "F9" in text
 
 
 class TestMainWindowBinding:
@@ -144,6 +152,6 @@ class TestMainWindowBinding:
         try:
             assert len(window.keymap) == len(SHORTCUTS)
             assert "F5" in window.controls.start_btn.toolTip()
-            assert "Esc" in window.controls.stop_btn.toolTip()
+            assert "F9" in window.controls.stop_btn.toolTip()
         finally:
             window.close()
