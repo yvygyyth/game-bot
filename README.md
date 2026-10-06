@@ -293,6 +293,63 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
    每个记录信息的状态都必须有节点认领，否则启动期就 `ConfigError`；
 6. 执行层**只回答"怎么可靠地做一次"**，不决定做不做。
 
+## 启动开发环境
+
+**这个项目没有"启动"这一步** —— 它不是 web 服务，没有 dev server、没有构建、
+没有热重载。`src/gamebot/` 是纯 Python 包，改完存盘，下一条命令就是新代码。
+所以"起环境"只有三件事：**依赖装好、自检绿、想跑的入口跑得起来**。
+
+```bash
+cd game-bot
+uv sync --extra windows --extra ui    # ① 依赖（已齐时约 1 秒，纯校验）
+uv run ruff check . && uv run pytest  # ② 自检：必须全绿（实测约 5 秒 / 664 用例）
+uv run gamebot ui                     # ③ 起界面（约 2 秒起来，然后常驻）
+```
+
+**这三步都不需要游戏开着**（`uv sync` / 测试用假后端 / 界面不管游戏在不在），
+所以即使手头没游戏也能确认环境是好的。第 ③ 步的无头版本：
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张就退出
+```
+
+### 按你要做的事选入口
+
+| 要做什么 | 命令 | 要游戏开着吗 |
+|---|---|---|
+| 改界面 | `uv run gamebot ui`（可加 `--script mingjiangsha/jingji` 预选） | **不用** |
+| 跑测试 | `uv run pytest` | **不用**（假后端） |
+| 改识图/流程 | `uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20` | **要** |
+| 只跑某一条分支 | 上面加 `--node <节点>`：把游戏手动摆到那一步，不用从头玩 | **要** |
+| 看定义对不对 | `uv run python -m games check mingjiangsha/jingji` | 不用 |
+| 调真机识别 | 起来跑一次，看界面的「识图日志」（带红框的图 + 分数表） | **要** |
+| 无头环境（CI / 没显示器） | `QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png` | 不用 |
+
+**"要游戏开着"的意思是"那个窗口得存在"**：连 `--dry-run` 和
+`gamebot capture` 都会先去抓屏，所以窗口不在时它们报的是
+
+```
+✗ BackendError: 未找到标题包含 '名将杀' 的窗口        （退出码 2）
+```
+
+**这不是环境坏了**，是没开游戏。先 `uv run gamebot windows` 看当前有哪些窗口，
+用 `--window <标题片段>` 覆盖。**没有游戏时能验证的东西仍然不少**：界面能起来、
+测试能全过、`check` 能过、`describe` 能看状态树和流程图。
+
+### 需要知道的几件事
+
+* **哪些 extra 要装**：PC 游戏要 `--extra windows`，界面要 `--extra ui`；
+  不读文字就不用装 OCR 那两个（`--extra ocr-rapid` / `--extra ocr-tesseract`），
+  没装时 `find_text` / `read_text` 返回 `not_found`，**不影响其他功能**。
+* **`uv run gamebot check` 会退出 1**，这是**预期的**：它查的是
+  `config/app.yaml` 里那份示例流程，而示例引用的 10 张模板图没入库。
+  查真脚本用 `uv run python -m games check <脚本>`。
+* **没有构建步骤、没有热重载**：改完存盘，下一条命令就是新代码。
+  唯一例外是**已经开着的界面** —— Python 只在启动时加载模块，所以改完
+  界面代码要**关掉重开**（曾经以为是 bug：界面上还留着已经删掉的按钮）。
+* **真机上有环境可能拦掉鼠标注入**（连 `SetCursorPos` 都返回 0 且无错误码）。
+  遇到别怀疑代码，先 `uv run gamebot capture -o a.png` 看截屏通不通。
+
 ## 进度
 
 | 模块 | 状态 | 说明 |
