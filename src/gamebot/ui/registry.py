@@ -41,7 +41,8 @@ class NodeEntry:
 
     id: str
     title: str
-    page: str | None
+    state: str | None
+    """它关联的状态 —— 来自**关联表**，不是节点自己（节点不知道自己是哪个状态）。"""
     steps: int
     out_edges: int
     is_initial: bool
@@ -49,8 +50,8 @@ class NodeEntry:
     @property
     def label(self) -> str:
         mark = "★ " if self.is_initial else ""
-        page = self.page or "（任意页面）"
-        return f"{mark}{self.id}  —  {page}"
+        state = self.state or "（不关联状态）"
+        return f"{mark}{self.id}  —  {state}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +175,7 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
         NodeEntry(
             id=node.id,
             title=node.display,
-            page=node.page,
+            state=scenario.bindings.state_of(node.id),
             steps=len(node.steps),
             out_edges=len(scenario.graph.out_edges(node.id)),
             is_initial=(node.id == scenario.graph.initial),

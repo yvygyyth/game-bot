@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from ..exceptions import ConfigError
 from ..state.page import PageId, PageTree
 from ..utils.logging import get_logger
+from .bindings import NodeBindings
 from .graph import Graph, NodeId
 
 if TYPE_CHECKING:
@@ -136,11 +137,15 @@ class EngineOptions:
 
 @dataclass(slots=True)
 class Scenario:
-    """一整份脚本：状态树 + 流程图 + 运行参数。
+    """一整份脚本：状态树 + 流程图 + **关联表** + 运行参数。
+
+    **三个产物各是一个字段**，谁也不藏在谁里面：
 
     :param name: 脚本名，进日志和报告。
-    :param tree: 状态树 —— "我在哪"。
+    :param tree: 状态树 —— "我在哪"（靠画面认）。
     :param graph: 流程图 —— "做什么、何时换"。
+    :param bindings: 关联表 —— 状态末梢 ↔ 流程节点的 id 双向映射。
+        它**不属于**树也不属于图（那是"两者怎么对上"），所以是独立字段。
     :param options: 运行参数（tick 间隔、预算、未知策略……）。
     :param meta: 任意附加信息。
     """
@@ -148,6 +153,7 @@ class Scenario:
     name: str = "scenario"
     tree: PageTree = field(default_factory=PageTree)
     graph: Graph = field(default_factory=Graph)
+    bindings: NodeBindings = field(default_factory=NodeBindings)
     options: EngineOptions = field(default_factory=EngineOptions)
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -170,13 +176,12 @@ class Scenario:
         :raises FlowError: 流程图的问题。
         :raises ConfigError: 跨两者的引用错了（状态 id / 节点 id 对不上）。
         """
-        from .binding import validate_binding
-
         problems: list[str] = []
 
         self.tree.validate()
         self.graph.validate()
-        validate_binding(self.graph, self.tree)
+        # 关联表的引用错误在这里报（节点关联的状态在不在、状态有没有人认领）
+        self.bindings.validate(self.tree, self.graph)
 
         if self.options.recovery_node and self.options.recovery_node not in self.graph.nodes:
             problems.append(
@@ -198,7 +203,7 @@ class Scenario:
         """这份脚本的"状态 ↔ 节点"关联表（引擎和 ``gamebot check`` 用它）。"""
         from .binding import StateBinding
 
-        return StateBinding(self.graph, self.tree)
+        return StateBinding(self.bindings, self.graph)
 
     # ------------------------------------------------------------------ #
     # 查询
@@ -222,7 +227,7 @@ class Scenario:
         在启动期拦下）。这个方法留给 ``gamebot check`` 做
         "把整棵树摊开看一眼"的展示。
         """
-        claimed = {n.page for n in self.graph.nodes.values() if n.page}
+        claimed = set(self.bindings.table().values())
         return tuple(
             p.id
             for p in self.tree.walk()

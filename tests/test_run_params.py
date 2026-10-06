@@ -21,6 +21,7 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
 from gamebot.bootstrap import build_context, build_engine
 from gamebot.config.schema import AppConfig, BackendKind
+from gamebot.flow import NodeBindings
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
 from gamebot.state.page import Page, PageTree
@@ -33,8 +34,13 @@ def _scenario(step, *, max_ticks: int = 1) -> Scenario:
     tree = PageTree()
     tree.add(Page("home", queries=(ImageQuery("home.png"),)))
     graph = Graph(initial="home")
-    graph.add_node(Node("home", page="home", steps=[step]))
-    scenario = Scenario(name="params", tree=tree, graph=graph)
+    graph.add_node(Node("home", steps=[step]))
+    scenario = Scenario(
+        name="params",
+        tree=tree,
+        graph=graph,
+        bindings=NodeBindings.of([("home", "home")]),
+    )
     scenario.options.tick_interval = 0.001
     scenario.options.max_ticks = max_ticks
     scenario.validate()

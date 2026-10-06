@@ -62,6 +62,7 @@ from ..atomic.query import query_from_dict
 from ..exceptions import ConfigError
 from ..state.page import PageGroup, PageKind, PageLeaf, PageNode, PageTree
 from ..types import Region
+from .bindings import Binding, NodeBindings
 from .graph import Edge, EdgeKind, Graph, Node
 from .scenario import EngineOptions, Scenario, UnknownPolicy
 
@@ -75,7 +76,16 @@ __all__ = [
 
 #: 顶层允许出现的键 = EngineOptions 的字段 + 这几个结构性键。
 #: ``initial`` 属于流程图（起点是图的一部分），不属于运行参数。
-_STRUCTURAL_KEYS = {"edges", "initial", "meta", "name", "nodes", "pages", "states"}
+_STRUCTURAL_KEYS = {
+    "bindings",
+    "edges",
+    "initial",
+    "meta",
+    "name",
+    "nodes",
+    "pages",
+    "states",
+}
 
 #: 页面/状态定义允许的字段。
 #: 分类节点（`kind: group`）能写的键。**它没有识别相关的字段** ——
@@ -165,11 +175,39 @@ def parse_scenario(data: dict[str, Any]) -> Scenario:
         name=str(data.get("name") or "scenario"),
         tree=parse_pages(_states_section(data)),
         graph=parse_graph(data),
+        bindings=parse_bindings(data),
         options=parse_options(data),
         meta=dict(data.get("meta") or {}),
     )
-    _explain_page_references(scenario)
+    _explain_binding_references(scenario)
     return scenario
+
+
+def parse_bindings(data: dict[str, Any]) -> NodeBindings:
+    """解析 ``bindings:`` 那一节 —— **关联表**（节点 -> 状态）。
+
+    ```yaml
+    bindings:
+      home: home/lobby
+      jingji/before_create: home/jingji/before_create
+    ```
+
+    这是**独立的一节**（不藏在 ``nodes`` 里）：它表达的是"状态树和流程图怎么
+    对上"，既不属于树也不属于图。
+
+    :raises ConfigError: 不是映射、值不是字符串。
+    """
+    raw = data.get("bindings")
+    if raw is None:
+        return NodeBindings()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"bindings 必须是映射(节点 -> 状态)，收到: {type(raw).__name__}")
+    pairs: list[Binding] = []
+    for node_id, state_id in raw.items():
+        if not isinstance(state_id, str):
+            raise ConfigError(f"bindings[{node_id!r}] 必须是状态 id 字符串，收到: {state_id!r}")
+        pairs.append(Binding(str(node_id), state_id))
+    return NodeBindings(pairs=tuple(pairs))
 
 
 def _states_section(data: dict[str, Any]) -> Any:
@@ -304,12 +342,13 @@ def _node_from_config(node_id: str, spec: Any) -> Node:
         raise ConfigError(f"节点 {node_id!r} 的定义必须是映射(mapping)")
     payload = dict(spec)
     _reject_unknown(payload, _NODE_KEYS, f"节点 {node_id!r}")
-    unsupported = [f for f in ("steps", "on_enter", "on_exit") if payload.get(f)]
+    unsupported = [f for f in ("steps", "on_enter", "on_exit", "page") if payload.get(f)]
     if unsupported:
         raise ConfigError(
-            f"节点 {node_id!r} 写了 {unsupported} —— **YAML 里不支持写步骤**。"
-            "步骤是普通函数（(ctx) -> ActionResult），只能写在 Python 里："
-            "在功能目录的 steps/ 下定义，然后在 graph.py 的 Node(steps=[...]) 里引用。"
+            f"节点 {node_id!r} 写了 {unsupported} —— YAML 里不支持这些。"
+            "**步骤**是普通函数（(ctx) -> ActionResult），只能写在 Python 里"
+            "（功能目录的 steps/ 下定义，然后 Node(steps=[...]) 引用）；"
+            "**page** 也搬走了：节点和状态的对应关系在独立的 bindings: 一节。"
         )
     return Node(id=node_id, **payload)
 
@@ -364,21 +403,21 @@ def parse_options(data: dict[str, Any]) -> EngineOptions:
     return EngineOptions(**payload)
 
 
-def _explain_page_references(scenario: Scenario) -> None:
-    """节点写的 ``page`` 不在树里时给一句**更像人话**的提示。
+def _explain_binding_references(scenario: Scenario) -> None:
+    """关联表里的状态不在树里时给一句**更像人话**的提示。
 
-    父节点的 key 一改，整棵子树的 id 就跟着变 —— 这正是 ``nodes[].page``
-    最容易过期的地方。``Scenario.validate`` 会报"声明了不存在的状态"，
-    但它不会说"它其实还在树里，只是变成了另一个路径"。
+    父节点的 key 一改，整棵子树的 id 就跟着变 —— 这正是关联表最容易过期的
+    地方。``Scenario.validate`` 会报"关联了不存在的状态"，但它不会说
+    "它其实还在树里，只是变成了另一个路径"。
     """
-    for node in scenario.graph.nodes.values():
-        if not node.page or node.page in scenario.tree:
+    for pair in scenario.bindings.pairs:
+        if pair.state in scenario.tree:
             continue
-        tail = "/" + node.page.rsplit("/", 1)[-1]
+        tail = "/" + pair.state.rsplit("/", 1)[-1]
         candidates = [p.id for p in scenario.tree.walk() if p.id.endswith(tail)]
         if candidates:
             raise ConfigError(
-                f"节点 {node.id!r} 声明的状态 {node.page!r} 不在状态树里；"
+                f"关联表里的 {pair.node!r} 指向状态 {pair.state!r}，它不在状态树里；"
                 f"同名的状态还有: {', '.join(candidates)} —— 多半是某个父节点的 key 改过"
             )
 

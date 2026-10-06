@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .exceptions import ConfigError
+from .flow.bindings import NodeBindings
 from .flow.graph import Graph, Node
 from .flow.scenario import EngineOptions, Scenario
 from .state.page import PageGroup, PageNode, PageTree
@@ -65,7 +66,7 @@ class ScenarioSpec:
     现在边写在 :attr:`Node.transitions` 上，起点就是"我"：
 
     ```python
-    Node("home", page="home/lobby", transitions=[
+    Node("home", transitions=[
         Transition("jingji/before_create", when=on_page("home/jingji/before_create"),
                    priority=10, label="竞技场出现（建队前）"),
     ])
@@ -77,6 +78,12 @@ class ScenarioSpec:
 
     initial: str
     tree: PageGroup | None = None
+    bindings: NodeBindings = field(default_factory=NodeBindings)
+    """**关联表** —— 状态末梢 ↔ 流程节点的 id 双向映射。
+
+    独立字段，不藏在 `Node` 里：它表达"状态树和流程图怎么对上"，
+    既不属于树也不属于图。见 :mod:gamebot.flow.bindings。
+    """
     nodes: tuple[Node, ...] = ()
     options: EngineOptions = field(default_factory=EngineOptions)
     name: str = ""
@@ -143,6 +150,7 @@ class ScenarioSpec:
             name=self.name or name,
             tree=target,
             graph=graph,
+            bindings=self.bindings,
             options=self.options,
             meta=dict(self.meta),
         )

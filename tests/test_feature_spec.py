@@ -23,7 +23,7 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.config.schema import AppConfig
 from gamebot.exceptions import ConfigError, FlowError
 from gamebot.feature import FeatureSpec
-from gamebot.flow import Node, Transition
+from gamebot.flow import Node, NodeBindings, Transition
 from gamebot.flow.scenario import EngineOptions
 from gamebot.params import FormSpec
 from gamebot.scenario_spec import ScenarioSpec
@@ -46,7 +46,8 @@ def _spec(**overrides) -> FeatureSpec:
         scenario=ScenarioSpec(
             initial="home",
             tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
-            nodes=(Node("home", page="home"),),
+            bindings=NodeBindings.of([("home", "home")]),
+            nodes=(Node("home",),),
         ),
         base_config=AppConfig.defaults,
     )
@@ -217,7 +218,8 @@ class TestScenarioSpecAssembles:
         kwargs = dict(
             initial="home",
             tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
-            nodes=(Node("home", page="home"),),
+            bindings=NodeBindings.of([("home", "home")]),
+            nodes=(Node("home",),),
         )
         kwargs.update(overrides)
         return ScenarioSpec(**kwargs)
@@ -226,7 +228,7 @@ class TestScenarioSpecAssembles:
         """**嵌套树**：给一个分类节点，它的子节点跟着一起进来。
 
         （节点要认领**每一个**记录信息的状态，所以这里两个状态都得有节点 ——
-        那正是 ``validate_binding`` 在管的规矩，声明里漏了它会在组装时报。）
+        那正是关联表校验在管的规矩，声明里漏了它会在组装时报。）
         """
         spec = self._spec(
             initial="root",
@@ -235,11 +237,12 @@ class TestScenarioSpecAssembles:
                 roi=Region(0, 0, 200, 200),
                 children=(PageLeaf("root/kid", queries=(ImageQuery("k.png"),)),),
             ),
+            bindings=NodeBindings.of([("root", "root"), ("kid", "root/kid")]),
             nodes=(
                 # kid 得从 initial 走得到，否则它就是死代码（校验会报）。
                 # **边写在 root 自己的 transitions 上** —— 起点不用写。
-                Node("root", page="root", transitions=[Transition("kid")]),
-                Node("kid", page="root/kid"),
+                Node("root", transitions=[Transition("kid")]),
+                Node("kid",),
             ),
         )
         scenario = spec.materialize(name="x")
@@ -262,9 +265,10 @@ class TestScenarioSpecAssembles:
                     ),
                 ),
             ),
+            bindings=NodeBindings.of([("root", "root"), ("kid", "root/kid")]),
             nodes=(
-                Node("root", page="root", transitions=[Transition("kid")]),
-                Node("kid", page="root/kid"),
+                Node("root", transitions=[Transition("kid")]),
+                Node("kid",),
             ),
         )
         scenario = spec.materialize(name="x")
@@ -277,9 +281,10 @@ class TestScenarioSpecAssembles:
         引擎、报告、决策那一套完全不用知道声明长什么样。
         """
         spec = self._spec(
+            bindings=NodeBindings.of([("home", "home"), ("next", "home")]),
             nodes=(
-                Node("home", page="home", transitions=[Transition("next", priority=7)]),
-                Node("next", page="home"),
+                Node("home", transitions=[Transition("next", priority=7)]),
+                Node("next",),
             ),
         )
         scenario = spec.materialize(name="x")
@@ -290,9 +295,10 @@ class TestScenarioSpecAssembles:
     def test_dangling_edge_reference_is_caught(self):
         """边指向不存在的节点 —— 组装时报（不是跑到那条边才发现）。"""
         spec = self._spec(
+            bindings=NodeBindings.of([("home", "home"), ("other", "home")]),
             nodes=(
-                Node("home", page="home", transitions=[Transition("ghost")]),
-                Node("other", page="home"),
+                Node("home", transitions=[Transition("ghost")]),
+                Node("other",),
             ),
         )
         with pytest.raises(FlowError, match="ghost"):
@@ -300,7 +306,7 @@ class TestScenarioSpecAssembles:
 
     def test_unreachable_node_is_caught(self):
         """从 initial 走不到的节点（死代码）在组装时报。"""
-        spec = self._spec(nodes=(Node("home", page="home"), Node("lonely", page="home")))
+        spec = self._spec(nodes=(Node("home",), Node("lonely",)))
         with pytest.raises(FlowError, match="走不到"):
             spec.materialize(name="x")
 
@@ -348,7 +354,8 @@ class TestScenarioSpecAssembles:
             ),
             # **每个记录信息的状态都要有节点认领**（另一条规矩，和声明顺序无关）。
             # 分类节点不需要 —— 它不记录信息。
-            nodes=(Node("kid", page="root/kid"),),
+            bindings=NodeBindings.of([("kid", "root/kid")]),
+            nodes=(Node("kid",),),
             initial="kid",
         )
         scenario = spec.materialize(name="x")

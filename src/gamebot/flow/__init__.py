@@ -35,6 +35,7 @@
 from __future__ import annotations
 
 from .binding import StateBinding
+from .bindings import Binding, NodeBindings
 from .engine import FlowEngine, RunReport, StopReason
 from .graph import (
     Decision,
@@ -52,6 +53,7 @@ from .loader import load_scenario, parse_scenario
 from .scenario import EngineOptions, Scenario, UnknownPolicy
 
 __all__ = [
+    "Binding",
     "Decision",
     "Edge",
     "EdgeAttempt",
@@ -62,6 +64,7 @@ __all__ = [
     "Graph",
     "GraphCursor",
     "Node",
+    "NodeBindings",
     "NodeId",
     "RunReport",
     "Scenario",

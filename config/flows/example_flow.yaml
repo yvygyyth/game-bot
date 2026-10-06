@@ -80,23 +80,27 @@ states:
 #    引用 —— 那样能拿到编辑器的补全和类型检查，而 YAML 里的 `{type: ...}`
 #    字符串什么也检查不了。
 #
-#    所以下面这些节点只有 page（"我该在哪个状态"），没有 steps。
+#    所以下面这些节点只有名字，没有 steps。
 #    真脚本请看 games/mingjiangsha/jingji/graph.py。
 nodes:
-  lobby:
-    page: home/lobby
+  lobby: {}
+  qianli: {}
+  battle: {}
+  result: {}
+  closed: {}
 
-  qianli:
-    page: home/qianli
-
-  battle:
-    page: home/qianli/battle
-
-  result:
-    page: home/qianli/result
-
-  closed:
-    page: closed
+# ---------- 关联表：状态和节点怎么对上 ----------
+# 独立的一节，**不写在节点上** —— 它表达"状态树和流程图怎么对上"，
+# 既不属于树也不属于图。左边是流程节点，右边是状态末梢。
+#
+# 规则：状态末梢**一定**要有节点认领（否则重定位到它无处可去），
+# 流程节点**不一定**要有状态（纯逻辑/纯等待节点就不写）。
+bindings:
+  lobby: home/lobby
+  qianli: home/qianli
+  battle: home/qianli/battle
+  result: home/qianli/result
+  closed: closed
 
 # ---------- 边：何时换目标 ----------
 # priority 大的先判断。没条件的边是"兜底"，别给它高优先级。

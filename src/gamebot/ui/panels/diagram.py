@@ -557,7 +557,9 @@ class StateTreeView(_Diagram):
 class FlowDiagramView(_Diagram):
     """流程图的图：节点框 + 带箭头的边，**当前节点描红**。"""
 
-    def show_graph(self, graph: Any, *, current: str = "") -> None:
+    def show_graph(
+        self, graph: Any, *, current: str = "", bindings: Any = None
+    ) -> None:
         self._scene.clear()
         if graph is None or len(graph) == 0:
             self._empty("（没有流程图：先选一个脚本）")
@@ -580,13 +582,14 @@ class FlowDiagramView(_Diagram):
         layout: dict[str, QRectF] = {}
         cursor_y: dict[int, float] = {}
         for node_id, level in sorted(depth.items(), key=lambda kv: (kv[1], kv[0])):
-            node = graph.node(node_id)
             x = level * (NODE_W + GAP_X)
             y = cursor_y.get(level, 0.0)
             cursor_y[level] = y + NODE_H + GAP_Y
             # 流程图节点：第一行是**节点 id**（流程图的身份），
-            # 第二行是它认领的状态（`page`）—— 没有状态就说明它不校验位置。
-            page_label = node.page or "不校验状态"
+            # 第二行是它认领的状态 —— 来自**关联表**，不是节点自己
+            # （节点不知道自己是哪个状态，那是独立的一层数据）。
+            state = bindings.state_of(node_id) if bindings is not None else None
+            page_label = state or "不关联状态"
             # 流程图里"当前节点"就是正常状态 -> 绿框（不是红：红留给"需要重定位"）
             layout[node_id] = self._node(
                 x,
@@ -696,7 +699,9 @@ class DiagramPanel(QWidget):
             current_node_page=current_node_page,
             overlay_pages=overlays,
         )
-        self._graph_view.show_graph(scenario.graph, current=current_node)
+        self._graph_view.show_graph(
+            scenario.graph, current=current_node, bindings=scenario.bindings
+        )
         self._text.setPlainText(_describe(scenario, current_page, current_node))
         if current_page or current_node:
             where = current_page or "unknown"
@@ -733,6 +738,7 @@ def _describe(scenario: Any, current_page: str, current_node: str) -> str:
         node = graph.node(current_node)
         if node is not None:
             edges = len(graph.out_edges(current_node))
-            lines.append(f"  期望  {node.page or '（不校验状态）'}")
+            state = scenario.bindings.state_of(current_node)
+            lines.append(f"  关联  {state or '（不关联状态）'}")
             lines.append(f"  步骤  {len(node.steps)} 个 / 出边 {edges} 条")
     return "\n".join(lines)

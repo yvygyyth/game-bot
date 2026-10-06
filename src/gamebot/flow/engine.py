@@ -278,8 +278,9 @@ class FlowEngine:
         self.start_node = start_node or scenario.graph.initial
         if start_node and scenario.graph.node(start_node) is None:
             raise FlowError(f"起始节点不存在: {start_node!r}")
-        # 状态 ↔ 节点的关联表：动前校验 / 重定位去向 / 动后预期都靠它
-        self.binding = StateBinding(scenario.graph, scenario.tree)
+        # 关联表（状态末梢 ↔ 流程节点）：进入节点时**更新当前状态**用，
+        # 出意外时**反查该回哪个节点**也用它。见本模块 tick 的说明。
+        self.binding = StateBinding(scenario.bindings, scenario.graph)
         self.cursor = GraphCursor(scenario.graph, current=self.start_node)
         self.report = RunReport(scenario=scenario.name)
 
@@ -463,10 +464,10 @@ class FlowEngine:
         #
         # hint 和 expected 是两回事，别合并：
         #   hint     = 上一帧**实际看到**的状态（跟踪器的当前值），只影响尝试顺序
-        #   expected = 流程层**以为应该**在的状态（当前节点声明的），先精确验它
+        #   expected = 流程层**以为应该**在的状态（关联表说的），先精确验它
         # 大多数时候两者相等，但"刚换完屏"那一轮不同 —— 而正是那一轮
         # 最需要 hint 少试几个分支。
-        expected = self.binding.expects(node)
+        expected = self.binding.state_of(node.id)
         found = self.scenario.tree.locate(
             frame, self.tracker.current_id, expected=expected, now=now
         )
@@ -495,36 +496,32 @@ class FlowEngine:
         if self._check_terminal(anchor, now=now):
             return None
 
-        # (5) 状态自检：锚点和"我以为我在的地方"一致就干活，不一致就重定位。
+        # (5) **自检 = 跑这个节点对应状态的定位代码**。
         #
-        # 不写 ``page`` 的节点也有"我以为我在的地方" —— 就是它自己。
-        # 这样"流程图只写正常流程"和"意外时总能被拉回正轨"可以同时成立：
-        # 不校验不等于闭着眼乱走。认不出来（unknown）**不算不一致** ——
-        # 那是"看不清"，不是"走错了"，由 _handle_unknown 的宽容期处理。
-        if self._matches_current(node, anchor):
-            return self._run_current(node, now=now)
+        # 这里没有单独的"自检机制" —— 按关联表，进入一个节点就意味着
+        # **当前状态是它关联的那个末梢**（那就是"进入该流程节点会修改当前状态"），
+        # 而"定位代码"就是状态自己的识别规则（queries / roi / exclude / 阈值）。
+        # 所以"自检"和"定位"是同一个动作，不是两套东西 —— 以前那个
+        # 只比 id 的 `_matches_current` 因此删掉了。
+        #
+        # 节点**不关联状态**（纯逻辑/纯等待节点）时不设状态、也不自检：
+        # 流程图因此可以只写正常流程。认不出来（unknown）不算"走错了" ——
+        # 那是"看不清"，由 _handle_unknown 的宽容期处理。
+        bound = self.binding.state_of(node.id)
+        if bound is not None:
+            if anchor == bound:
+                return self._run_current(node, now=now)
+            return self._realign(frame, node, bound, anchor, now=now)
 
+        # 没关联状态：只要锚点没有被**别的**节点认领，就继续待着（让位给认领它的）
         if anchor == UNKNOWN_PAGE:
             self._handle_unknown(now)
             self._note_advance(now=now)
             return None
-
-        expected = self.binding.expects(node) or node.id
-        return self._realign(frame, node, expected, anchor, now=now)
-
-    def _matches_current(self, node: Node, anchor: PageId) -> bool:
-        """实测锚点是不是"当前节点应该在的地方"。
-
-        * 节点声明了 ``page``：锚点就是它；
-        * 节点没声明（纯逻辑/纯等待节点）：看锚点有没有**别的**节点认领 ——
-          有就说明已经走到别人负责的状态上了，该让位；没有就继续待着。
-        """
-        if self.binding.is_bound(node.page):
-            return anchor == node.page
-        if anchor == UNKNOWN_PAGE:
-            return True
         owner = self.binding.node_for(anchor)
-        return owner is None or owner.id == node.id
+        if owner is None or owner == node.id:
+            return self._run_current(node, now=now)
+        return self._realign(frame, node, node.id, anchor, now=now)
 
     # ------------------------------------------------------------------ #
     # 两条分支
@@ -588,14 +585,14 @@ class FlowEngine:
             self._note_advance(now=now)
             return None
 
-        self.cursor.advance(target.id, now=now)
-        self._note_recovery(node.id, expected, anchor, target.id, recovered.value)
+        self.cursor.advance(target, now=now)
+        self._note_recovery(node.id, expected, anchor, target, recovered.value)
         log.info(
-            "状态自检不符：节点 %r 期望 %r，实测 %r -> 重定位到节点 %r",
+            "位置不对：节点 %r 关联的状态是 %r，实测 %r -> 重定位到节点 %r",
             node.id,
             expected,
             anchor,
-            target.id,
+            target,
         )
         # 本轮不再执行：先把位置摆正，干活交给下一轮
         self._note_advance(now=now)
@@ -668,20 +665,24 @@ class FlowEngine:
         # WAIT: 什么都不做，继续等
 
     def check_state(self, anchor: PageId | None = None) -> tuple[bool, str]:
-        """动手前的状态校验（走关联表）。
+        """"我该在的状态"和"实测状态"对得上吗（走关联表）。
 
-        这是 :meth:`StateBinding.check` 的转发，**保留成引擎上的公开方法**
-        是因为它对排查很有用：想知道"这一步到底校没校验、校验的是什么"，
-        在 REPL 里问引擎就行。
+        保留成引擎上的公开方法是因为它对排查很有用：想知道"这一步到底校没校验、
+        校验的是什么"，在 REPL 里问引擎就行。
 
-        ``Node.page is None`` 的节点永远通过 —— 那正是"流程图只写正常流程"
-        的实现方式：不写就不校验。
+        **节点不关联状态时永远通过** —— 那正是"流程图只写正常流程"的实现方式。
 
         :param anchor: 实测锚点；不给就用跟踪器当前状态。
         """
         if anchor is None:
             anchor = self.tracker.current_id
-        return self.binding.check(self.cursor.current, anchor)
+        node_id = self.cursor.current
+        bound = self.binding.state_of(node_id)
+        if bound is None:
+            return True, f"节点 {node_id!r} 不关联状态"
+        if anchor == bound:
+            return True, "状态正确"
+        return False, f"节点 {node_id!r} 关联状态 {bound!r}，实测是 {anchor!r}"
 
     def _run_node(self, state_id: NodeId) -> list[StepOutcome]:
         """执行某节点的步骤（含 ``on_enter`` 首次执行）。

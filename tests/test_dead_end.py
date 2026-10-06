@@ -17,6 +17,7 @@ from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
 from gamebot.bootstrap import build_context, build_engine
+from gamebot.flow import NodeBindings
 from gamebot.flow.engine import DEAD_END_STALL_ROUNDS, StopReason
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
@@ -55,14 +56,24 @@ def _build(
         tree.add(Page("home/other", queries=(ImageQuery("other.png"),)), parent="home")
 
     graph = Graph(initial="home")
-    graph.add_node(Node("home", page="home"))
-    graph.add_node(Node("leaf", page="home/leaf", steps=steps))
+    graph.add_node(Node("home",))
+    graph.add_node(Node("leaf", steps=steps))
     graph.connect("home", "leaf", condition=ImageQuery("leaf.png"), priority=10)
     if extra_edge:
-        graph.add_node(Node("other", page="home/other"))
+        graph.add_node(Node("other",))
         graph.connect("leaf", "other", condition=ImageQuery("other.png"), priority=10)
 
-    scenario = Scenario(name="deadend", tree=tree, graph=graph)
+    # 关联表跟着一起变：不建 other 的时候就不能关联它
+    # （关联表指向不存在的状态/节点都是启动期错误 —— 那是对的）
+    pairs = [("home", "home"), ("leaf", "home/leaf")]
+    if extra_edge:
+        pairs.append(("other", "home/other"))
+    scenario = Scenario(
+        name="deadend",
+        tree=tree,
+        graph=graph,
+        bindings=NodeBindings.of(pairs),
+    )
     scenario.options.tick_interval = 0.001
     scenario.options.max_ticks = max_ticks
     scenario.options.dead_end_rounds = dead_end_rounds

@@ -24,6 +24,7 @@ from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
 from gamebot.config.schema import AppConfig, BackendKind
+from gamebot.flow import NodeBindings
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
 from gamebot.params import FormSpec
@@ -46,8 +47,13 @@ def _tree() -> PageTree:
 
 def _scenario(max_ticks: int = 3, interval: float = 0.01) -> Scenario:
     graph = Graph(initial="home")
-    graph.add_node(Node("home", page="home"))
-    scenario = Scenario(name="fake-ui", tree=_tree(), graph=graph)
+    graph.add_node(Node("home",))
+    scenario = Scenario(
+        name="fake-ui",
+        tree=_tree(),
+        graph=graph,
+        bindings=NodeBindings.of([("home", "home")]),
+    )
     scenario.options.max_ticks = max_ticks
     scenario.options.tick_interval = interval
     scenario.validate()

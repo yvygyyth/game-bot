@@ -7,6 +7,7 @@ import pytest
 from gamebot.atomic.query import ImageQuery, PixelQuery
 from gamebot.exceptions import ConfigError, FlowError, StateError
 from gamebot.flow import (
+    Binding,
     Decision,
     Edge,
     EdgeKind,
@@ -15,6 +16,7 @@ from gamebot.flow import (
     Graph,
     GraphCursor,
     Node,
+    NodeBindings,
     RunReport,
     Scenario,
     StopReason,
@@ -57,23 +59,22 @@ class TestNode:
     def test_defaults(self) -> None:
         node = Node("a")
         assert node.steps == []
-        assert node.page is None
         assert node.transitions == []
 
     def test_of_shorthand(self) -> None:
-        node = Node.of("a", page="home")
+        node = Node.of("a")
         assert node.id == "a"
-        assert node.page == "home"
 
     def test_display_and_passive(self) -> None:
         assert Node("a", description="打怪").display == "打怪"
         assert Node("a").is_passive is True
 
     def test_to_dict(self) -> None:
-        payload = Node("a", page="home").to_dict()
+        payload = Node("a").to_dict()
         assert payload["id"] == "a"
-        assert payload["page"] == "home"
         assert payload["steps"] == 0
+        # 节点**不**知道自己对应哪个状态 —— 那在关联表里
+        assert "page" not in payload
 
 
 class TestEdge:
@@ -112,13 +113,11 @@ class TestGraphBuild:
     def test_in_edges(self) -> None:
         assert {e.source for e in small_graph().in_edges("b")} == {"a"}
 
-    def test_node_for_page(self) -> None:
-        graph = Graph()
-        graph.add_node(Node("battle", page="qianli/battle"))
-        graph.add_node(Node("other", page="home"))
-        assert graph.node_for_page("qianli/battle").id == "battle"
-        assert graph.node_for_page("nope") is None
-        assert len(graph.nodes_for_page("home")) == 1
+    def test_node_for_state_is_the_bindings_table(self) -> None:
+        """"哪个节点认领这个状态"现在是**关联表**的事，不是图的事。"""
+        table = NodeBindings.of([("battle", "qianli/battle")])
+        assert table.node_for("qianli/battle") == "battle"
+        assert table.node_for("nope") is None
 
     def test_reachable_from(self) -> None:
         assert small_graph().reachable_from() == {"a", "b"}
@@ -403,21 +402,30 @@ class TestGraphCursor:
 # --------------------------------------------------------------------------- #
 # Scenario
 # --------------------------------------------------------------------------- #
-def build_scenario() -> Scenario:
+def build_scenario(bindings: NodeBindings | None = None) -> Scenario:
     tree = PageTree()
     tree.add(Page("home", queries=(ImageQuery("home.png"),)))
     tree.add(Page("battle", queries=(ImageQuery("battle.png"),)))
     tree.add(Page("closed", queries=(ImageQuery("closed.png"),), terminal=True))
 
     graph = Graph(initial="home")
-    graph.add_node(Node("home", page="home"))
-    graph.add_node(Node("battle", page="battle"))
-    graph.add_node(Node("closed", page="closed"))
+    graph.add_node(Node("home",))
+    graph.add_node(Node("battle",))
+    graph.add_node(Node("closed",))
     graph.connect("home", "battle", priority=10)
     graph.connect("battle", "home", priority=5)
     graph.connect("battle", "closed", priority=1, kind=EdgeKind.TERMINAL)
 
+    if bindings is None:
+        bindings = NodeBindings.of(
+            [
+                ("home", "home"),
+                ("battle", "battle"),
+                ("closed", "closed"),
+            ]
+        )
     return Scenario(
+        bindings=bindings,
         name="t",
         tree=tree,
         graph=graph,
@@ -430,8 +438,10 @@ class TestScenario:
         assert build_scenario().validate() is None
 
     def test_node_pointing_at_missing_page_raises(self) -> None:
-        scenario = build_scenario()
-        scenario.graph.nodes["battle"].page = "写错了"
+        """关联表指向一个不存在的状态 —— 那条流程永远不会执行。"""
+        scenario = build_scenario(
+            NodeBindings.of([("home", "home"), ("battle", "写错了"), ("closed", "closed")])
+        )
         with pytest.raises(ConfigError) as excinfo:
             scenario.validate()
         assert "不在状态树里" in str(excinfo.value)
@@ -455,9 +465,18 @@ class TestScenario:
         scenario.tree.add(
             Page("folder/kid", queries=(ImageQuery("kid.png"),)), parent="folder"
         )
-        scenario.graph.add_node(Node("kid", page="folder/kid"))
+        scenario.graph.add_node(Node("kid",))
         # 加条边让它可达 —— 否则 ``Graph.validate`` 会先报"死代码"，测不到本条
         scenario.graph.connect("home", "kid", priority=1)
+        # kid 认领 folder/kid；分类节点 folder 自己不需要认领
+        scenario.bindings = NodeBindings.of(
+            [
+                ("home", "home"),
+                ("battle", "battle"),
+                ("closed", "closed"),
+                ("kid", "folder/kid"),
+            ]
+        )
         assert scenario.validate() is None
 
     def test_recovery_node_must_exist(self) -> None:
@@ -502,7 +521,11 @@ class TestScenario:
         scenario.tree.add(
             Page("folder/kid", queries=(ImageQuery("k.png"),)), parent="folder"
         )
-        scenario.graph.add_node(Node("kid", page="folder/kid"))
+        scenario.graph.add_node(Node("kid",))
+        scenario.bindings = NodeBindings.of([
+            ("home", "home"), ("battle", "battle"),
+            ("closed", "closed"), ("kid", "folder/kid"),
+        ])
         assert scenario.unclaimed_pages() == ()
 
     def test_terminal_state_still_needs_a_node(self) -> None:
@@ -516,6 +539,7 @@ class TestScenario:
         # 那就测不到本条了。
         del scenario.graph.nodes["closed"]
         scenario.graph.edges = [e for e in scenario.graph.edges if e.target != "closed"]
+        scenario.bindings = NodeBindings.of([("home", "home"), ("battle", "battle")])
         assert "closed" in scenario.unclaimed_pages()
         with pytest.raises(ConfigError) as excinfo:
             scenario.validate()
@@ -639,26 +663,26 @@ class TestFlowEngine:
         engine = FlowEngine(build_scenario(), ctx)
         ok, why = engine.check_state("nobody")
         assert ok is False
-        assert "期望状态" in why
+        assert "关联状态" in why
 
     def test_state_check_passes_when_matching(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx)
         assert engine.check_state("home") == (True, "状态正确")
 
     def test_state_check_skipped_for_unbound_node(self, ctx) -> None:
-        """**做法三**：不写 ``page`` 的节点完全不校验，流程直着走。"""
+        """没被关联表提到的节点完全不校验，流程直着走。"""
         scenario = build_scenario()
-        scenario.graph.add_node(Node("free", page=None))
+        scenario.graph.add_node(Node("free"))
         engine = FlowEngine(scenario, ctx, start_node="free")
         ok, why = engine.check_state("随便哪个状态")
         assert ok is True
-        assert "不绑定状态" in why
+        assert "不关联状态" in why
 
     def test_state_check_uses_binding(self, ctx) -> None:
         """校验走的是关联表，所以"期望什么"只有一个出处。"""
         engine = FlowEngine(build_scenario(), ctx)
         assert engine.binding.state_of("home") == "home"
-        assert engine.binding.node_for("home").id == "home"
+        assert engine.binding.node_for("home") == "home"
 
     def test_start_node_is_honoured(self, ctx) -> None:
         engine = FlowEngine(build_scenario(), ctx, start_node="battle")
@@ -704,40 +728,46 @@ class TestDecision:
 class TestStateBinding:
     def test_state_to_node_and_back(self) -> None:
         binding = build_scenario().binding()
-        assert binding.node_for("home").id == "home"
+        assert binding.node_for("home") == "home"
         assert binding.state_of("home") == "home"
         assert binding.is_bound("home") is True
         assert binding.is_bound("nobody") is False
 
     def test_unbound_node_is_the_low_burden_style(self) -> None:
-        """不写 ``page`` 的节点 = 不校验状态。这是"流程图只写正常流程"的实现。"""
+        """没被关联表提到的节点 = 不校验状态。这是"流程图只写正常流程"的实现。"""
         scenario = build_scenario()
         scenario.graph.add_node(Node("free"))
         binding = scenario.binding()
         assert binding.state_of("free") is None
         assert "free" in binding.unbound_nodes()
-        assert binding.check("free", "随便哪个状态") == (True, "节点不绑定状态")
 
     def test_main_node_is_the_highest_priority(self) -> None:
         """同状态多节点时必须有确定的主节点，否则"跳到哪"不确定。"""
         scenario = build_scenario()
-        scenario.graph.add_node(Node("home/secondary", page="home", priority=5))
-        scenario.graph.add_node(Node("home/primary", page="home", priority=50))
+        scenario.graph.add_node(Node("home/secondary"))
+        scenario.graph.add_node(Node("home/primary"))
+        # 同状态多节点时谁是主节点由**关联表**的 priority 定（大的赢）
+        scenario.bindings = NodeBindings(
+            pairs=(
+                Binding("home/secondary", "home", priority=5),
+                Binding("home/primary", "home", priority=50),
+                Binding("battle", "battle"),
+                Binding("closed", "closed"),
+            )
+        )
         binding = scenario.binding()
-        assert binding.node_for("home").id == "home/primary"
-        assert next(n.id for n in binding.nodes_for("home")) == "home/primary"
+        assert binding.node_for("home") == "home/primary"
+        assert binding.nodes_for("home")[0] == "home/primary"
 
-    def test_check_reports_mismatch(self) -> None:
-        binding = build_scenario().binding()
-        ok, why = binding.check("home", "battle")
-        assert ok is False
-        assert "期望状态 'home'" in why and "实测是 'battle'" in why
+    def test_node_for_returns_none_for_unclaimed_state(self) -> None:
+        """关联表只回答"谁认领"，不做"对不对"的比较 —— 那是引擎的事。
 
-    def test_check_handles_unknown(self) -> None:
+        （以前 ``StateBinding.check`` 在这里比一次，而引擎里又比一次 ——
+        同一件事两个出处。现在只有 :meth:`FlowEngine.check_state`。）
+        """
         binding = build_scenario().binding()
-        ok, why = binding.check("home", None)
-        assert ok is False
-        assert "认不出来" in why
+        assert binding.node_for("nobody") is None
+        assert binding.state_of("nobody") is None
 
     def test_table_is_readable(self) -> None:
         table = build_scenario().binding().table()
@@ -749,10 +779,11 @@ class TestStateBinding:
         assert payload["state_to_node"]["home"] == "home"
 
     def test_missing_state_is_rejected(self) -> None:
-        scenario = build_scenario()
-        scenario.graph.nodes["battle"].page = "ghost"
+        scenario = build_scenario(
+            NodeBindings.of([("home", "home"), ("battle", "ghost"), ("closed", "closed")])
+        )
         with pytest.raises(ConfigError):
-            scenario.binding().validate()
+            scenario.bindings.validate(scenario.tree, scenario.graph)
 
     def test_len_and_contains(self) -> None:
         binding = build_scenario().binding()
@@ -778,8 +809,8 @@ def build_live() -> tuple[Scenario, object]:
     )
 
     graph = Graph(initial="lobby")
-    graph.add_node(Node("lobby", page="home/lobby"))
-    graph.add_node(Node("battle", page="home/battle"))
+    graph.add_node(Node("lobby",))
+    graph.add_node(Node("battle",))
     graph.connect("lobby", "battle", priority=10, condition=ImageQuery("battle.png"))
     graph.connect("battle", "lobby", priority=10, condition=ImageQuery("lobby.png"))
 
@@ -787,6 +818,7 @@ def build_live() -> tuple[Scenario, object]:
         name="live",
         tree=tree,
         graph=graph,
+        bindings=NodeBindings.of([("lobby", "home/lobby"), ("battle", "home/battle")]),
         options=EngineOptions(tick_interval=0.01, require_confirmed=False),
     )
     return scenario, tree

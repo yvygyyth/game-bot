@@ -49,7 +49,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Union
 
 from ..exceptions import FlowError
-from ..state.page import PageId
 from ..types import ActionResult
 from ..utils.logging import get_logger
 
@@ -109,7 +108,7 @@ class Transition:
      {"condition": on_page("home/jingji/before_create"), ...}),
 
     # 现在：写在 home 节点上，`to` 和 `when` 不再各说一遍
-    Node("home", page="home/lobby", transitions=[
+    Node("home", transitions=[
         Transition("jingji/before_create", when=on_page("home/jingji/before_create"),
                    priority=10, label="竞技场出现（建队前）"),
     ])
@@ -167,33 +166,25 @@ class Transition:
 # --------------------------------------------------------------------------- #
 @dataclass(slots=True)
 class Node:
-    """流程图的一个节点 = "待在某个页面时要做的事"。
+    """流程图的一个节点 = "该做什么"。
 
-    :param id: 唯一标识。建议和页面同名（``"home/qianli/battle"``），好对照。
-    :param steps: 每次轮到这个节点时执行的步骤，按顺序。空列表 = 纯等待/观察节点。
-    :param page: **声明"我负责哪个状态"**（``PageId``）；None = 不声明，也就不校验。
+    ## 它**不**知道自己是哪个状态
 
-        这一个字段有三个用途，全都由 :class:`gamebot.flow.binding.StateBinding`
-        实现（那是两侧唯一的桥）：
+    节点和状态的对应关系在 :class:`~gamebot.flow.bindings.NodeBindings`
+    （一张**独立的关联表**）。理由：那是"两者怎么对上"这件事，
+    既不属于状态树也不属于流程图 —— 写在任何一边都会让边界模糊，
+    而且想单独看这张表就得把一边翻一遍。
 
-        1. **动前校验**：实测状态和它不符时拒绝执行 steps —— 防止在错误页面上乱点；
-        2. **重定位去向**：状态层报出真实锚点后，靠它反查"该落到哪个节点"；
-        3. **动后预期**：节点跑完，当前"预期状态"跟着游标变成它的 ``page``。
-
-        不写它的节点就是"纯逻辑/纯等待"节点：不校验、不参与重定位，
-        流程图因此可以只写正常流程。见 ``docs/state-and-flow.md``。
-    :param priority: 多个节点声明同一个 ``page`` 时谁是**主节点**。
-        重定位必须落到唯一一个节点上，所以同状态多节点时要能选出主节点：
-        取 ``priority`` 最大者，并列时取先声明的。
-        防止"原地死循环刷同一个界面"。
+    :param id: 唯一标识。**建议和它关联的状态同名**，这样关联表一眼能对上；
+        但框架不要求同名 —— 对应关系只认关联表。
+    :param steps: 每次轮到这个节点时执行的步骤，按顺序。
+        **某一步失败就停在那里**，然后由上层重定位。空列表 = 纯等待/观察节点。
     :param description: 说明。
     :param meta: 任意附加信息。
     """
 
     id: NodeId
     steps: list[StepFunc] = field(default_factory=list)
-    page: PageId | None = None
-    priority: int = 0
     description: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -223,7 +214,7 @@ class Node:
 
     @classmethod
     def of(cls, node_id: NodeId, *steps: StepFunc, **kwargs: Any) -> Node:
-        """只做一件事的节点的简写：``Node.of("battle", ClickImageStep("skill.png"))``。"""
+        """只做一件事的节点的简写：``Node.of("battle", click_image("skill.png"))``。"""
         return cls(id=node_id, steps=list(steps), **kwargs)
 
     @property
@@ -238,13 +229,11 @@ class Node:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "page": self.page,
-            "priority": self.priority,
             "steps": len(self.steps),
         }
 
     def __repr__(self) -> str:
-        return f"Node({self.id!r}, steps={len(self.steps)}, page={self.page!r})"
+        return f"Node({self.id!r}, steps={len(self.steps)})"
 
 
 # --------------------------------------------------------------------------- #
@@ -340,7 +329,6 @@ class Edge(Transition):
         return {
             "source": self.source,
             "target": self.to,
-            "priority": self.priority,
             "kind": self.kind.value,
             "label": self.label,
             "has_condition": self.has_condition,
@@ -535,21 +523,6 @@ class Graph:
     def in_edges(self, node_id: NodeId) -> tuple[Edge, ...]:
         return tuple(e for e in self.edges if e.target == node_id)
 
-    def node_for_page(self, page_id: PageId) -> Node | None:
-        """声明了"我该在这个页面上"的节点。
-
-        这是树和图的**主要结合点**：定位到某页面后，用它反查该去哪个节点。
-        多个节点声明同一页面时返回第一个（同页面多节点是合法设计，
-        用边的优先级去区分该走哪个）。
-        """
-        for node in self.nodes.values():
-            if node.page == page_id:
-                return node
-        return None
-
-    def nodes_for_page(self, page_id: PageId) -> tuple[Node, ...]:
-        return tuple(n for n in self.nodes.values() if n.page == page_id)
-
     def reachable_from(self, start: NodeId | None = None) -> set[NodeId]:
         """从起点出发能走到的节点集合（用来找死代码）。"""
         origin = start or self.initial
@@ -694,8 +667,7 @@ class Graph:
         """打印成可读的清单，给日志和 ``gamebot check`` 用。"""
         lines = [f"Graph(initial={self.initial!r}, {len(self.nodes)} 节点, {len(self.edges)} 边)"]
         for node in self.nodes.values():
-            page = f" @ {node.page}" if node.page else ""
-            lines.append(f"  [{node.id}]{page}  steps={len(node.steps)}")
+            lines.append(f"  [{node.id}]  steps={len(node.steps)}")
             for edge in self.out_edges(node.id):
                 guard = "?" if edge.has_condition else "-"
                 lines.append(

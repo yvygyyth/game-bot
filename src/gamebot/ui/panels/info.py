@@ -158,6 +158,6 @@ class InfoPanel(QWidget):
             self._node_steps.setText("—")
             self._node_edges.setText("—")
             return
-        self._node_page.setText(node.page or "（不绑定状态 —— 不做校验）")
+        self._node_page.setText(node.state or "（不关联状态 —— 不做校验）")
         self._node_steps.setText(str(node.steps))
         self._node_edges.setText(str(node.out_edges))
