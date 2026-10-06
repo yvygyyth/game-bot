@@ -252,7 +252,11 @@ class MainWindow(QMainWindow):
             return
         if initial_script and not self.controls.select_script(initial_script):
             log.warning("找不到脚本 %r，保持默认选择", initial_script)
-        self._status.setText(f"发现 {len(entries)} 个脚本")
+        # **别在这里无条件覆盖状态栏**：上面那句 select_script 会触发
+        # `_on_script_changed`，它已经把"选了哪个脚本 + 检查结果"写进去了。
+        # 覆盖掉的后果是"选完脚本自动检查"那条信息一闪就没了（实测踩到）。
+        if not self._status.text() or self._status.text() == "就绪":
+            self._status.setText(f"发现 {len(entries)} 个脚本")
 
     @Slot(object)
     def _on_script_changed(self, entry: ScriptEntry | None) -> None:
@@ -264,6 +268,7 @@ class MainWindow(QMainWindow):
             self.diagram.set_scenario(None)
             self.recognition.set_recorder(None)
             self.controls.set_nodes(())
+            self.controls.note_script_selected(False)
             self.controls.set_runnable(False, "先选一个脚本")
             return
 
@@ -302,6 +307,7 @@ class MainWindow(QMainWindow):
             details.node_list,
             enabled=bool(details.node_list),
         )
+        self.controls.note_script_selected(True)
         self.controls.set_runnable(True, "开始运行（会操作游戏）")
         if details.problems:
             self._status.setText(f"{entry.key}: 定义有问题（见「检查输出」）")
@@ -311,6 +317,11 @@ class MainWindow(QMainWindow):
                 f"{entry.key}: {details.pages} 状态 / {details.nodes} 节点 / "
                 f"{details.edges} 边"
             )
+        # **选完脚本自动查一次**：否则「检查」按钮查了什么、结果如何，
+        # 只有点下去才知道 —— 而"缺模板"是开始前就该知道的事。
+        # 用户反馈"我不知道「检查」在检查什么"，根因就是这个。
+        # 按钮保留（手动重查），但这行会自动跑。
+        self._run_check(quiet=True)
 
     @Slot(object)
     def _on_window_changed(self, title: str) -> None:
@@ -348,13 +359,30 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # 检查 / 自检
     # ------------------------------------------------------------------ #
-    def _run_check(self) -> None:
+    def _run_check(self, *, quiet: bool = False) -> None:
+        """「检查」：查**这份定义本身 + 它要用的模板图在不在**。
+
+        查三样，都是"开始之前就能知道"的：
+
+        1. **定义自洽** —— ``Scenario.validate()``：每个记录信息的状态都有流程
+           节点认领、父节点是分类节点、边两头的节点存在、子页面 ROI 没伸出父页面；
+        2. **模板文件在不在** —— 走 ``check_templates``，把定义里引用到的每个
+           模板名去模板根里找一遍；
+        3. **模板根都有哪些、在不在** —— 找不到图时最常怀疑的就是这里。
+
+        **不查**识别准不准（那是跑起来看「识图日志」的事）。
+
+        :param quiet: 选脚本时自动跑的那一次 —— 不切到「检查输出」页（那会把用户
+            刚选脚本的动作打断），只把结论写状态栏。
+        """
         entry = self._entry
         if entry is None or entry.spec is None:
             return
         from ..bootstrap import check_templates
 
         lines: list[str] = []
+        #: 状态栏那一行要说人话：先给结论，再给细节
+        verdict = "检查未完成"
         try:
             config = entry.spec.build_config()
             scenario = entry.spec.build_scenario()
@@ -367,15 +395,23 @@ class MainWindow(QMainWindow):
             if missing:
                 lines.append(f"✗ 缺 {len(missing)} 个模板文件:")
                 lines.extend(f"    - {name}" for name in missing)
+                verdict = f"缺 {len(missing)} 个模板文件"
             else:
                 lines.append("✓ 模板文件齐全")
+                verdict = "定义与模板都 OK"
             for root in config.template_roots():
                 exists = "存在" if root.is_dir() else "目录不存在"
                 lines.append(f"  模板根: {root}（{exists}）")
         except Exception as exc:
             lines.append(f"✗ {type(exc).__name__}: {exc}")
+            verdict = f"{type(exc).__name__}: {exc}"
 
-        self._show_check_output(f"检查 {entry.key}", lines)
+        self._check_verdict = verdict
+        if quiet:
+            # 状态栏加一句，让"检查"的结果不点也看得见
+            self._status.setText(f"{self._status.text()}　| 检查：{verdict}")
+        else:
+            self._show_check_output(f"检查 {entry.key}", lines)
         for line in lines:
             log.info("[check] %s", line)
 
@@ -540,7 +576,6 @@ class MainWindow(QMainWindow):
         self._run_journal = journal
         self._engine_running = True
         self.controls.set_running(True)
-        self.controls.note_runnable(False)
         self._status.setText(f"运行中：{entry.key}")
         self.info.set_run_state(None)
 
@@ -593,8 +628,8 @@ class MainWindow(QMainWindow):
         """跑完了：解锁界面、关会话、把结论写出来。"""
         self._engine_running = False
         self._last_report = report
-        self.controls.set_running(False)
         self.controls.note_runnable(True)
+        self.controls.set_running(False)
         self.controls.stop_btn.setToolTip("还没在跑")
         self.recognition.refresh(force=True)
         # 图上把"最后停在哪一格"留着，不清空 —— 停下之后最想看的就是它
@@ -624,8 +659,8 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _on_engine_failed(self, message: str) -> None:
         self._engine_running = False
-        self.controls.set_running(False)
         self.controls.note_runnable(True)
+        self.controls.set_running(False)
         self._status.setText("运行出错")
         self._show_check_output("运行出错", [message])
         self._release_run()

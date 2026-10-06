@@ -382,6 +382,50 @@ if sys.platform == "win32":
         ctypes.c_ssize_t, ctypes.c_int, _wintypes.WPARAM, _wintypes.LPARAM
     )
 
+    def _declare_win32() -> None:
+        """给要用的 Win32 函数声明参数类型。
+
+        ## 不声明会怎样（踩过，而且极难查）
+
+        ctypes 默认把没声明的参数当 **32 位 ``int``**。而 ``LPARAM`` /
+        ``WPARAM`` 在 64 位 Windows 上是 **8 字节**，钩子回调收到的 ``lparam``
+        是个 64 位指针 —— 于是 ``CallNextHookEx(h, code, wparam, lparam)``
+        在最后一步抛 ``OverflowError: int too long to convert``。
+
+        那个异常被回调的兜底 ``except`` 吞掉，表现是**钩子一个键都收不到**，
+        而"装钩子成功""线程在跑"全都是正常的 —— 没有任何线索指向类型声明。
+
+        实测抓到它的方式：直接调 ``service._callback(...)`` 传一个伪造的
+        ``KBDLLHOOKSTRUCT`` 指针，异常就出来了。（真按键在这个环境验不了，
+        因为输入注入被拦。）
+        """
+        u = ctypes.windll.user32
+        u.CallNextHookEx.argtypes = [
+            _wintypes.HHOOK,
+            ctypes.c_int,
+            _wintypes.WPARAM,
+            _wintypes.LPARAM,
+        ]
+        u.CallNextHookEx.restype = ctypes.c_ssize_t
+        u.SetWindowsHookExW.argtypes = [
+            ctypes.c_int,
+            _HOOKPROC,
+            ctypes.c_void_p,
+            _wintypes.DWORD,
+        ]
+        u.SetWindowsHookExW.restype = _wintypes.HHOOK
+        u.UnhookWindowsHookEx.argtypes = [_wintypes.HHOOK]
+        u.UnhookWindowsHookEx.restype = _wintypes.BOOL
+        u.GetMessageW.argtypes = [
+            ctypes.POINTER(_wintypes.MSG),
+            _wintypes.HWND,
+            _wintypes.UINT,
+            _wintypes.UINT,
+        ]
+        u.GetMessageW.restype = ctypes.c_int
+
+    _declare_win32()
+
 else:  # pragma: no cover - 非 Windows 不会走到装钩子那条路
     _KBDLLHOOKSTRUCT = None  # type: ignore[assignment,misc]
     _HOOKPROC = None  # type: ignore[assignment,misc]

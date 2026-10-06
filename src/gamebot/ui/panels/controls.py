@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
@@ -38,6 +40,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..registry import NodeEntry, ScriptEntry
+
+log = logging.getLogger(__name__)
 
 __all__ = ["ControlsBar"]
 
@@ -67,6 +71,10 @@ class ControlsBar(QWidget):
         self._nodes: tuple[NodeEntry, ...] = ()
         self._windows: list[str] = []
         self._runnable = False
+        #: 有没有选脚本。解锁开始按钮时只看它（见 set_running 的说明）
+        self._has_script = False
+        #: 现在在不在跑。note_runnable 运行中不生效，靠它判断
+        self._running = False
         self._hints: dict[str, str] = {}
 
         # ---- 第一步：选软件（这一步就把坐标定下来） ----
@@ -221,6 +229,17 @@ class ControlsBar(QWidget):
         **填完不自动选中第一项**：自动选中会被下游当成"用户选了它"，
         于是预览立刻切去抓那个窗口 —— 而你刚要看的可能恰恰是整屏。
         留空，等用户真的点一下。
+
+        ## 原来选中的那个窗口已经不在了怎么办（踩过的坑）
+
+        下拉框是**可编辑**的（能手打标题关键字），所以
+        ``setCurrentText(一个不在列表里的标题)`` **不会报错**：它把显示的
+        文字改掉，但 ``currentIndex`` 还停在旧位置 —— 于是下拉框进入
+        "**显示 A、实际选中 B**"的状态。用户看到的是"我明明选了/输入了，
+        列表里却没这一项，而且改不回去"。
+
+        所以这里先查"原来那个还在不在"，**不在就明确清空** ——
+        宁可让用户重选一次，也不要留一个说不清的状态。
         """
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -230,13 +249,19 @@ class ControlsBar(QWidget):
 
         titles = [f"{info.title}{_SIZE_SUFFIX}{info.region.w}x{info.region.h}" for info in infos]
         self._windows = titles
-        current = self.window.currentText()
+        previous = self.window.currentText()
         self.window.blockSignals(True)
         self.window.clear()
         self.window.addItems(titles)
         self.window.blockSignals(False)
-        if current:
-            self.window.setCurrentText(current)
+
+        if previous in titles:
+            self.window.setCurrentText(previous)
+        elif previous:
+            # 原来选的那个不在了 —— 明确清空，别留下"显示 A 实际选中 B"
+            self.window.setCurrentIndex(-1)
+            self.window.setEditText("")
+            log.info("原来选中的窗口 %r 已经不在列表里，选择已清空", previous)
         self.detect.setToolTip(self._detect_tip())
         self._refresh_coords()
         return titles
@@ -288,10 +313,24 @@ class ControlsBar(QWidget):
         self._refresh_tips()
 
     def _refresh_tips(self) -> None:
-        """按当前的键位表重设静态按钮的 tooltip（动态那几个各管各的）。"""
+        """按当前的键位表重设静态按钮的 tooltip（动态那几个各管各的）。
+
+        **「检查」那条的说明写在这里，不写在构造点上** —— 这里才是唯一生效的
+        地方（构造点上设会被 `_refresh_tips` 覆盖，实测踩到：写了一大段说明，
+        鼠标悬停显示的却是旧的一行）。和"键位提示会被动态重设冲掉"是同一类坑。
+        """
         self.detect.setToolTip(self._detect_tip())
         self.check_btn.setToolTip(
-            self._tip("check", "校验这份定义：状态 id、边的端点、模板文件是否齐全")
+            self._tip(
+                "check",
+                "检查**这份定义本身**和**它要用的模板图在不在**：\n"
+                "  · 定义自洽 —— 每个记录信息的状态都有流程节点认领、父节点是分类节点、\n"
+                "    边两头的节点存在、子页面 ROI 没伸出父页面\n"
+                "  · 模板文件齐不齐 —— 定义里引用到的每张图去模板根里找一遍\n"
+                "  · 模板根都有哪些、在不在（找不到图时最常怀疑这里）\n"
+                "不查识别准不准 —— 那是跑起来看「识图日志」的事。\n"
+                "选完脚本会自动查一次，这个按钮用来手动重查。",
+            )
         )
 
     def _detect_tip(self) -> str:
@@ -318,16 +357,52 @@ class ControlsBar(QWidget):
 
         锁住选择是必须的：跑到一半换脚本 = 引擎还在按旧场景跑，
         而界面上显示的是新脚本的信息，两边对不上。
+
+        ## 解锁时"能不能开始"**不再**依赖 ``_runnable``（踩过的坑）
+
+        原来最后一行是 ``start_btn.setEnabled(not running and self._runnable)``，
+        而 ``_runnable`` 在开跑那一刻被置为 ``False``（防止运行中再点开始）。
+        于是解锁时它还是 ``False``，**开始按钮永远点不亮** —— 除非调用方
+        记得先 ``note_runnable(True)`` 再调这个方法。
+
+        调用方**没记得**（``_on_engine_finished`` 里那两行正好写反了顺序），
+        表现就是"停止之后不能重新开始"。这类"顺序敏感 + 静默错"的接口
+        不该存在，所以现在解锁只看**有没有选脚本**（``_has_script``）：
+        这个状态和"在不在跑"完全正交，先调后调都一样。
         """
         for widget in (self.game, self.script, self.node, self.window, self.detect):
             widget.setEnabled(not running)
         self.check_btn.setEnabled(not running)
-        self.start_btn.setEnabled(not running and self._runnable)
+        if running:
+            self.start_btn.setEnabled(False)
+        else:
+            # 解锁：只取决于"有没有选脚本"，不取决于上一次运行留下的记忆
+            self.start_btn.setEnabled(self._has_script)
+            self.start_btn.setToolTip(
+                self._tip("start", "开始运行（会操作游戏）" if self._has_script else "先选一个脚本")
+            )
         self.stop_btn.setEnabled(running)
+        self._running = running
+
+    def note_script_selected(self, ok: bool) -> None:
+        """记住"有没有选脚本"。解锁时用它恢复开始按钮（见 :meth:`set_running`）。"""
+        self._has_script = ok
 
     def note_runnable(self, ok: bool) -> None:
-        """记住"能不能跑"，供 :meth:`set_running` 恢复用（别把灰按钮点亮）。"""
+        """记住"现在能不能跑"（比如"先选软件"）。
+
+        和 :meth:`note_script_selected` 的分工：
+
+        * ``_has_script`` —— **有没有选脚本**。稳定的前提，解锁时只看它；
+        * ``_runnable`` —— **当前能不能开跑**。换脚本那条路会重设它。
+
+        **运行中不生效**：开跑时 ``_runnable`` 被置 False 只是"不许再点开始"，
+        不该写进这个记忆里（否则解锁时就没有正确的值可恢复 —— 那正是
+        "停止后不能重新开始"那个 bug 的来源）。
+        """
         self._runnable = ok
+        if not self._running:
+            self.set_runnable(ok, "" if ok else "先选一个脚本")
 
     @property
     def current_script(self) -> ScriptEntry | None:
