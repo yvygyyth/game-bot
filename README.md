@@ -73,7 +73,7 @@ game-bot/
 │   ├── config/                  # 配置模型与加载
 │   └── utils/                   # 日志、计时
 ├── tests/                       # 框架的结构测试 + 单元测试
-└── main.py                      # 不安装也能跑：python main.py run
+└── main.py                      # 不安装也能跑：uv run python main.py run
 ```
 
 **框架和业务是分开的**：`src/gamebot/` 不认识任何具体游戏；
@@ -83,11 +83,48 @@ game-bot/
 `tests/` 放的是**框架自己**的单元测试（层级依赖、类型契约、决策逻辑）；
 （图齐不齐、ROI 框得对不对、状态之间有没有区分度）。两边职责不同。
 
+## 虚拟环境和"怎么执行命令"
+
+**这个项目的命令一律走 `uv run`。** 它会自动用 `.venv`，所以：
+
+* 不需要先 `activate`；
+* 也不会用错解释器。
+
+```bash
+uv sync --extra windows --extra ui    # 第一次：装依赖（顺便建好 .venv）
+uv run gamebot ui                     # 以后每条命令都在前面加 uv run
+uv run python -m games list
+```
+
+### 为什么特意说这件事
+
+`uv run` 的设计就是**省掉激活那一步**，但它有个前提：**所有命令都得走它**。
+少写了 `uv run`、直接敲 `python -m games ...` 的话，用的是 PATH 里那个
+`python` —— 而本机它是 **3.10.8**、项目要求 **>=3.11**，于是崩在一个
+`runpy` 的堆栈里，报错内容跟你想跑的东西毫无关系。
+
+不想每次都打 `uv run` 也可以，那就**激活一次**（一个终端里有效）：
+
+```bash
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
+python -m games list      # 激活之后才这么写
+```
+
+激活之后不带 `uv run` 是对的；**没激活就是错的**。文档里统一用 `uv run`
+就是为了不依赖"你记不记得激活过"这个状态。
+
 ## 快速开始
+
+**每条命令都走 `uv run`** —— 它自动用 `.venv`，不需要先激活，也不会
+用错解释器（原因见下面"虚拟环境"那一节）。
 
 ```bash
 cd game-bot
-uv sync                 # 装依赖（Windows 后端还需要 --extra windows）
+uv sync --extra windows --extra ui    # 装依赖（第一次）
 
 # 先确认能看到窗口、能截到图 —— 这一步能省掉后面 80% 的瞎猜
 uv run gamebot windows
@@ -99,23 +136,29 @@ uv run gamebot run --dry-run      # 空跑：只识别状态，不操作游戏
 uv run gamebot run                # 真跑
 ```
 
-不装包也能用（自动把 `src/` 加进 `sys.path`）：
+> `gamebot check` 查的是 `config/app.yaml` 里那份**示例流程**，它引用的 10 张
+> 模板图**没有入库**（`assets/templates/` 只有一个 `.gitkeep`）。所以它报
+> "缺失 10 个模板文件"、退出码 1 是**预期的** —— 那是让人照着抄格式的样例，
+> 不是能直接跑的东西。要查一个真脚本用
+> `uv run python -m games check <脚本>`。
+
+不装包也能用（`main.py` 自动把 `src/` 加进 `sys.path`）：
 
 ```bash
-python main.py capture -o a.png
+uv run python main.py capture -o a.png
 ```
 
 ### 写脚本（业务层）
 
 ```bash
-python -m games list                          # 有哪些脚本
-python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
-python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
+uv run python -m games list                          # 有哪些脚本
+uv run python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
+uv run python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 
 # 真的跑起来。建议按 check -> --dry-run -> 真跑 的顺序来
-python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
-python -m games run mingjiangsha/jingji --max-runtime 300          # 真跑
-python -m games run mingjiangsha/jingji --node jingji              # 从中间某个节点开始调
+uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
+uv run python -m games run mingjiangsha/jingji --max-runtime 300          # 真跑
+uv run python -m games run mingjiangsha/jingji --node jingji              # 从中间某个节点开始调
 ```
 
 `run` 跑完会打三样最该看的东西：**停止原因**、**每次重定位**

@@ -129,7 +129,7 @@ while True:
 
 ```python
 # 命令行
-python -m games run mingjiangsha/jingji --param rounds=5 --param target=battle
+uv run python -m games run mingjiangsha/jingji --param rounds=5 --param target=battle
 
 # 步骤里读（给了默认值就是"可选参数"）
 rounds = ctx.param("rounds", 3)

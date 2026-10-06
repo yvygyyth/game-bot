@@ -7,9 +7,9 @@
 ```
 
 ```bash
-python -m games check    mingjiangsha/jingji   # 定义对不对、缺哪些图
-python -m games describe mingjiangsha/jingji   # 状态树 + 流程图长什么样
-python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
+uv run python -m games check    mingjiangsha/jingji   # 定义对不对、缺哪些图
+uv run python -m games describe mingjiangsha/jingji   # 状态树 + 流程图长什么样
+uv run python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
 ```
 
 ## 怎么确认"现在认得出哪一页"
@@ -63,7 +63,7 @@ python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
 界面上是右上角那块（四个控件 + 重置按钮）。命令行同样能覆盖：
 
 ```bash
-python -m games run mingjiangsha/jingji --param jingji.rounds=3 --param jingji.strict=true
+uv run python -m games run mingjiangsha/jingji --param jingji.rounds=3 --param jingji.strict=true
 ```
 
 两条路走**同一个** `FORM.fill()` 做校验 —— 所以不会出现"界面拦得住的、

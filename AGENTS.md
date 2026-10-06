@@ -17,6 +17,10 @@
 
 ## 命令
 
+**一律走 `uv run`** —— 它自动用 `.venv`，不需要先 `activate`。
+少写 `uv run` 就会用 PATH 里那个 `python`（本机是 3.10.8，而项目要求
+>=3.11），崩在一个跟你想跑的东西毫无关系的 `runpy` 堆栈里。
+
 ```bash
 uv sync --extra windows --extra ui    # 装依赖（windows 后端 + 界面）
 uv run ruff check .                   # 必须全绿
@@ -24,16 +28,22 @@ uv run pytest                         # 必须全过
 
 uv run gamebot windows                # 列出可见窗口（填 window_title 用）
 uv run gamebot capture -o a.png       # 截一张（验证坐标和后端）
-uv run gamebot check                  # 校验配置 / 流程定义 / 模板文件
+uv run gamebot check                  # ⚠ 查的是 config/app.yaml 那份**示例流程**，
+                                      #   它引用的模板没入库 → 报缺 10 个、退出 1
+                                      #   是预期的。查真脚本用下面那条
 uv run gamebot ui                     # 打开本地控制台
 
-python -m games list                          # 有哪些脚本
-python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
+uv run python -m games list                          # 有哪些脚本
+uv run python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 
 # 真的跑起来（业务层脚本；gamebot run 跑的是 config/app.yaml 那个示例流程）
-python -m games run mingjiangsha/jingji --dry-run --max-ticks 20
-python -m games run mingjiangsha/jingji --max-runtime 300
+uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20
+uv run python -m games run mingjiangsha/jingji --max-runtime 300
 ```
+
+（想省掉 `uv run` 就**先激活**：`.venv\Scripts\activate`（Windows）或
+`source .venv/bin/activate`。激活之后不带 `uv run` 是对的，没激活就是错的 ——
+所以文档统一用 `uv run`，不依赖"你记不记得激活过"这个状态。）
 
 ## 先读哪几份
 

@@ -91,10 +91,13 @@ DESCRIPTION = "自动刷本……"      # 一句话说明
 
 ## 命令
 
+**前面一定有 `uv run`** —— 它自动用 `.venv`。少写它就会用 PATH 里那个
+`python`（本机 3.10.8，而项目要求 >=3.11），报错跟游戏脚本毫无关系。
+
 ```bash
-python -m games list                          # 有哪些脚本
-python -m games describe mingjiangsha/jingji  # 页面树 + 流程图长什么样
-python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
+uv run python -m games list                          # 有哪些脚本
+uv run python -m games describe mingjiangsha/jingji  # 页面树 + 流程图长什么样
+uv run python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
 ```
 
 `check` 是写脚本时最该反复跑的一条。它挡掉的是这几类问题：
@@ -141,7 +144,7 @@ class FarmStep(Step):
 命令行传：
 
 ```bash
-python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=60
+uv run python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=60
 ```
 
 **参数和黑板是两件东西，别混**（这是这个框架里最容易搞错的一对）：
