@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
@@ -215,7 +215,7 @@ class Point:
     x: int
     y: int
 
-    def __iter__(self):  # 支持 x, y = point
+    def __iter__(self) -> Iterator[int]:  # 支持 x, y = point
         yield self.x
         yield self.y
 

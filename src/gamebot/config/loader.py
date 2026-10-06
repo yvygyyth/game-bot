@@ -122,7 +122,7 @@ def merge_dataclass(target: T, data: dict[str, Any], *, _prefix: str = "") -> T:
         raise ConfigError(f"{type(target).__name__} 不是 dataclass，无法合并配置")
 
     expanded = _expand_dotted(data)
-    valid = {f.name: f for f in fields(target)}  # type: ignore[arg-type]
+    valid = {f.name: f for f in fields(target)}
 
     unknown = sorted(set(expanded) - set(valid))
     if unknown:

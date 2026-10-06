@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
@@ -85,14 +86,14 @@ class ControlsBar(QWidget):
         self._hints: dict[str, str] = {}
 
         # ---- 第一步：选软件（这一步就把坐标定下来） ----
-        self.window = QComboBox(self)
-        self.window.setMinimumWidth(300)
-        self.window.setEditable(True)
-        self.window.setToolTip(
+        self.software = QComboBox(self)
+        self.software.setMinimumWidth(300)
+        self.software.setEditable(True)
+        self.software.setToolTip(
             "要操作的软件窗口。列表来自当前可见窗口（客户区坐标一并列出来），"
             "也可以手打标题关键字。"
         )
-        self.window.currentTextChanged.connect(self._on_window_changed)
+        self.software.currentTextChanged.connect(self._on_window_changed)
 
         self.detect = QPushButton("重新检测", self)
         # **必须吃掉 ``clicked`` 带的那个 ``checked`` 参数**（`lambda` 里那两个
@@ -151,7 +152,7 @@ class ControlsBar(QWidget):
     def _build_layout(self) -> None:
         step1 = QHBoxLayout()
         step1.addWidget(QLabel("① 软件", self))
-        step1.addWidget(self.window, 1)
+        step1.addWidget(self.software, 1)
         step1.addWidget(self.detect)
         step1.addSpacing(6)
         step1.addWidget(self.coords)
@@ -290,17 +291,17 @@ class ControlsBar(QWidget):
 
         titles = [f"{info.title}{_SIZE_SUFFIX}{info.region.w}x{info.region.h}" for info in infos]
         self._windows = titles
-        previous = self.window.currentText()
-        self.window.blockSignals(True)
-        self.window.clear()
-        self.window.addItems(titles)
-        self.window.setCurrentIndex(-1)  # Qt 会在 addItems 时自动选中第一项，撤掉
+        previous = self.software.currentText()
+        self.software.blockSignals(True)
+        self.software.clear()
+        self.software.addItems(titles)
+        self.software.setCurrentIndex(-1)  # Qt 会在 addItems 时自动选中第一项，撤掉
         if previous:
             # **无论如何都保留用户的选择**（见上面那段说明）：在列表里就选中它，
             # 不在列表里就把它作为"当前文本"留住 —— 可编辑下拉框允许这样。
             # 曾经写成"不在就清空"，结果是"点一下刷新，选好的窗口就没了"。
-            self.window.setCurrentText(previous)
-        self.window.blockSignals(False)
+            self.software.setCurrentText(previous)
+        self.software.blockSignals(False)
 
         self._previous_missing = bool(previous) and previous not in titles
         if self._previous_missing:
@@ -330,7 +331,7 @@ class ControlsBar(QWidget):
         self.coords.setText(f"客户区 x={region.x} y={region.y}  {region.w}x{region.h}")
 
     @property
-    def current_window_info(self):
+    def current_window_info(self) -> Any:
         """当前选中窗口的 ``WindowInfo``（拿不到返回 None）。
 
         自己**重新枚举一次**而不是缓存：窗口会被挪动、会被改尺寸，
@@ -420,7 +421,7 @@ class ControlsBar(QWidget):
         不该存在，所以现在解锁只看**有没有选脚本**（``_has_script``）：
         这个状态和"在不在跑"完全正交，先调后调都一样。
         """
-        for widget in (self.game, self.script, self.node, self.window, self.detect):
+        for widget in (self.game, self.script, self.node, self.software, self.detect):
             widget.setEnabled(not running)
         self.check_btn.setEnabled(not running)
         if running:
@@ -470,7 +471,7 @@ class ControlsBar(QWidget):
         标题 —— 带着后缀去匹配永远找不到窗口。用户手打的标题没有后缀，
         所以这里按后缀切一刀就够了，不做别的猜测。
         """
-        return _clean_title(self.window.currentText())
+        return _clean_title(self.software.currentText())
 
     # ------------------------------------------------------------------ #
     # 联动
@@ -510,7 +511,7 @@ def _clean_title(text: str) -> str:
     return text.split(_SIZE_SUFFIX)[0].strip()
 
 
-def _list_windows(keyword: str = ""):
+def _list_windows(keyword: str = "") -> list[Any]:
     """枚举可见窗口，返回 ``WindowInfo`` 列表。失败时返回空列表。
 
     界面不该因为枚举不到就崩 —— 后端依赖平台（Windows 用 pywin32，

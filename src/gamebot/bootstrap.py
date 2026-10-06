@@ -327,10 +327,12 @@ def build_engine(
     ``build_context``（跟踪器需要它）而没传 ``scenario_options``。这一句保证
     "存失败帧"那个开关不会因为调用约定不同而悄悄失效 —— 那正是它之前的样子。
     """
-    ctx.executor.save_frames_on_error = bool(
-        getattr(scenario.options, "save_frames_on_error", False)
-    )
-    return FlowEngine(scenario, ctx, executor=ctx.executor)
+    executor = ctx.executor
+    if executor is not None:
+        executor.save_frames_on_error = bool(
+            getattr(scenario.options, "save_frames_on_error", False)
+        )
+    return FlowEngine(scenario, ctx, executor=executor)
 
 
 def bootstrap(

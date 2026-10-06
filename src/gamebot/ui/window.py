@@ -44,7 +44,13 @@ from .panels.info import InfoPanel
 from .panels.logview import LogView
 from .panels.params import ParamsPanel
 from .panels.recognition import RecognitionPanel
-from .registry import ScriptDetails, ScriptEntry, load_details, load_scripts
+from .registry import (
+    NodeEntry,
+    ScriptDetails,
+    ScriptEntry,
+    load_details,
+    load_scripts,
+)
 from .shortcuts import SHORTCUTS, Keymap
 from .theme import monospace
 
@@ -346,7 +352,7 @@ class MainWindow(QMainWindow):
             overlays=tuple(getattr(event, "overlays", ())),
         )
 
-    def _on_node_changed(self, node: object) -> None:
+    def _on_node_changed(self, node: NodeEntry | None) -> None:
         """换起始节点：右侧显示它的详情，左侧图上**预点亮**它。
 
         这样点「开始」之前就能看清"我要从哪一格起跑"，而不是跑起来才知道。

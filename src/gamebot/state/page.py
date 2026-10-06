@@ -664,7 +664,9 @@ class PageTree:
             updates["region"] = region
         if not isinstance(confidence, _Unset) and hasattr(query, "confidence"):
             updates["confidence"] = confidence
-        return replace(query, **updates) if updates else query
+        # query 声明成 Query（Protocol），mypy 不肯对它用 dataclasses.replace；
+        # 运行期它一定是 dataclass。这是**唯一**一处必须 ignore 的地方。
+        return replace(query, **updates) if updates else query  # type: ignore[type-var]
 
     @staticmethod
     def _label(query: Any, index: int) -> str:

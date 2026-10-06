@@ -24,6 +24,7 @@
 ```bash
 uv sync --extra windows --extra ui    # 装依赖（windows 后端 + 界面）
 uv run ruff check .                   # 必须全绿
+uv run mypy src games                 # 必须全绿（类型检查，见下）
 uv run pytest                         # 必须全过
 
 uv run gamebot windows                # 列出可见窗口（填 window_title 用）

@@ -140,8 +140,11 @@ class ParamsPanel(QGroupBox):
     def _make_editor(self, item: ParamField) -> QWidget:
         tip = item.help or item.name
         if item.kind is FieldKind.BOOL:
-            editor: QWidget = QCheckBox(self)
-            editor.setChecked(bool(item.default))
+            # 先建成具体类型再赋给 QWidget 变量：否则 mypy 只看到 QWidget，
+            # 而它没有 setChecked（运行期当然有）
+            box = QCheckBox(self)
+            box.setChecked(bool(item.default))
+            editor: QWidget = box
         elif item.kind is FieldKind.CHOICE:
             editor = QComboBox(self)
             for value, shown in item.choices:

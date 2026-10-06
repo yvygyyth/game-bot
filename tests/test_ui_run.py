@@ -286,7 +286,7 @@ class TestTargetWindowPreflight:
         monkeypatch.setattr(
             main, "_ask_re_detect", lambda wanted, source: asked.append((wanted, source)) or False
         )
-        main.controls.window.setCurrentText("README.md - game-bot - Cursor")
+        main.controls.software.setCurrentText("README.md - game-bot - Cursor")
 
         assert main._target_window_ok(entry) is False
         assert shown == [], "枚举得到别的窗口时不该走'枚举不到'那条分支"
@@ -297,7 +297,7 @@ class TestTargetWindowPreflight:
         """要问一句，而且点了「Yes」就重新枚举。"""
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
-        main.controls.window.setCurrentText("已经关掉的窗口")
+        main.controls.software.setCurrentText("已经关掉的窗口")
 
         refreshed: list[bool] = []
         monkeypatch.setattr(
@@ -317,7 +317,7 @@ class TestTargetWindowPreflight:
     def test_declining_does_not_refresh(self, qt_app, ui, monkeypatch) -> None:
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
-        main.controls.window.setCurrentText("关掉的")
+        main.controls.software.setCurrentText("关掉的")
         refreshed: list[bool] = []
         monkeypatch.setattr(
             main.controls, "refresh_windows", lambda keyword="": refreshed.append(True) or []
@@ -330,7 +330,7 @@ class TestTargetWindowPreflight:
     def test_existing_window_passes(self, qt_app, ui, monkeypatch) -> None:
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["在的窗口", "别的"])
-        main.controls.window.setCurrentText("在的窗口")
+        main.controls.software.setCurrentText("在的窗口")
 
         assert main._target_window_ok(entry) is True
 
@@ -344,7 +344,7 @@ class TestTargetWindowPreflight:
         """
         main, entry, _ = ui
         self._stub_windows(monkeypatch, [])
-        main.controls.window.setCurrentText("随便什么")
+        main.controls.software.setCurrentText("随便什么")
         shown: list[tuple[str, str]] = []
         monkeypatch.setattr(
             main, "_info_box", lambda title, body: shown.append((title, body))
@@ -359,7 +359,7 @@ class TestTargetWindowPreflight:
         """端到端：窗口不在时点「开始」，引擎不能起来。"""
         main, _entry, _ = ui
         self._stub_windows(monkeypatch, ["别的窗口"])
-        main.controls.window.setCurrentText("关掉的窗口")
+        main.controls.software.setCurrentText("关掉的窗口")
         monkeypatch.setattr(main, "_info_box", lambda title, body: None)
         # **必须挡掉弹窗**：模态框会阻塞，而测试在转事件循环 —— 忘了这一句
         # 整套会挂在这儿等人点，表现只是"慢"（实测 4.6s -> 59s），不像失败。
@@ -375,7 +375,7 @@ class TestTargetWindowPreflight:
         """没选软件时，按**配置里**的 window_title 检查（那才是后端会用的）。"""
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["在的窗口"])
-        main.controls.window.setCurrentText("")
+        main.controls.software.setCurrentText("")
         monkeypatch.setattr(
             entry.spec, "build_config", lambda: _config_with_title("在的窗口")
         )
@@ -466,7 +466,7 @@ class TestButtonWiring:
         main, _, _ = ui
         main._on_start()
         assert not main.controls.script.isEnabled()
-        assert not main.controls.window.isEnabled()
+        assert not main.controls.software.isEnabled()
         _wait_until(qt_app, lambda: not main._engine_running)
         assert main.controls.script.isEnabled()
 

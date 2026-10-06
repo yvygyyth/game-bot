@@ -671,7 +671,14 @@ def step_from_dict(data: Any) -> Step:
     if "offset" in payload and isinstance(payload["offset"], (list, tuple)):
         payload["offset"] = tuple(payload["offset"])
 
-    allowed = set(inspect.signature(cls.__init__).parameters) - {"self"}
+    # 对**类本身**取签名（``inspect.signature(cls)`` 会自动跳过 self），
+    # 而不是对 ``cls.__init__`` 取 —— 后者在 mypy 看来是"对实例取 __init__"，
+    # 而实例的 __init__ 可能来自不兼容的子类。
+    #
+    # 踩过：写成 ``type(cls).__init__`` 是错的 —— ``cls`` 已经是类，
+    # ``type(cls)`` 是它的**元类**，于是 allowed 里全是元类构造函数的参数名，
+    # 每一个合法字段都被判成"未知字段"（9 个用例如例全红）。
+    allowed = set(inspect.signature(cls).parameters) - {"args", "kwargs"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ConfigError(

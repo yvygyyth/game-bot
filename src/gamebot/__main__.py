@@ -164,7 +164,10 @@ def cmd_grab(args: argparse.Namespace) -> int:
     from .config.loader import load_config
 
     try:
-        region = Region.from_tuple(tuple(int(v) for v in args.region.split(",")))
+        parts = tuple(int(v) for v in args.region.split(","))
+        if len(parts) != 4:
+            raise ValueError(f"要 4 个数，给了 {len(parts)} 个")
+        region = Region(*parts)
     except Exception:
         print("✗ --region 格式应为 x,y,w,h，例如 100,50,80,30")
         return 2

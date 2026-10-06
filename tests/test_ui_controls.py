@@ -205,12 +205,12 @@ class TestStartButtonAfterStop:
         main, _ = ui
         main._on_start()
         assert _wait(qt_app, lambda: main._engine_running)
-        for name in ("script", "window", "detect", "check_btn"):
+        for name in ("script", "software", "detect", "check_btn"):
             assert not getattr(main.controls, name).isEnabled(), f"{name} 运行中该锁住"
 
         main._request_engine_stop()
         assert _wait(qt_app, lambda: not main._engine_running)
-        for name in ("script", "window", "detect", "check_btn"):
+        for name in ("script", "software", "detect", "check_btn"):
             assert getattr(main.controls, name).isEnabled(), f"{name} 停止后该解锁"
 
     def test_unlock_does_not_depend_on_call_order(self, qt_app, ui) -> None:
@@ -270,10 +270,10 @@ class TestWindowSelectionRefresh:
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
         controls.refresh_windows()
 
-        controls.window.setCurrentText("pages.py - game-bot - Cursor  @ 2560x1392")
+        controls.software.setCurrentText("pages.py - game-bot - Cursor  @ 2560x1392")
         controls.refresh_windows()
 
-        assert controls.window.currentText().startswith("pages.py"), "选择不该被抹掉"
+        assert controls.software.currentText().startswith("pages.py"), "选择不该被抹掉"
         assert "找不到" in controls.coords.text(), (
             f"要让人看出来现在抓不到它，实际坐标栏是 {controls.coords.text()!r}"
         )
@@ -282,10 +282,10 @@ class TestWindowSelectionRefresh:
         main, _ = ui
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
-        controls.window.setCurrentText("不存在-zzz")
+        controls.software.setCurrentText("不存在-zzz")
         controls.refresh_windows()
 
-        controls.window.setCurrentIndex(1)
+        controls.software.setCurrentIndex(1)
         assert controls.window_title == "窗口乙", "保留选择之后必须还能正常改选"
         assert "客户区" in controls.coords.text()
 
@@ -308,12 +308,12 @@ class TestWindowSelectionRefresh:
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
         controls.refresh_windows()
-        assert controls.window.count() == 2
+        assert controls.software.count() == 2
 
         controls.detect.click()      # 和用户点按钮走同一条路
         qt_app.processEvents()
 
-        assert controls.window.count() == 2, (
+        assert controls.software.count() == 2, (
             "点重新检测把列表清空了 —— 多半是信号带的 checked 被当成了过滤关键字"
         )
 
@@ -325,7 +325,7 @@ class TestWindowSelectionRefresh:
 
         controls.refresh_windows(False)  # type: ignore[arg-type]
 
-        assert controls.window.count() == 2
+        assert controls.software.count() == 2
 
     def test_keyword_filter_still_works(self, qt_app, monkeypatch, ui) -> None:
         """防噪声不能把**正常**的过滤功能弄坏。"""
@@ -359,7 +359,7 @@ class TestWindowSelectionRefresh:
         controls = main.controls
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
         controls.refresh_windows()
-        controls.window.setCurrentIndex(1)
+        controls.software.setCurrentIndex(1)
 
         controls.refresh_windows()
 
@@ -376,12 +376,12 @@ class TestWindowSelectionRefresh:
         self._fake_windows(monkeypatch, ["窗口甲", "窗口乙"])
         # 注意：``setCurrentText("")`` 在可编辑下拉框上**不生效**（文本空了、
         # 索引还在），所以这里用 setCurrentIndex(-1) 真正置空
-        controls.window.setCurrentIndex(-1)
-        controls.window.setEditText("")
+        controls.software.setCurrentIndex(-1)
+        controls.software.setEditText("")
 
         controls.refresh_windows()
 
-        assert controls.window.currentText() == ""
+        assert controls.software.currentText() == ""
         assert controls.window_title == ""
 
 

@@ -41,9 +41,15 @@ def main(
     argv: list[str] | None = None,
 ) -> int:
     """构造界面。``snapshot`` 非空时渲染截图并退出。"""
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(argv if argv is not None else sys.argv[:1])
+    # ``QApplication.instance()`` 的静态类型是 ``QCoreApplication | None``，
+    # 但它就是本进程那个 QApplication（Qt 只允许一个）。这里断言一下，
+    # 好让后面的 ``setApplicationDisplayName`` / ``apply_dark_theme(app)`` 类型成立。
+    existing = QApplication.instance()
+    app = (
+        existing
+        if isinstance(existing, QApplication)
+        else QApplication(argv if argv is not None else sys.argv[:1])
+    )
     QCoreApplication.setApplicationName("gamebot")
     QCoreApplication.setApplicationVersion("0.1.0")
     app.setApplicationDisplayName("gamebot 控制台")

@@ -261,6 +261,31 @@ class Session(ABC):
         if self._cancel_event().wait(seconds):
             raise Cancelled(self.stop_reason or "已请求中止")
 
+    # -- 识别实现（``Frame`` 要用）---------------------------------------------
+    #
+    # 这三条**属于 Session 契约**，不是 ``BaseSession`` 的私有细节：``Frame``
+    # 的 ``find_image`` / ``read_text`` 都靠它们，而 ``Frame`` 拿到的是
+    # ``Session`` 类型。写在基类上，"Frame 需要什么"一眼看得见；写在子类上
+    # 就成了隐式约定 —— 别的实现会在运行期才炸，而且炸在 Frame 里，
+    # 看不出是 Session 少给了东西。
+    #
+    # 默认抛 ``NotImplementedError`` 而不是做成 ``abstractmethod``：只有"要
+    # 识别"的 Session 才需要它们，不该因此让纯截图用途的实现建不出来。
+    @property
+    def matcher(self) -> Matcher:
+        """图像匹配实现。"""
+        raise NotImplementedError("这个 Session 没有配 matcher")
+
+    @property
+    def reader(self) -> TextReader:
+        """文字识别实现。未启用 OCR 时应当是 ``UnavailableTextReader``，不是 None。"""
+        raise NotImplementedError("这个 Session 没有配 reader")
+
+    @property
+    def default_confidence(self) -> float:
+        """查询没指定阈值时用的默认置信度。"""
+        raise NotImplementedError("这个 Session 没有配默认置信度")
+
     # -- 生命周期 -------------------------------------------------------------
     @abstractmethod
     def close(self) -> None:

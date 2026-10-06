@@ -200,7 +200,12 @@ def parse_hotkey(action: str, keys: str) -> Hotkey | None:
     if sequence.count() != 1:
         log.warning("全局快捷键 %r 的写法解析不出单个组合: %r", action, keys)
         return None
-    combo = sequence[0]
+    # 取第一条组合。**只能走下标，而 PySide6 的 stub 没给 `__getitem__`**，
+    # 所以这一处必须 ignore —— 我试过绕开（改用 `toString()`），
+    # 结果是**语义坏了**：Qt 不认的键名 `toString()` 返回空串，
+    # 于是"键名拼错"和"解析不出组合"混成一类，测试立刻变红。
+    # 与其为了类型干净牺牲正确性，不如在**唯一**需要它的地方 ignore 并写明理由。
+    combo = sequence[0]  # type: ignore[index]
     key = _as_int(combo.key())
     if key == _as_int(Qt.Key.Key_unknown):
         # 这条要说清"是键名写错了"，而不是含糊的"解析不出来"

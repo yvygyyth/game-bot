@@ -480,6 +480,14 @@ class FlowEngine:
             self.stop(StopReason.ERROR, found.message)
             return None
         match = found.value
+        if match is None:
+            # ``locate`` 契约上"成功就一定带一个 PageMatch（认不出来时是
+            # UNKNOWN_PAGE）"，所以这里理论上到不了。留着是为了**类型收窄**：
+            # 下面 ``tracker.update`` 收的是 PageMatch，而 mypy 看的是
+            # ``PageMatch | None``。与其 ignore，不如把这个"不该发生"写出来。
+            log.error("状态定位返回成功但没有结果")
+            self.stop(StopReason.ERROR, "状态定位返回成功但没有结果")
+            return None
 
         # (3) 跟踪层：连续几帧了、从何时起、换状态了没有
         self.tracker.update(match, now=now, reason="定位")
@@ -574,12 +582,11 @@ class FlowEngine:
 
         # 慢路径：末梢优先 + 逐步扩散。快路径只验了 expected，所以这里要重找一遍。
         recovered = self.scenario.tree.recover(frame, near=expected, now=now)
-        if recovered.ok:
-            candidate = recovered.value
-            if candidate.id != UNKNOWN_PAGE and candidate.id != expected:
-                anchor = candidate.id
-                self.tracker.update(candidate, now=now, reason="重定位")
-                anchor = self.tracker.current_id
+        candidate = recovered.value if recovered.ok else None
+        if candidate is not None and candidate.id != UNKNOWN_PAGE and candidate.id != expected:
+            anchor = candidate.id
+            self.tracker.update(candidate, now=now, reason="重定位")
+            anchor = self.tracker.current_id
 
         target = self.binding.node_for(anchor)
         if target is None:

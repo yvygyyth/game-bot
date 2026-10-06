@@ -141,7 +141,7 @@ class Journal(ABC):
             target.mkdir(parents=True, exist_ok=True)
             safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in outcome.step)
             path = target / f"{prefix}t{tick}_{outcome.attempts}_{safe}.png"
-            saved = frame.save(path)
+            saved = frame.save(str(path))
             path_text = str(path) if saved.ok else ""
         except OSError:
             path_text = ""
