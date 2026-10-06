@@ -52,7 +52,13 @@ def base_config() -> AppConfig:
 
 
 def new_tree() -> PageTree:
-    """新建一棵只含**游戏级公共页面**的树。"""
+    """新建一棵**只含游戏级公共页面**的树。
+
+    游戏级公共页面现在是空的（理由见 :mod:`games.mingjiangsha.pages`），
+    所以返回空树 —— 功能脚本用 ``tree.add`` 往里放自己的页面（含它的
+    `home`）。这个函数留着，是因为"游戏级公共页面"这件事本身要有个位置，
+    而不是让每个功能各自 ``PageTree()``：那样以后加公共页就得改所有功能。
+    """
     tree = PageTree()
     for page, parent in COMMON_PAGES:
         tree.add(page, parent)
