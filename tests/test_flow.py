@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from gamebot.atomic.query import ImageQuery, PixelQuery
@@ -908,6 +910,109 @@ class TestEngineRealign:
 
         assert engine.cursor.current == "lobby"
         assert engine.report.recoveries[-1].to_node is None
+
+
+class TestRelocateAfterStepFailure:
+    """**某一步失败 -> 立刻重定位**，不等下一轮的自检。
+
+    失败（多半是识图没命中）意味着这一步的前提没成立，而前提通常就是
+    "画面还在我预期的那个状态" —— 也就是说画面很可能已经变了（点了按钮、
+    弹了窗、进了下一屏）。等下一轮再发现，中间那一轮白跑，而且日志里
+    "失败"和"重定位"会分成两轮、看不出因果。
+    """
+
+    def _engine(self, ctx, matcher, step) -> tuple[Any, Any]:
+        """先让 lobby **确认进入**（连续帧数够了），再换上要测的步骤。
+
+        为什么不能一开始就挂上：确认之前引擎根本不执行步骤，而确认需要两帧。
+        所以 warm-up 那一轮用一个空步骤跑过去，然后才换成被测的那个。
+        """
+        from gamebot.execution.executor import Executor
+
+        ctx.executor = Executor(ctx)
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+        engine.tracker.advance_tick()
+        engine.tick()  # 第 1 帧：确认进入，还没动作
+
+        scenario.graph.nodes["lobby"].steps = [step]
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+        engine.tracker.advance_tick()
+        return engine, scenario
+
+    def test_screen_moved_so_it_relocates_this_tick(self, ctx, matcher) -> None:
+        """画面已经变了：**同一轮里**游标就挪到新状态下对应的节点。"""
+        calls: list[str] = []
+
+        def step(c):
+            calls.append("lobby")
+            return ActionResult.not_found("按钮没找到")
+
+        engine, _ = self._engine(ctx, matcher, step)
+        engine.tick()
+
+        assert calls == ["lobby"], "步骤该跑一次（然后失败）"
+        assert engine.cursor.current == "battle", "失败后立刻重定位到 battle"
+        assert len(engine.report.recoveries) == 1
+        record = engine.report.recoveries[0]
+        assert record.expected == "home/lobby"
+        assert record.actual == "home/battle"
+        assert record.to_node == "battle"
+
+    def test_screen_did_not_move_so_it_stays(self, ctx, matcher) -> None:
+        """画面**还在原地**：失败是"这一步没命中"，不是"位置跑了" —— 不挪。
+
+        挪了等于把游标从一个正确的位置上踢开。
+        """
+        engine, _ = self._engine(
+            ctx, matcher, lambda c: ActionResult.not_found("按钮没找到")
+        )
+        # 这一轮画面还是 lobby（步骤失败了，但界面没变）
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+        engine.tick()
+
+        assert engine.cursor.current == "lobby", "位置没变就不该挪"
+        assert engine.report.recoveries == []
+
+    def test_failure_uses_a_fresh_frame(self, ctx, matcher) -> None:
+        """判断"画面变没变"必须用**新帧** —— 失败的那一步可能刚点过按钮。
+
+        不作废帧的话，这里会拿失败前那张图得出"没变"的错误结论。
+        """
+        engine, _ = self._engine(
+            ctx, matcher, lambda c: ActionResult.not_found("按钮没找到")
+        )
+        ctx.frame()  # 先确保有一张当前帧
+        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+        engine.tick()
+
+        assert ctx.current_frame is not None
+        assert engine.cursor.current == "battle", "新帧看到了 battle，就该挪过去"
+
+    def test_unbound_node_does_not_relocate(self, ctx, matcher) -> None:
+        """不关联状态的节点做不了"因失败而重定位" —— 它没有"该在的位置"。
+
+        这条**刻意只钉那一句早返回**，而不是走一遍 tick：不关联状态的节点在
+        tick 那一层本来就过不了自检（锚点被别的节点认领了就该让位），
+        所以"锚点还在原地、节点却不关联状态"这个组合到不了失败那一步。
+        直接调 :meth:`_relocate_after_failure` 才能把那一句单独锁住 ——
+        它保证"没有'该在的位置'时**不猜也不挪**"。
+        """
+        from gamebot.execution.executor import Executor, StepOutcome
+
+        scenario, _tree = build_live()
+        ctx.executor = Executor(ctx)
+        scenario.graph.add_node(Node("free"))
+        engine = FlowEngine(scenario, ctx, start_node="free")
+        engine.tracker.set_initial("home/lobby", now=0.0)
+
+        failure = StepOutcome("whatever", ActionResult.not_found("没找到"))
+        engine._relocate_after_failure(scenario.graph.require("free"), failure, now=0.0)
+
+        assert engine.cursor.current == "free", "没有'该在的位置'就不该挪"
+        assert engine.report.recoveries == []
 
     def test_unknown_state_waits_instead_of_guessing(self, ctx, matcher) -> None:
         """认不出来时只等，绝不猜、绝不动作。"""

@@ -536,9 +536,88 @@ class FlowEngine:
             return None
 
         outcomes = self._run_node(node.id)
+        last = outcomes[-1] if outcomes else None
+
+        if last is not None and not last.ok:
+            # **某一步失败 -> 立刻重定位**，不等下一轮的自检。
+            #
+            # 为什么在这里做：失败（多半是识图没命中）意味着**这一步的前提没成立**，
+            # 而前提通常就是"画面还在我预期的那个状态" —— 也就是说，
+            # 画面很可能已经变了（点了按钮、弹了窗、进了下一屏）。
+            # 等下一轮再去发现，中间那一轮是白跑的；而且日志里"失败"和
+            # "重定位"会分成两轮，看不出因果。
+            #
+            # 所以这里**主动**拿新帧把位置摆正，并把因果写进日志
+            # （"因某步失败"），而不是留给下一轮当成一次普通的自检不符。
+            self._relocate_after_failure(node, last, now=now)
+            self._note_advance(now=now)
+            return last
+
         # 转移决策：**没走成的也记**（"为什么它不动"要靠这个回答）
         self._note_advance(now=now)
-        return outcomes[-1] if outcomes else None
+        return last
+
+    def _relocate_after_failure(
+        self, node: Node, failure: StepOutcome, *, now: float
+    ) -> None:
+        """一步失败了：拿**新帧**看看现在到底在哪，该挪就挪。
+
+        和 :meth:`_realign` 的区别只在**触发原因**（这里是"某步失败"，
+        那里是"进 tick 时自检就不符"）和**日志措辞** —— 定位与挪游标那套
+        完全共用，不另写一份（否则"怎么判断现在在哪"就有了两个出处）。
+
+        ## 为什么必须重新取帧
+
+        失败之前那次 ``locate`` 用的是**已经用过的帧**（``_frame()`` 在 TTL 内复用），
+        而失败的那一步很可能已经点了按钮 —— 那张图过期了。
+        不作废帧的话，这里会得出"位置没变"的错误结论。
+        """
+        # 作废缓存 -> `_locate_now` 会真的抓一张新的
+        self.ctx.invalidate_frame()
+        anchor = self._locate_now(now=now)
+
+        bound = self.binding.state_of(node.id)
+        if bound is None:
+            # 节点不关联状态（纯逻辑/纯等待节点）：没有"该在的位置"可言，
+            # 不猜、不挪 —— 下一轮它会照常再试一次。
+            log.debug("节点 %r 不关联状态，步骤失败后不做重定位", node.id)
+            return
+
+        if anchor == bound:
+            # 画面还在原地：失败是"这一步没命中"，不是"位置跑了"。
+            # **不挪** —— 挪了等于把游标从正确的位置上踢开。
+            log.info(
+                "节点 %r 的步骤 %r 失败（%s），但位置没变（仍是 %r）—— 不重定位",
+                node.id,
+                failure.step,
+                failure.message,
+                anchor,
+            )
+            return
+
+        # 位置确实变了：交给和自检不符时**同一套**重定位逻辑
+        # （慢路径确认 + 关联表反查 + 记 Recovery）
+        self._realign(self.ctx.frame(), node, bound, anchor, now=now, cause="步骤失败")
+
+    def _locate_now(self, *, now: float) -> PageId:
+        """拿当前帧问一句"现在到底在哪个状态"（快路径，**不动跟踪器**）。
+
+        专门给"某步失败之后要不要重定位"用：
+
+        * 用**快路径**而不是 :meth:`PageTree.recover` —— 后者是扩散搜索，
+          代价高；这里只需要一个瞬时判断，判断完立刻交给 :meth:`_realign`
+          （那里才走慢路径确认）。**慢路径只在一个地方跑，不重复实现。**
+        * **不动跟踪器**：跟踪器管的是"连续命中几帧了"（确认进入），
+          这里只是内部问一句，更新它会让确认计数凭空 +1 ——
+          等于用一次内部查询把"连续 N 帧"的闸门放过去了。
+        * 认不出来 / 底层报错都返回 ``UNKNOWN_PAGE``：那会走
+          :meth:`_handle_unknown` 的宽容期，是安全的默认。
+        """
+        frame = self.ctx.frame()
+        found = self.scenario.tree.locate(frame, self.tracker.current_id, now=now)
+        if not found.ok or found.value is None:
+            return UNKNOWN_PAGE
+        return found.value.id
 
     def _realign(
         self,
@@ -548,6 +627,7 @@ class FlowEngine:
         anchor: PageId,
         *,
         now: float,
+        cause: str = "自检不符",
     ) -> StepOutcome | None:
         """状态对不上：走意外路径（重定位）。
 
@@ -559,6 +639,10 @@ class FlowEngine:
            再问关联表"这归哪个节点管"，把游标挪过去；
         3. 挪过去之后**本轮不执行** —— 重定位是"先把位置摆正"，
            干活留给下一轮（那时的自检会自然通过）。
+
+        :param cause: 为什么来这儿 —— 两个来源：进 tick 时自检就不符（默认），
+            或者**某步失败**（见 :meth:`_relocate_after_failure`）。
+            只影响日志措辞，不改变行为：那件事只有一个正确做法。
         """
         if anchor == UNKNOWN_PAGE:
             self._handle_unknown(now)
@@ -588,7 +672,8 @@ class FlowEngine:
         self.cursor.advance(target, now=now)
         self._note_recovery(node.id, expected, anchor, target, recovered.value)
         log.info(
-            "位置不对：节点 %r 关联的状态是 %r，实测 %r -> 重定位到节点 %r",
+            "%s：节点 %r 关联的状态是 %r，实测 %r -> 重定位到节点 %r",
+            cause,
             node.id,
             expected,
             anchor,
