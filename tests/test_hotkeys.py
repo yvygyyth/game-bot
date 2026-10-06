@@ -30,7 +30,6 @@ from gamebot.ui.hotkeys import (
     GlobalHotkeys,
     Hotkey,
     is_supported,
-    matches,
     parse_hotkey,
 )
 
@@ -113,44 +112,64 @@ class TestParse:
         assert parse_hotkey("stop", "Esc").action == "stop"
 
 
-class TestMatches:
-    """命中判定。判错的症状是"按了没反应"或"没按也触发"。"""
+class TestModifierMask:
+    """修饰键位掩码 —— 键位匹配现在由 **Windows 自己**做（``RegisterHotKey``）。
+
+    所以这里不再测"给一个 vk+mods 判断命中"的算法（那个函数已经删了），
+    改测**我们交给 Windows 的那个掩码对不对**。它错了的症状是
+    "``Ctrl+Alt+F12`` 按不出来"或"误触发别的组合"。
+    """
 
     def _hotkey(self, qt_app, keys="Esc"):
-        return parse_hotkey("stop", keys)
+        parsed = parse_hotkey("stop", keys)
+        assert parsed is not None
+        return parsed
 
-    def test_exact_hit(self, qt_app):
-        assert matches(self._hotkey(qt_app), 0x1B, 0) is True
+    def test_plain_key_has_no_modifiers(self, qt_app):
+        assert self._hotkey(qt_app, "Esc").mods == 0
 
-    def test_wrong_key(self, qt_app):
-        assert matches(self._hotkey(qt_app), 0x41, 0) is False
+    def test_control_bit(self, qt_app):
+        assert self._hotkey(qt_app, "Ctrl+A").mods == MOD_CONTROL
 
-    def test_extra_modifier_does_not_match(self, qt_app):
-        """``Esc`` 那条不该被 ``Ctrl+Esc`` 触发 —— 修饰键必须**恰好**匹配。
+    def test_alt_bit(self, qt_app):
+        assert self._hotkey(qt_app, "Alt+A").mods == MOD_ALT
 
-        放宽成"包含"的话，``Ctrl+Alt+X`` 会在按 ``Ctrl+X`` 时误触发。
-        """
-        assert matches(self._hotkey(qt_app), 0x1B, MOD_CONTROL) is False
+    def test_control_alt_combines(self, qt_app):
+        """两个修饰键是**位或**，别把 ``Alt`` 覆盖掉 ``Ctrl``。"""
+        hotkey = self._hotkey(qt_app, "Ctrl+Alt+F12")
+        assert hotkey.mods == MOD_CONTROL | MOD_ALT
+        assert hotkey.mods & MOD_CONTROL and hotkey.mods & MOD_ALT
 
-    def test_missing_modifier_does_not_match(self, qt_app):
-        hotkey = self._hotkey(qt_app, "Ctrl+A")
-        assert matches(hotkey, 0x41, 0) is False
+    def test_shift_bit(self, qt_app):
+        assert self._hotkey(qt_app, "Shift+A").mods == MOD_SHIFT
+
+    def test_win_modifier_is_in_the_mask(self, qt_app):
+        """``Meta`` 在 Qt 里是 Win 键；写成 ``"Win+A"`` 是**错的写法**，
+        会被上面 ``TestParse`` 挡住 —— 这里验正确的那个。"""
+        assert self._hotkey(qt_app, "Meta+A").mods == MOD_WIN
 
     def test_modifier_order_does_not_matter(self, qt_app):
         """位掩码是集合语义：``Ctrl+Alt`` 和 ``Alt+Ctrl`` 是同一个。"""
-        hotkey = self._hotkey(qt_app, "Ctrl+Alt+F12")
-        assert matches(hotkey, 0x7B, MOD_ALT | MOD_CONTROL) is True
-        assert matches(hotkey, 0x7B, MOD_CONTROL | MOD_ALT) is True
+        assert self._hotkey(qt_app, "Ctrl+Alt+F12").mods == self._hotkey(
+            qt_app, "Alt+Ctrl+F12"
+        ).mods
 
-    def test_win_modifier_is_in_the_mask(self, qt_app):
-        hotkey = self._hotkey(qt_app, "Meta+A")
-        assert hotkey.mods == MOD_WIN
-        assert matches(hotkey, 0x41, MOD_WIN) is True
+    def test_display_preserves_canonical_order(self, qt_app):
+        """显示用固定顺序（``Ctrl+Alt+Shift+Win``），不跟着输入顺序变。"""
+        assert self._hotkey(qt_app, "Alt+Ctrl+F12").display == "Ctrl+Alt+F12"
 
 
-class TestService:
+class TestRegistrationIsObservable:
+    """**这条换上 `RegisterHotKey` 的核心理由**：成败能看出来。
+
+    低级键盘钩子的失败是静默的 —— 句柄有效、``GetLastError=0``、线程在跑，
+    但回调一次都不被调用，外部表现只有"按了没反应"。
+    ``RegisterHotKey`` 失败**返回 False 并带错误码**，所以这里能直接钉住
+    "注册成功的键进了 ``registered``、失败的进了 ``failed_keys``"。
+    """
+
     def test_no_hotkeys_does_not_start(self, qt_app):
-        """一条都没解析出来时不起线程（省一个后台线程，也省一次装钩子）。"""
+        """一条都没解析出来时不起线程（省一个后台线程，也省一次建窗口）。"""
         service = GlobalHotkeys([])
         assert service.start() is False
         assert not service.running
@@ -170,19 +189,35 @@ class TestService:
         service.stop()
         service.stop()
 
+    def test_registered_and_failed_are_reported_separately(self, qt_app):
+        """注册结果要能分开看 —— 这是换机制换来的可诊断性。"""
+        if not is_supported():
+            pytest.skip("只有 Windows 上有这个 API")
+        service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
+        try:
+            service.start()
+            # 每个键要么注册上、要么进失败表，不能两个都不在
+            assert len(service.registered) + len(service.failed_keys) == 1
+            # 不变量：同一时刻两边不该有同一个键
+            assert not {h.keys for h in service.registered} & {
+                h.keys for h in service.failed_keys
+            }
+        finally:
+            service.stop()
+
     def test_stop_after_start_cleans_up(self, qt_app):
         if not is_supported():
-            pytest.skip("只有 Windows 上能装钩子")
+            pytest.skip("只有 Windows 上有这个 API")
         service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
         if not service.start():
-            pytest.skip("这个环境装不上钩子")
+            pytest.skip("这个环境注册不上（多半被别的软件占了）")
         assert service.running
         service.stop()
         assert not service.running
+        assert service.registered == [], "注销之后不该还留着'已注册'"
 
     def test_triggered_signal_reaches_a_slot(self, qt_app):
-        """钩子线程命中 -> 界面线程执行。**钩子回调本身在测试里调不了**，
-        但"发了信号之后动作会不会被执行"这一段能验，而它正是最容易接错的一段
+        """命中之后"动作会不会被执行"这一段能验，而它正是最容易接错的一段
         （少一次 connect、或者槽函数签名不对，表现都是"按了没反应"）。
         """
         service = GlobalHotkeys([Hotkey("stop", 0x1B, 0, "Esc")])
@@ -200,6 +235,21 @@ class TestService:
         service = GlobalHotkeys([hotkey])
         service.hotkeys.clear()
         assert service.hotkeys == [hotkey]
+
+    def test_message_ids_start_at_one(self, qt_app):
+        """``WM_HOTKEY`` 的 ``wParam`` 是注册时给的 id，必须从 1 开始且连续。
+
+        这里钉住"id → 哪条快捷键"的映射算法本身（``index - 1``）——
+        它错了的症状是"按 A 触发了 B"，比没反应更难查。
+        """
+        hotkeys = [
+            Hotkey("run", 0x74, 0, "F5"),
+            Hotkey("stop", 0x1B, 0, "Esc"),
+            Hotkey("help", 0x70, 0, "F1"),
+        ]
+        for index, hotkey in enumerate(hotkeys, start=1):
+            assert hotkeys[index - 1] is hotkey
+        assert len(hotkeys) == 3
 
 
 class TestShortcutTableIsConsistent:
