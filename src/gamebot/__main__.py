@@ -230,7 +230,19 @@ def main(argv: list[str] | None = None) -> int:
     """CLI 主入口。"""
     parser = build_parser()
     args = parser.parse_args(argv)
-    setup_logging("INFO")
+
+    # ``ui`` 额外写一份日志文件。
+    #
+    # 理由：界面是**用 ``pythonw.exe`` 启动的**（无控制台版本）——那样双击才不会
+    # 弹一个黑窗口，代价是 stdout 常常接不到东西（没有控制台，日志就丢了）。
+    # 所以界面自己写文件，出问题时有地方可查；控制台那份照常保留。
+    log_file = None
+    if args.command == "ui":
+        from pathlib import Path
+
+        log_file = Path("logs/ui.log")
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    setup_logging("INFO", log_file=log_file)
 
     handler = _HANDLERS[args.command]
     try:
