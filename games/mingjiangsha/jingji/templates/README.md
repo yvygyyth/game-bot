@@ -12,8 +12,7 @@ select/picked/picked.png              选将 · 已选（「确定」是金的�
 fight/hand/hand.png                   战斗 · 换牌（「是否需要更换初始手牌？」）
 fight/done/done.png                   战斗 · 结算（结算页「确认」）
 
-clicks/jingji_entry.png               ← 只用来**点**，不对应状态
-clicks/select_first.png
+clicks/select_first.png               ← 只用来**点**，不对应状态
 clicks/fight_menu.png
 clicks/fight_surrender.png
 clicks/fight_confirm.png
@@ -83,19 +82,24 @@ rawMaterial/                          ← 你的原始截图，别动
 
 ---
 
-## 点击目标（6 张）—— 决定"点哪里"
+## 点击目标（5 张）—— 决定"点哪里"
 
 | 模板 | 从哪张截图裁 | 裁什么 | 现状 |
 |---|---|---|---|
-| `clicks/jingji_entry.png` | `home.png` | 「竞技」卡（可先用现有的） | 380×370 |
 | `clicks/select_first.png` | `select1.png` | **第 1 张武将卡**（张飞那张） | 230×360 |
 | `clicks/fight_menu.png` | `zhandou2.png` | 右上角那个**金色圆结** | 70×70 ✓ |
 | `clicks/fight_surrender.png` | `zhandou3.png` | 展开菜单里的「**投降**」 | 70×70 ✓ |
 | `clicks/fight_confirm.png` | `zhandou4.png` | 投降弹窗里的「**确认**」 | 240×75 |
 | `clicks/fight_next.png` | `zhandou6.png` | 结算中间底部「**下一步**」 | 245×65 |
 
-> **「点击空白区域到下一步」（zhandou5）不需要模板** —— 那一步点固定坐标
-> （`pages.py` 的 `FIGHT_BLANK`）。它本来就叫"空白区域"，找图不如点坐标。
+### 两个"不用模板"的点击
+
+| 点哪 | 怎么点 | 为什么不用模板 |
+|---|---|---|
+| 首页「竞技」入口（熊猫头） | **固定坐标** `JINGJI_ENTRY` | 鼠标不在卡上时熊猫头**不完整** —— 找图会失败，而那个坐标本来就点得中（玩家说的）。原有一张 `clicks/jingji_entry.png` 就是因此没人读，已删 |
+| 「点击空白区域到下一步」（zhandou5） | **固定坐标** `FIGHT_BLANK` | 它本来就叫"空白区域"，那里没有可认的东西 |
+
+> 固定坐标都在 `pages.py` 里，带注释说明为什么不用模板。
 
 ---
 

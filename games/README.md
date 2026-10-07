@@ -47,13 +47,16 @@ games/
 
 ```python
 # games/<游戏>/<功能>/steps/advance_team.py
-T_CREATE_TEAM = "jingji/create_team.png"     # 这个步骤用的模板
-TEAM_ROI = Region(1400, 630, 470, 360)       # 它的搜索范围
-CONF_BUTTON = 0.85                           # 它的阈值
+T_CREATE_TEAM = "jj/before_create/create_team.png"   # 这个步骤用的模板
+TEAM_ROI = Region(1400, 630, 470, 360)               # 它的搜索范围
+CONF_BUTTON = 0.85                                   # 它的阈值
 
-def create_team(ctx) -> ActionResult:        # 它的逻辑（**就是一个函数**）
+def create_team(ctx) -> ActionResult:                # 它的逻辑（**就是一个函数**）
     ...
 ```
+
+> 模板名里的层级 = **状态路径**（见下面「模板怎么分目录」那一节）。
+> 步骤专用的模板也可以放在自己状态目录下，不必都塞 `clicks/`。
 
 `steps/__init__.py` **只做转发**（`from .advance_team import create_team`），
 不要在那里写逻辑 —— 这样 `from .steps import create_team` 照常能用，
@@ -404,34 +407,52 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 判断错了不会报错 —— 只是以后加第二个脚本时会发现"这张图怎么找不到了"，
 或者游戏级目录里堆了一堆其实只有一个脚本用的图。
 
-### 两件事，别混（这块来回改过三次，值得单独说）
+### 模板怎么分目录（这块来回改过几次，值得单独说）
 
 同一个 `templates/` 目录里，**"放哪一层"和"子目录叫什么"回答的是两个不同的问题**：
 
-| 问题 | 答案由什么决定 | 例子 |
-|---|---|---|
-| 放**功能级**还是**游戏级**？ | 谁声明用它 —— 一个功能专属就放功能级 | 竞技卡 → 功能级（不是公共资源） |
-| 子目录名写什么？ | 它**长在哪个界面上** | 竞技卡长在首页 → `home/` |
+| 问题 | 答案由什么决定 |
+|---|---|
+| 放**功能级**还是**游戏级**？ | 谁声明用它 —— 一个功能专属就放功能级 |
+| 子目录叫什么？ | 这张图是**哪个状态的锚点**（目录层级 = 状态路径） |
 
-所以竞技卡是 **`<功能根>/home/jingji_card.png`**：
+所以竞技场是这样（**目录层级和 `pages.py` 里那棵状态树一一对应**）：
 
 ```
 games/mingjiangsha/jingji/templates/
-├── home/jingji_card.png          竞技卡：长在**首页**上、但属于竞技功能
-└── jingji/
-    ├── title.png                 左上角「竞技场」标题（页面标识）
-    ├── create_team.png           三个按钮：都长在**竞技场页**上
-    ├── add_pet.png
-    └── start_match.png
+├── lobby/lobby.png                     首页
+├── jj/before_create/before_create.png  jj/before_create
+├── jj/after_create/after_create.png    jj/after_create
+├── jj/after_add/after_add.png          jj/after_add
+├── select/idle/idle.png                select/idle
+├── select/picked/picked.png            select/picked
+├── fight/hand/hand.png                 fight/hand
+├── fight/done/done.png                 fight/done
+├── clicks/…                            只用来**点**、不对应状态
+└── rawMaterial/                        原始截图（供重裁）
 ```
 
-**子目录 = 界面分组**，不是功能名。功能目录已经叫 `jingji` 了，
-再在它里面套一个 `templates/jingji/` 当"功能命名空间"是重复的 ——
-`templates/jingji/` 之所以存在，是因为那四张图**长在竞技场页上**。
+**为什么按状态分，而不是按"锚点/点击"分**：代码里确实是按锚点/点击分组的，
+但**排错时的思路不是那个**。出问题问的是"`select/picked` 认不出来"，
+不是"第 4 张锚点图不对" —— 按状态分之后，
+**检索路径就是排错路径**：直接进同名目录看那张图。
+
+**文件名不带前缀。** 目录已经表达了，`select/picked/select__picked.png`
+是重复的。
+
+⚠️ **模板路径这一个真相有四份写法**，改目录要一起改：
+
+1. `games/<游戏>/<功能>/pages.py` 的 `T_*` 常量 —— **权威**
+2. `logs/tools/build_templates.py` 的 `CROPS` 键
+3. `tests/<功能>_states.py` 里的 `TEMPLATE_OF`
+4. `templates/README.md` 的表格
+
+改完跑 `uv run python logs/tools/check_template_paths.py`：它一次告诉你
+"哪个常量指向的文件没了"和"哪个图没人引用"（两个方向都查）。
 
 **目录层级要跟着模板名走。** 模板名是相对模板根的路径，所以
-`"battle/skill.png"` 会落到 `<根>/battle/skill.png`。名字里带层级、
-磁盘上却没建那个子目录，报的是"找不到图"而不是"目录不存在"。
+`"select/picked/picked.png"` 会落到 `<根>/select/picked/picked.png`。
+名字里带层级、磁盘上却没建那个子目录，报的是"找不到图"而不是"目录不存在"。
 
 **改了目录就要改模板名，反之亦然。** 两处对不上时唯一的症状就是
 `games check` 报"缺某个模板文件"—— 而报出来的名字正是你写错的那个，

@@ -28,7 +28,7 @@
 ```
 home                [group]         ← 纯分类：自己不记录信息
 ├── lobby           queries: logo.png
-├── jingji          queries: jingji/title.png
+├── jingji          queries: example/title.png
 │   └── battle      roi: [1180,620,680,500]   queries: skillbar.png
 └── result          queries: OrQuery(victory.png, defeat.png)
 
@@ -252,7 +252,7 @@ states:                          # id 由嵌套位置推导：home/jingji/battle
     kind: group                  # YAML 里仍写 kind: group（解析成 PageGroup）
     children:
       jingji:
-        queries: [{type: ImageQuery, template: jingji/title.png}]
+        queries: [{type: ImageQuery, template: example/title.png}]
 
 nodes:
   jingji:

@@ -19,7 +19,7 @@ states:
     kind: group
     children:
       lobby:      {queries: [{type: ImageQuery, template: home/logo.png}]}
-      jingji:     {queries: [{type: ImageQuery, template: jingji/title.png}]}
+      jingji:     {queries: [{type: ImageQuery, template: example/title.png}]}
   network_error:                            # 顶层 = 全局叠加层
     kind: overlay
     priority: 100
@@ -31,12 +31,17 @@ nodes:
   home:
     page: home/lobby                        # 写了 = 动前校验 + 重定位去向
     steps:
-      - {type: ClickImageStep, template: jingji/entry.png}
+      - {type: ClickImageStep, template: example/entry.png}
   jingji:
     page: home/jingji
     priority: 10                            # 同状态多节点时谁是主节点
-    steps: [{type: ClickImageStep, template: jingji/create_team.png}]
+    steps: [{type: ClickImageStep, template: example/create_team.png}]
 ```
+
+> 上面的模板名是**格式示例**（这些文件不在本仓库里）。真实的 YAML 流程
+> 只在 `config/flows/` 下有，用来演示格式；**真脚本不走 YAML** ——
+> 它们的状态树写在 ``games/<游戏>/<功能>/pages.py`` 里，
+> 那才是模板路径的权威出处（见该文件里 ``T_*`` 常量）。
 
 ## 四个刻意的选择
 
