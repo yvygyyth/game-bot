@@ -23,6 +23,19 @@
 
 ## 怎么启动（**先读这一节**）
 
+> **装依赖、启动方式、命令速查、出问题怎么办** —— 完整版在
+> **[docs/getting-started.md](docs/getting-started.md)**。
+> 下面是精简版。
+
+### 装依赖
+
+```powershell
+uv sync --extra windows --extra ui
+```
+
+> ⚠️ **两个 extra 要一起给** —— `uv sync` 会把没列出的 extra 卸掉，
+> 只写一个另一个就没了。
+
 ### 界面
 
 **双击桌面的 `gamebot 界面（管理员）`** → 点一下 UAC 的"是" → 界面出来。
