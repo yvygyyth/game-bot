@@ -20,7 +20,16 @@
 都是浅色按钮），共用一套识别会互相误命中。而"取消"的位置是固定的
 （玩家原话："zhandou1 的界面点那个取消"），固定坐标最省事也最可靠。
 
-## 2~4 步为什么每步都要"等出现"
+## 2~4 步现在**全图找**（没给 ``region``）
+
+用户要求：默认不加 roi，误命中多了再加。想提速就加 —— 三个目标的框分别是：
+
+* 圆结 / 投降：都在**右上角**那条竖排（客户区约 x 2400~2470）；
+* 投降确认：屏幕**中间偏下**那个弹窗（约 x 1000~1240, y 885~960）。
+
+加在 :func:`_wait_then_click` 里那一处，别在别处再建一份。
+
+## 为什么每步都要"等出现"
 
 点击下发之后界面要几百毫秒才变。**不等就点下一步 = 在旧界面上点第二下**，
 这一轮就废了。所以每步都是 :func:`~gamebot.execution.builtins.wait_for`
@@ -38,14 +47,11 @@ from typing import TYPE_CHECKING, Any
 from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import wait_for
-from gamebot.types import ActionResult, Region
+from gamebot.types import ActionResult
 
 from ..pages import (
     CONF,
     FIGHT_HAND_CANCEL,
-    ROI_FIGHT_CONFIRM,
-    ROI_FIGHT_MENU,
-    ROI_FIGHT_SURRENDER,
     T_CLICK_FIGHT_CONFIRM,
     T_CLICK_FIGHT_MENU,
     T_CLICK_FIGHT_SURRENDER,
@@ -67,12 +73,12 @@ def advance_fight(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
 
     # ---- 2~4. 等目标出现 → 点它 ----
-    for template, region, label in (
-        (T_CLICK_FIGHT_MENU, ROI_FIGHT_MENU, "右上角圆结"),
-        (T_CLICK_FIGHT_SURRENDER, ROI_FIGHT_SURRENDER, "投降"),
-        (T_CLICK_FIGHT_CONFIRM, ROI_FIGHT_CONFIRM, "投降确认"),
+    for template, label in (
+        (T_CLICK_FIGHT_MENU, "右上角圆结"),
+        (T_CLICK_FIGHT_SURRENDER, "投降"),
+        (T_CLICK_FIGHT_CONFIRM, "投降确认"),
     ):
-        step = _wait_then_click(ctx, template, region, label)
+        step = _wait_then_click(ctx, template, label)
         if not step.ok:
             return step
 
@@ -81,11 +87,13 @@ def advance_fight(ctx: RunContext) -> ActionResult[Any]:
     )
 
 
-def _wait_then_click(
-    ctx: RunContext, template: str, region: Region, label: str
-) -> ActionResult[Any]:
-    """等 ``template`` 出现 → 点它。等不到就失败（交给上层重定位）。"""
-    query = ImageQuery(template, region=region, confidence=CONF)
+def _wait_then_click(ctx: RunContext, template: str, label: str) -> ActionResult[Any]:
+    """等 ``template`` 出现 → 点它。等不到就失败（交给上层重定位）。
+
+    全图找。**想提速就在这里加 ``region=``** —— 只此一处，
+    别在别的地方再建一份（那就成了第二份实现）。
+    """
+    query = ImageQuery(template, confidence=CONF)
     appeared = wait_for(ctx, query, timeout=WAIT_FIGHT)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(
@@ -93,8 +101,8 @@ def _wait_then_click(
         )
 
     # ⚠️ ``wait_for`` 命中的是**源坐标**（find_image 返回的就是源坐标），
-    # 所以必须用 click_source_point。用 click_logic_point 会二次换算点偏一个
-    # 窗口偏移 —— 大目标上看不出来，是这类脚本最阴的一类 bug。
+    # 所以必须用 click_source_point。用 click_logic_point 会二次换算、
+    # 点偏一个窗口偏移 —— 大目标上看不出来，是这类脚本最阴的一类 bug。
     clicked = actions.click_source_point(ctx.session, appeared.value)
     if not clicked.ok:
         return clicked

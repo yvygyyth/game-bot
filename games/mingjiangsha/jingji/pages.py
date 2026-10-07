@@ -101,46 +101,46 @@ CONF = 0.85
 """状态锚点的阈值。"""
 
 # --------------------------------------------------------------------------- #
-# 搜索区域（**客户区坐标**，原点 = 客户区左上角）
+# 搜索区域：**现在全图找，一个 roi 都不设**
 #
-# 模板就是在这些框里裁出来的，所以框必须包含模板；比模板大一圈是为了
-# 容忍界面小幅位移。收窄 roi 是**最有效的提速和防误命中手段**，优先调它。
+# 这是刻意的起点（用户要求）：先让它在整帧里找，误命中多了再加框。
+#
+# ## 为什么不一开始就设 roi
+#
+# roi 是**最有效的提速和防误命中手段**（竞技场的实测：把搜索范围收窄到
+# 右下角之后，反例分数从 0.611 掉到 0.439 —— 见 `shortcuts.py` 里那段）。
+# 但它有个前提：**你得知道模板到底稳定落在哪**。
+#
+# 现在的模板是刚裁的（可能偏几像素），界面在真机上会不会小幅位移也还没量过。
+# 这时候设一个紧框，风险是"框差了 10px → 模板永远找不到"，
+# 而症状和"模板裁错了"一模一样，反而更难查。
+#
+# 所以顺序反过来：**先全图确认能认出来，再按实测数据收窄**。
+#
+# ## 什么时候加、加哪个
+#
+# 干跑时看界面上的「识图日志」（每次匹配的带框图 + 分数）：
+#
+# * 某个状态**分数不高但能认出来** -> 不用管；
+# * 某个状态**在别的界面上也超过** :data:`CONF`（误命中）-> 给**那个**状态加框；
+# * 想提速（全图找比框里找慢）-> 也可以加，但先把正确性确认了。
+#
+# 加框是**逐个状态**的事，不用一次全加。
+#
+# ## 加框要动**两个**地方（别只改一处）
+#
+# 状态识别和"点哪里"是两套：
+#
+# 1. **识别**：给那个 ``PageLeaf`` 写 ``roi=Region(...)``，并把它的
+#    ``ImageQuery`` 也加上同样的 ``region=``。
+#    两处都要：``locate`` 用页面级 roi 剪枝，而直接跑 Query 时用 query 自己的。
+# 2. **点击**：对应的步骤里 ``click_image(...)`` 加 ``region=``（或
+#    ``wait_for`` 的 ``ImageQuery`` 加 ``region=``）。
+#    每个步骤该加哪个框，见它自己 docstring 里的"提速时框这儿"那段。
+#
+# 想让这些框有个统一的家，就在这段下面定义 ``ROI_*`` 常量再引用它们 ——
+# 现在一个都没有，是因为**全图找时它们没有用处**。
 # --------------------------------------------------------------------------- #
-ROI_LOBBY = Region(1120, 380, 620, 500)
-"""首页：「竞技」卡那一块。"""
-
-ROI_JJ_BUTTON = Region(2180, 800, 320, 200)
-"""竞技场：右侧那个按钮（创建队伍 / 添加伙伴）。
-
-三个阶段共用它 —— 它们只有按钮文字不同，位置一模一样。
-"""
-
-ROI_JJ_START = Region(1880, 1120, 480, 180)
-"""竞技场：右下「开始匹配」（比上面那个低一截、靠左一点）。"""
-
-ROI_SELECT_CONFIRM = Region(1080, 700, 480, 180)
-"""选将：「确定」按钮（灰 / 金两态，位置同一个）。"""
-
-ROI_FIGHT_HAND = Region(920, 540, 440, 200)
-"""战斗：换牌弹窗里那行字。"""
-
-ROI_FIGHT_DONE = Region(1150, 1200, 360, 170)
-"""战斗：结算页底部的「确认」。"""
-
-ROI_FIGHT_MENU = Region(2360, 40, 160, 140)
-"""战斗：右上角那个金色圆结（展开菜单的入口）。"""
-
-ROI_FIGHT_SURRENDER = Region(2360, 260, 160, 140)
-"""战斗：展开菜单里的「投降」。"""
-
-ROI_FIGHT_CONFIRM = Region(960, 860, 340, 140)
-"""战斗：投降弹窗里的「确认」。"""
-
-ROI_TIP = Region(1000, 780, 420, 220)
-"""tip 弹窗的控制区（复选框 + 确定按钮）。
-
-不认图，但要用它判断"这个弹窗到底在不在"（见步骤里的做法）。
-"""
 
 # --------------------------------------------------------------------------- #
 # 固定坐标（客户区坐标）
@@ -232,8 +232,7 @@ FEATURE_TREE = PageGroup(
             LOBBY,
             name="首页",
             min_stable_frames=2,  # 首页那排卡有滑入动画，等它停稳
-            roi=ROI_LOBBY,
-            queries=(ImageQuery(T_LOBBY, region=ROI_LOBBY, confidence=CONF),),
+            queries=(ImageQuery(T_LOBBY, confidence=CONF),),
             description="首页：「竞技」卡（熊猫头）",
         ),
         PageGroup(
@@ -241,36 +240,22 @@ FEATURE_TREE = PageGroup(
             name="竞技场",
             description="竞技场：组队三个阶段共用这个界面",
             children=(
-                # ⚠️ 这个分类节点**不带 roi**，因为三个叶子在**不同位置**：
-                # 前两个在右侧按钮区、第三个在右下角那块。
-                # 分类节点的 roi 会被整棵子树继承（子框必须在父框内），
-                # 带一个框就会把另外两个挡住 —— 装配期那条 StateError 正是
-                # 为这种情况写的。三个叶子各自声明自己的 roi。
                 PageLeaf(
                     "jj/before_create",
                     name="竞技场 · 建队前",
-                    roi=ROI_JJ_BUTTON,
-                    queries=(
-                        ImageQuery(T_BEFORE_CREATE, region=ROI_JJ_BUTTON, confidence=CONF),
-                    ),
+                    queries=(ImageQuery(T_BEFORE_CREATE, confidence=CONF),),
                     description="右下角是「创建队伍」",
                 ),
                 PageLeaf(
                     "jj/after_create",
                     name="竞技场 · 建队后",
-                    roi=ROI_JJ_BUTTON,
-                    queries=(
-                        ImageQuery(T_AFTER_CREATE, region=ROI_JJ_BUTTON, confidence=CONF),
-                    ),
+                    queries=(ImageQuery(T_AFTER_CREATE, confidence=CONF),),
                     description="右下角是「添加伙伴」",
                 ),
                 PageLeaf(
                     "jj/after_add",
                     name="竞技场 · 加完伙伴",
-                    roi=ROI_JJ_START,
-                    queries=(
-                        ImageQuery(T_AFTER_ADD, region=ROI_JJ_START, confidence=CONF),
-                    ),
+                    queries=(ImageQuery(T_AFTER_ADD, confidence=CONF),),
                     description="右下角是「开始匹配」",
                 ),
             ),
@@ -278,7 +263,6 @@ FEATURE_TREE = PageGroup(
         PageGroup(
             "select",
             name="选将",
-            roi=ROI_SELECT_CONFIRM,
             description="选将界面：「确定」灰 / 金两态",
             children=(
                 PageLeaf(
@@ -303,14 +287,12 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "fight/hand",
                     name="战斗 · 换牌",
-                    roi=ROI_FIGHT_HAND,
                     queries=(ImageQuery(T_FIGHT_HAND, confidence=CONF),),
                     description="「是否需要更换初始手牌？」（每局开头）",
                 ),
                 PageLeaf(
                     "fight/done",
                     name="战斗 · 结算",
-                    roi=ROI_FIGHT_DONE,
                     queries=(ImageQuery(T_FIGHT_DONE, confidence=CONF),),
                     description="结算页的「确认」",
                 ),
@@ -320,8 +302,7 @@ FEATURE_TREE = PageGroup(
             "over",
             name="刷完了",
             terminal=True,
-            roi=ROI_LOBBY,
-            queries=(ImageQuery(T_LOBBY, region=ROI_LOBBY, confidence=CONF),),
+            queries=(ImageQuery(T_LOBBY, confidence=CONF),),
             description=(
                 "局数刷够了，流程到此结束。"
                 "它的识别特征**故意和首页一样**（还是那张竞技卡）—— 因为点完"

@@ -26,13 +26,7 @@ from typing import TYPE_CHECKING, Any
 from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult
 
-from ..pages import (
-    CONF,
-    ROI_SELECT_CONFIRM,
-    SELECT_FIRST_CARD,
-    T_CLICK_SELECT_FIRST,
-    T_SELECT_PICKED,
-)
+from ..pages import CONF, T_CLICK_SELECT_FIRST, T_SELECT_PICKED
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -52,13 +46,9 @@ def pick_general(ctx: RunContext) -> ActionResult[Any]:
     点完卡之后「确定」会变金 —— 那是**下一个状态**（``select/picked``），
     所以这里除了作废帧不做别的：状态机下一轮自己会认出来。
     """
-    return click_image(
-        ctx,
-        T_CLICK_SELECT_FIRST,
-        region=SELECT_FIRST_CARD,
-        confidence=CONF,
-        settle=PICK_SETTLE,
-    )
+    # 全图找。提速时加 region= —— 第 1 张卡在选将界面的**左起第一张**
+    # （客户区约 x 190~420, y 300~660）。
+    return click_image(ctx, T_CLICK_SELECT_FIRST, confidence=CONF, settle=PICK_SETTLE)
 
 
 def confirm_general(ctx: RunContext) -> ActionResult[Any]:
@@ -69,10 +59,6 @@ def confirm_general(ctx: RunContext) -> ActionResult[Any]:
     （代价：改状态识别就会动到这个点击目标 —— 但换按钮样子的概率极低，
     而少维护一张图是实实在在的收益。）
     """
-    return click_image(
-        ctx,
-        T_SELECT_PICKED,
-        region=ROI_SELECT_CONFIRM,
-        confidence=CONF,
-        settle=CONFIRM_SETTLE,
-    )
+    # 全图找。提速时加 region= —— 确定按钮在**屏幕中间**
+    # （客户区约 x 1120~1500, y 750~825）。
+    return click_image(ctx, T_SELECT_PICKED, confidence=CONF, settle=CONFIRM_SETTLE)

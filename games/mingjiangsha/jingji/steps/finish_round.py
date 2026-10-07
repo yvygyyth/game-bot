@@ -37,7 +37,6 @@ from ..pages import (
     CONF,
     FIGHT_BLANK,
     FIGHT_NEXT_SETTLE,
-    ROI_FIGHT_DONE,
     T_CLICK_FIGHT_NEXT,
     T_FIGHT_DONE,
     WAIT_FIGHT,
@@ -77,12 +76,10 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
 
     # ---- 3. 点结算页的「确认」（复用状态锚点那张模板）----
+    # 全图找。提速时加 region= —— 结算页的「确认」在**底部中间**
+    # （客户区约 x 1200~1445, y 1250~1315）。
     confirmed = click_image(
-        ctx,
-        T_FIGHT_DONE,
-        region=ROI_FIGHT_DONE,
-        confidence=CONF,
-        settle=FIGHT_NEXT_SETTLE,
+        ctx, T_FIGHT_DONE, confidence=CONF, settle=FIGHT_NEXT_SETTLE
     )
     if not confirmed.ok:
         return confirmed

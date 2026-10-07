@@ -329,7 +329,7 @@ class RecognitionRecorder:
         self,
         *,
         directory: Path | None = None,
-        keep: int = 20,
+        keep: int = 200,
         history: int = 300,
         on_record: Callable[[MatchRecord], None] | None = None,
     ) -> None:
