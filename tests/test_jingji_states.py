@@ -87,13 +87,13 @@ CASES: tuple[tuple[str, str], ...] = (
 #: 这份表没跟上，于是测试找不到文件）。
 TEMPLATE_OF: dict[str, str] = {
     "lobby": "lobby/lobby.png",
-    "jj/before_create": "jj/before_create/before_create.png",
-    "jj/after_create": "jj/after_create/after_create.png",
-    "jj/after_add": "jj/after_add/after_add.png",
-    "select/idle": "select/idle/idle.png",
-    "select/picked": "select/picked/picked.png",
-    "fight/hand": "fight/hand/hand.png",
-    "fight/done": "fight/done/done.png",
+    "jj/before_create": "jj/before_create.png",
+    "jj/after_create": "jj/after_create.png",
+    "jj/after_add": "jj/after_add.png",
+    "select/idle": "select/idle.png",
+    "select/picked": "select/picked.png",
+    "fight/hand": "fight/hand.png",
+    "fight/done": "fight/done.png",
 }
 
 

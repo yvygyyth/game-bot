@@ -54,7 +54,7 @@ def pick_general(ctx: RunContext) -> ActionResult[Any]:
 def confirm_general(ctx: RunContext) -> ActionResult[Any]:
     """选将 · 已选：点「确定」进战斗。
 
-    点的目标复用**状态锚点**那张模板（``select/picked/picked.png`` = 金色确定按钮）：
+    点的目标复用**状态锚点**那张模板（``select/picked.png`` = 金色确定按钮）：
     它就是屏幕中间那个按钮，位置没有歧义，没必要为"点它"再单独裁一张图。
     （代价：改状态识别就会动到这个点击目标 —— 但换按钮样子的概率极低，
     而少维护一张图是实实在在的收益。）

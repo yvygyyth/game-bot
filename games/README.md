@@ -47,7 +47,7 @@ games/
 
 ```python
 # games/<游戏>/<功能>/steps/advance_team.py
-T_CREATE_TEAM = "jj/before_create/create_team.png"   # 这个步骤用的模板
+T_CREATE_TEAM = "jj/create_team.png"                 # 这个步骤用的模板
 TEAM_ROI = Region(1400, 630, 470, 360)               # 它的搜索范围
 CONF_BUTTON = 0.85                                   # 它的阈值
 
@@ -55,8 +55,9 @@ def create_team(ctx) -> ActionResult:                # 它的逻辑（**就是�
     ...
 ```
 
-> 模板名里的层级 = **状态路径**（见下面「模板怎么分目录」那一节）。
-> 步骤专用的模板也可以放在自己状态目录下，不必都塞 `clicks/`。
+> 模板名里的第一段是**父状态目录**（见下面「模板怎么分目录」那一节）。
+> 步骤专用、又不是状态锚点的图，放它所在的父状态目录下就行，
+> 不必都塞 `clicks/` —— `clicks/` 是留给"不对应任何状态"的点击目标的。
 
 `steps/__init__.py` **只做转发**（`from .advance_team import create_team`），
 不要在那里写逻辑 —— 这样 `from .steps import create_team` 照常能用，
@@ -414,30 +415,34 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 | 问题 | 答案由什么决定 |
 |---|---|
 | 放**功能级**还是**游戏级**？ | 谁声明用它 —— 一个功能专属就放功能级 |
-| 子目录叫什么？ | 这张图是**哪个状态的锚点**（目录层级 = 状态路径） |
+| 子目录叫什么？ | 这张图的**父状态**（状态树里的分组节点） |
 
-所以竞技场是这样（**目录层级和 `pages.py` 里那棵状态树一一对应**）：
+所以竞技场是这样（**目录 = 分组节点，文件 = 叶子**）：
 
 ```
 games/mingjiangsha/jingji/templates/
-├── lobby/lobby.png                     首页
-├── jj/before_create/before_create.png  jj/before_create
-├── jj/after_create/after_create.png    jj/after_create
-├── jj/after_add/after_add.png          jj/after_add
-├── select/idle/idle.png                select/idle
-├── select/picked/picked.png            select/picked
-├── fight/hand/hand.png                 fight/hand
-├── fight/done/done.png                 fight/done
-├── clicks/…                            只用来**点**、不对应状态
-└── rawMaterial/                        原始截图（供重裁）
+├── lobby/lobby.png          首页（顶层叶子，自己一组）
+├── jj/before_create.png     jj 下三个叶子
+├── jj/after_create.png
+├── jj/after_add.png
+├── select/idle.png          select 下两个叶子
+├── select/picked.png
+├── fight/hand.png           fight 下两个叶子
+├── fight/done.png
+├── clicks/…                 只用来**点**、不对应状态
+└── rawMaterial/             原始截图（供重裁）
 ```
 
-**为什么按状态分，而不是按"锚点/点击"分**：代码里确实是按锚点/点击分组的，
-但**排错时的思路不是那个**。出问题问的是"`select/picked` 认不出来"，
-不是"第 4 张锚点图不对" —— 按状态分之后，
-**检索路径就是排错路径**：直接进同名目录看那张图。
+**按父状态分，不按叶子分。** 试过给每个叶子单独建目录
+（`select/picked/picked.png`）—— 那层目录名和文件名永远一样，
+只是把路径写长了一遍，反而更碎。父状态这一层就够用了：
+进 `select/` 看到那两张「确定」按钮，进 `fight/` 看到那两张战斗快照。
 
-**文件名不带前缀。** 目录已经表达了，`select/picked/select__picked.png`
+**按状态分而不是按"锚点/点击"分**：代码里确实是按锚点/点击分组的，
+但**排错时的思路不是那个**。出问题问的是"`select/picked` 认不出来"，
+不是"第 4 张锚点图不对" —— 按状态分之后，进对目录就能一眼看全候选。
+
+**文件名不带前缀。** 目录已经表达了，`select/select__picked.png`
 是重复的。
 
 ⚠️ **模板路径这一个真相有四份写法**，改目录要一起改：
@@ -451,7 +456,7 @@ games/mingjiangsha/jingji/templates/
 "哪个常量指向的文件没了"和"哪个图没人引用"（两个方向都查）。
 
 **目录层级要跟着模板名走。** 模板名是相对模板根的路径，所以
-`"select/picked/picked.png"` 会落到 `<根>/select/picked/picked.png`。
+`"select/picked.png"` 会落到 `<根>/select/picked.png`。
 名字里带层级、磁盘上却没建那个子目录，报的是"找不到图"而不是"目录不存在"。
 
 **改了目录就要改模板名，反之亦然。** 两处对不上时唯一的症状就是

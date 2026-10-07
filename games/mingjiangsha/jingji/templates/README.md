@@ -1,32 +1,35 @@
 # 竞技场脚本 —— 模板
 
-**这里按状态分目录**，跟 `pages.py` 里那棵状态树走：
+**按父状态分目录**，跟 `pages.py` 里那棵状态树的**分组节点**走：
 
 ```
-lobby/lobby.png                       首页（「竞技」卡上的熊猫头）
-jj/before_create/before_create.png    竞技场 · 建队前（右下角「创建队伍」）
-jj/after_create/after_create.png      竞技场 · 建队后（右下角「添加伙伴」）
-jj/after_add/after_add.png            竞技场 · 加完伙伴（右下角「开始匹配」）
-select/idle/idle.png                  选将 · 未选（「确定」是灰的）
-select/picked/picked.png              选将 · 已选（「确定」是金的）
-fight/hand/hand.png                   战斗 · 换牌（「是否需要更换初始手牌？」）
-fight/done/done.png                   战斗 · 结算（结算页「确认」）
+lobby/lobby.png        首页（「竞技」卡上的熊猫头）
+jj/before_create.png   竞技场 · 建队前（右下角「创建队伍」）
+jj/after_create.png    竞技场 · 建队后（右下角「添加伙伴」）
+jj/after_add.png       竞技场 · 加完伙伴（右下角「开始匹配」）
+select/idle.png        选将 · 未选（「确定」灰的）
+select/picked.png      选将 · 已选（「确定」金的）
+fight/hand.png         战斗 · 换牌（「是否需要更换初始手牌？」）
+fight/done.png         战斗 · 结算（结算页「确认」）
 
-clicks/select_first.png               ← 只用来**点**，不对应状态
+clicks/select_first.png     ← 只用来**点**，不对应状态
 clicks/fight_menu.png
 clicks/fight_surrender.png
 clicks/fight_confirm.png
 clicks/fight_next.png
 
-rawMaterial/                          ← 你的原始截图，别动
+rawMaterial/                ← 你的原始截图，别动
 ```
 
-## 为什么这样分
+## 为什么这样分（以及为什么不更细）
 
-**"某个状态认不出来" → 直接进同名目录看那张图。检索路径就是排错路径。**
+**按父状态分**：`select/` 里就是那两张「确定」按钮，`fight/` 里就是那两张
+战斗快照 —— 找图时进对目录，一眼看到全部候选。
 
-文件名里不再带 `jingji__` / `select__` / `fight__` 前缀 —— 目录已经表达了，
-再写一遍是重复（`select/picked/select__picked.png`）。
+**不给每个叶子单独建目录**：试过 `select/picked/picked.png` 那种，
+那层目录名和文件名永远一样，只是把路径写长了一遍，反而更碎。
+
+**文件名不带 `jingji__` / `select__` / `fight__` 前缀**：目录已经表达了。
 
 ⚠️ **改模板路径要同步改四处**（同一个真相的四份写法）：
 
@@ -34,6 +37,9 @@ rawMaterial/                          ← 你的原始截图，别动
 2. `logs/tools/build_templates.py` 的 `CROPS` 键
 3. `tests/test_jingji_states.py` 的 `TEMPLATE_OF`
 4. 本文档
+
+改完跑 `uv run python logs/tools/check_template_paths.py` ——
+它两个方向都查：**常量指向的文件在不在** + **有没有图没人引用**。
 
 ---
 
@@ -63,13 +69,13 @@ rawMaterial/                          ← 你的原始截图，别动
 | 模板 | 从哪张截图裁 | 裁什么 | 裁剪框（客户区） | 尺寸 |
 |---|---|---|---|---|
 | `lobby/lobby.png` | `home.png` | 「竞技」卡里的**熊猫头** | 你自己定的（已裁好 ✓ 0.987） | 268×274 |
-| `jj/before_create/before_create.png` | `jingji1.png` | 「**创建队伍**」按钮本体 | **(2223, 836, 2443, 926)** | 220×90 |
-| `jj/after_create/after_create.png` | `jingji2.png` | 「**添加伙伴**」按钮本体 | **(2223, 837, 2443, 926)** | 220×89 |
-| `jj/after_add/after_add.png` | `jingji3.png` | 「**开始匹配**」按钮本体 | **(1930, 1155, 2290, 1255)** | 360×100 |
-| `select/idle/idle.png` | `select1.png` | 「确定」按钮（**灰的**） | **(1085, 715, 1480, 810)** | 395×95 |
-| `select/picked/picked.png` | `select2.png` | 「确定」按钮（**金的**） | **(1078, 707, 1481, 813)** | 403×106 |
-| `fight/hand/hand.png` | `zhandou1.png` | 弹窗里「**是否需要更换初始手牌？**」那行字 | 你自己定（现 440×177 偏大，可只留文字那一行） | ~380×50 |
-| `fight/done/done.png` | `zhandou7.png` | 结算页「**确认**」按钮本体 | **(1147, 1205, 1452, 1304)** | 305×99 |
+| `jj/before_create.png` | `jingji1.png` | 「**创建队伍**」按钮本体 | **(2223, 836, 2443, 926)** | 220×90 |
+| `jj/after_create.png` | `jingji2.png` | 「**添加伙伴**」按钮本体 | **(2223, 837, 2443, 926)** | 220×89 |
+| `jj/after_add.png` | `jingji3.png` | 「**开始匹配**」按钮本体 | **(1930, 1155, 2290, 1255)** | 360×100 |
+| `select/idle.png` | `select1.png` | 「确定」按钮（**灰的**） | **(1085, 715, 1480, 810)** | 395×95 |
+| `select/picked.png` | `select2.png` | 「确定」按钮（**金的**） | **(1078, 707, 1481, 813)** | 403×106 |
+| `fight/hand.png` | `zhandou1.png` | 弹窗里「**是否需要更换初始手牌？**」那行字 | 你自己定（现 440×177 偏大，可只留文字那一行） | ~380×50 |
+| `fight/done.png` | `zhandou7.png` | 结算页「**确认**」按钮本体 | **(1147, 1205, 1452, 1304)** | 305×99 |
 
 > 上面那几个精确框是**从截图里量出来的**（找金色像素的包围盒，见
 > `logs/tools/measure_buttons.py`），不是估的。
@@ -96,7 +102,7 @@ rawMaterial/                          ← 你的原始截图，别动
 
 | 点哪 | 怎么点 | 为什么不用模板 |
 |---|---|---|
-| 首页「竞技」入口（熊猫头） | **固定坐标** `JINGJI_ENTRY` | 鼠标不在卡上时熊猫头**不完整** —— 找图会失败，而那个坐标本来就点得中（玩家说的）。原有一张 `clicks/jingji_entry.png` 就是因此没人读，已删 |
+| 首页「竞技」入口（熊猫头） | **固定坐标** `JINGJI_ENTRY` | 鼠标不在卡上时熊猫头**不完整** —— 找图会失败，而那个坐标本来就点得中（玩家说的） |
 | 「点击空白区域到下一步」（zhandou5） | **固定坐标** `FIGHT_BLANK` | 它本来就叫"空白区域"，那里没有可认的东西 |
 
 > 固定坐标都在 `pages.py` 里，带注释说明为什么不用模板。
