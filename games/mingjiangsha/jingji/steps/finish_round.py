@@ -4,9 +4,24 @@
 
 | 序 | 对应图 | 点什么 | 怎么定位置 |
 |---|---|---|---|
-| 1 | `zhandou5` | 「点击空白区域到下一步」 | **固定坐标** |
+| 1 | `zhandou5` | 「点击空白区域到下一步」 | 找 ``T_FIGHT_SPACE``（**提示文字本身**） |
 | 2 | `zhandou6` | 「下一步」 | 模板 ``T_CLICK_FIGHT_NEXT`` |
 | 3 | `zhandou7` | 「确认」 | 找 ``T_FIGHT_DONE``（就是状态锚点那张） |
+
+## 第 1 步为什么从固定坐标改成找图
+
+原来点的是固定坐标 ``FIGHT_BLANK``，理由写的是"那儿本来就没有可认的东西" ——
+**那条理由是错的**：那行提示文字「点击空白区域到下一步」本身就是可认的
+（``fight/space.png``），认出来点它的中心就行。
+
+而且找图**更准也更稳**：
+
+* 那行字在原始像素里约 `x 1088~1480 / y 1205~1245`，客户区中心 ≈ `(1281, 1202)`；
+* 原来的固定坐标 `FIGHT_BLANK = (1341, 1226)` 换算过来是 `(1341, 1203)` ——
+  **偏右 60px**，落在字的右边缘附近（勉强点中，但不是中心）；
+* 结算面板是**滑入**的，固定坐标假定它已经到位；找图则等它真的出现。
+
+于是这一步和另外两步一样，变成"等它出现再点"。
 
 ## 循环次数为什么在这里 +1
 
@@ -35,10 +50,10 @@ from gamebot.types import ActionResult
 from ..form import ROUNDS_PARAM
 from ..pages import (
     CONF,
-    FIGHT_BLANK,
     FIGHT_NEXT_SETTLE,
     T_CLICK_FIGHT_NEXT,
     T_FIGHT_DONE,
+    T_FIGHT_SPACE,
     WAIT_FIGHT,
 )
 
@@ -56,12 +71,13 @@ ROUNDS_KEY = "fight.rounds"
 
 def finish_round(ctx: RunContext) -> ActionResult[Any]:
     """结算页：点空白区 → 下一步 → 确认，然后记一局。"""
-    # ---- 1. 点空白区域到下一步（固定坐标，见 pages.FIGHT_BLANK）----
-    blank = actions.click_logic_point(ctx.session, FIGHT_BLANK)
+    # ---- 1. 等「点击空白区域到下一步」出现，点那行字 ----
+    # 结算面板是**滑入**的，所以是"等它出现"而不是"假定它已经在"。
+    # 找图命中的是**中心点**（matcher 返回 top_left + 模板一半），
+    # 所以直接点它就是点在那行字上。
+    blank = click_image(ctx, T_FIGHT_SPACE, confidence=CONF, settle=FIGHT_NEXT_SETTLE)
     if not blank.ok:
         return blank
-    ctx.invalidate_frame()
-    ctx.sleep(FIGHT_NEXT_SETTLE)
 
     # ---- 2. 等「下一步」出现，点它 ----
     next_query = ImageQuery(T_CLICK_FIGHT_NEXT, confidence=CONF)
