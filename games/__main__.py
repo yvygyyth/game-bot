@@ -30,6 +30,7 @@ if str(_ROOT) not in sys.path:
 from gamebot.exceptions import GameBotError  # noqa: E402
 from games import get_script, list_scripts  # noqa: E402
 from games._spec import discovery_errors  # noqa: E402
+from games.where import cmd_where, register_where  # noqa: E402
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -327,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    register_where(sub)
+
     return parser
 
 
@@ -335,6 +338,7 @@ _HANDLERS = {
     "describe": cmd_describe,
     "check": cmd_check,
     "run": cmd_run,
+    "where": cmd_where,
 }
 
 

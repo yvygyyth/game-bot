@@ -318,6 +318,9 @@ class WindowsInputBackend:
         给 0 时部分游戏会漏收按键。
     :param offset_provider: 返回**捕获区在屏幕上的原点**的可调用对象
         （通常是 ``WindowsScreenBackend.source_region``）。见下面"坐标系"。
+    :param coordinate_space: ``"source"``（默认）或 ``"screen"`` —— 本后端收到的
+        点属于哪一套坐标。``"screen"`` 时先减掉捕获区原点再走同一条路。
+        见下面"两套坐标"。
 
     ## 坐标系（这里曾经有个真 bug）
 
@@ -334,6 +337,21 @@ class WindowsInputBackend:
 
     偏移在**每次调用时**现取，不在构造时算死：窗口会被拖动、脚本跑着跑着
     用户可能挪一下窗口，算死就会悄悄错位。
+
+    ## 两套坐标，只差原点在哪
+
+    | ``coordinate_space`` | 0 起点 | 谁产出的 |
+    |---|---|---|
+    | ``"source"``（默认） | 捕获区（客户区）左上角 | ``Frame`` / ``find_image`` / 模板 / roi |
+    | ``"screen"`` | **显示器**左上角 | 桌面级取点工具，人手量出来的 |
+
+    两者只差一个常量：捕获区在屏幕上的原点（本机实测是 ``(1, 31)``）。
+
+        source (1365, 585) + (1, 31) = screen (1366, 616)
+
+    ``"screen"`` 时这里**先减掉那个原点**，之后就完全走 source 那条路 ——
+    所以换算只有**一层**，动作层、步骤、模板都不用知道这个开关存在。
+    ``"source"`` 时这一层是恒等，一个减法都不做。
     """
 
     name = "windows-input"
@@ -344,11 +362,17 @@ class WindowsInputBackend:
         engine: str = "direct",
         key_hold: float = 0.02,
         offset_provider: Any = None,
+        coordinate_space: str = "source",
     ) -> None:
         if sys.platform != "win32":
             raise BackendUnavailable("windows 后端只能在 Windows 上使用")
+        if coordinate_space not in ("source", "screen"):
+            raise BackendError(
+                f"coordinate_space 只能是 'source' 或 'screen'，收到 {coordinate_space!r}"
+            )
         self.engine = engine
         self.key_hold = key_hold
+        self.coordinate_space = coordinate_space
         self._impl: Any = None
         self._offset_provider = offset_provider
 
@@ -370,8 +394,22 @@ class WindowsInputBackend:
             return (0, 0)
 
     def _absolute(self, point: Point) -> tuple[int, int]:
-        """源坐标 -> 绝对屏幕坐标。所有涉及坐标的调用都必须过这一道。"""
+        """本后端收到的点 -> 绝对屏幕坐标。**所有涉及坐标的调用都过这一道。**
+
+        两层，但只有一个开关：
+
+        1. ``coordinate_space == "screen"`` 时，先减掉捕获区原点 ——
+           把"屏幕坐标"拉回"捕获区相对坐标"。``"source"`` 时这一步是恒等。
+        2. 再加回捕获区原点，得到绝对屏幕坐标。
+
+        所以 ``"screen"`` 是 ``+原 点 - 原点``（净效果 = 原样使用），
+        ``"source"`` 是 ``+原点``。两步都在同一个函数里，
+        不会有"哪一层忘了换算"的机会。
+        """
         dx, dy = self._offset()
+        if self.coordinate_space == "screen":
+            # 屏幕坐标 -> 捕获区相对坐标
+            point = Point(point.x - dx, point.y - dy)
         return point.x + dx, point.y + dy
 
     def _load(self) -> Any:
@@ -525,6 +563,7 @@ def build_windows_backends(
     monitor_index: int = 1,
     client_area_only: bool = True,
     input_engine: str = "direct",
+    coordinate_space: str = "source",
     **_ignored: Any,
 ) -> BackendBundle:
     """装配 Windows 三件套。
@@ -533,6 +572,9 @@ def build_windows_backends(
     同样的原点偏移**，否则每次点击都偏一个窗口位置（见
     :class:`WindowsInputBackend` 的坐标系说明）。两者用同一个来源，
     从构造上保证它们不可能不一致。
+
+    ``coordinate_space`` 一路传到输入后端：``"screen"`` 时它会先减掉这个
+    同一个原点，于是"人手量的屏幕坐标"和"模板用的捕获区坐标"能对上。
     """
     screen = WindowsScreenBackend(
         window_title=window_title,
@@ -541,6 +583,10 @@ def build_windows_backends(
     )
     return BackendBundle(
         screen=screen,
-        input=WindowsInputBackend(engine=input_engine, offset_provider=screen.source_region),
+        input=WindowsInputBackend(
+            engine=input_engine,
+            offset_provider=screen.source_region,
+            coordinate_space=coordinate_space,
+        ),
         window=WindowsWindowBackend(client_area_only=client_area_only),
     )

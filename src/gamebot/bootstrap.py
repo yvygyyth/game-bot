@@ -169,6 +169,9 @@ def build_session_from_config(
             "monitor_index": screen.monitor_index,
             "client_area_only": screen.client_area_only,
             "input_engine": screen.input_engine,
+            # 脚本里写的坐标是哪一套（"source" = 捕获区相对、"screen" = 屏幕绝对）。
+            # 只有 Windows 后端有这个概念；android/fake 的坐标本来就是设备/画布相对。
+            "coordinate_space": screen.coordinate_space,
         }
     elif screen.backend is BackendKind.ANDROID:
         kwargs = {
