@@ -682,6 +682,15 @@ class MainWindow(QMainWindow):
 
         写进**日志面板**（而不是弹对话框打断启动）：日志就在界面上，
         第一眼能看到，而且事后回看还在。
+
+        ## 后来也弹框了（两处都写）
+
+        启动器从 PowerShell 换成 VBS 之后，**没有控制台可以打这段字** ——
+        那就该由应用自己说。而且这件事的代价太大（后面所有点击都白费），
+        只靠用户自己去翻日志不够。
+
+        弹框是**非阻塞**的（``show()`` 不是 ``exec()``）：不挡启动，
+        用户点掉就继续，但他已经知道了。
         """
         if not window_title:
             return
@@ -690,6 +699,23 @@ class MainWindow(QMainWindow):
             return
         for line in warning.splitlines():
             log.error("%s", line.strip())
+
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle("权限不够 —— 输入发不进游戏")
+        box.setText("这一轮点击不会有任何效果")
+        box.setInformativeText(
+            "Windows 的 UIPI 规定：发送方进程的完整性级别必须 >= 目标窗口的级别。\n\n"
+            "本进程级别不够，所以：鼠标会移到正确位置，但点击不生效；"
+            "失焦后快捷键也收不到。而且不报任何错。\n\n"
+            "怎么办：关掉本界面，用桌面上的「gamebot 界面（管理员）」重新打开"
+            "（或在管理员终端里跑）。\n\n"
+            "详细说明见 docs/getting-started.md。"
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.show()
 
     @Slot()
     def _show_shortcuts(self) -> None:

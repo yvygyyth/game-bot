@@ -4,7 +4,7 @@
 
 第一次装完，日常只需要记住两条：
 
-* **开界面** → 双击桌面的 `gamebot 界面（管理员）`
+* **开界面** → 双击 `gamebot.exe`（或桌面快捷方式）
 * **跑真机脚本** → `.\dev.ps1`（管理员开发终端），然后 `python -m games run ...`
 
 ---
@@ -103,24 +103,47 @@ uv run python -c "import numpy, cv2, mss, PIL, yaml, pynput, win32gui, pydirecti
 
 ### 2.1 图形界面（日常用这个）
 
-**双击桌面的 `gamebot 界面（管理员）`** → 点一下 UAC 的"是" → 界面出来。
+**双击项目根目录的 `gamebot.exe`**（或桌面的 `gamebot 界面` 快捷方式）
+→ 系统弹 UAC → 点"是" → 界面出来。
 
-没有命令行、没有控制台窗口（用 `.venv\Scripts\pythonw.exe` 启动，
-它是同一个解释器的**无控制台版本**）。
+**没有黑窗口。** exe 是 PyInstaller 打的，里面嵌了两样东西：
 
-不想用快捷方式的话：
+* `--windowed` → **GUI 子系统**（不分配控制台窗口）；
+* `--uac-admin` → **UAC 清单**（双击自动请求提权）。
 
-| 方式 | 操作 |
-|---|---|
-| 资源管理器双击 | `D:\WWW\python\game-bot\启动界面.ps1` |
-| 命令行 | `uv run python -m gamebot ui`（**要管理员终端**） |
+所以一个文件就够了 —— 不需要 `.bat` / `.ps1` / `.vbs` 这些中间层。
 
-带参数：
+> **为什么之前那些启动器都会闪黑窗口**：它们要靠 `powershell.exe` 或
+> `cmd.exe` 启动，而那两个是**控制台子系统**的程序，一运行就分配控制台。
+> `-WindowStyle Hidden` 发得太晚，盖不住那一瞬。
+> （用 `uv run python logs/tools/check_subsystem.py` 能直接看到哪些 exe
+> 是"控制台"子系统。）
+>
+> **这和 Qt 无关** —— Qt 是纯 GUI 库，用 GUI 子系统的解释器启动，
+> 一个控制台都不会有。
+
+#### 怎么重新打包
+
+改了代码之后要重新打（exe 里带的是**代码**，不是模板）：
+
+```powershell
+uv run python packaging/build_exe.py --verify
+```
+
+产出 `dist/gamebot/gamebot.exe`，并在项目根放一份副本（双击那份用 ——
+这样工作目录正好是项目根，配置里的相对路径都能找到）。
+
+**模板、脚本定义、日志都不在 exe 里** —— 它们留在项目目录里，
+改完立刻生效，**不用重新打包**。
+
+#### 不带 exe 也能开
 
 ```powershell
 uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
 uv run python -m gamebot ui --snapshot logs/ui.png         # 不开窗口，渲一张截图就退（自检用）
 ```
+
+（这条要在**管理员终端**里跑，理由见上面 §0。）
 
 日志写在 **`logs/ui.log`**（界面自己也有一份日志面板）。
 
@@ -236,7 +259,6 @@ python -m games run mingjiangsha/jingji --dry-run --max-ticks 10
 | 界面起不来、`gamebot.exe` 被占用 | 界面还开着 | 关掉它再 `uv sync` |
 | `ModuleNotFoundError` | extras 没装齐 | 见 §1.2 那条警告（两个 extra 要一起给） |
 | 识别一直 `unknown` | 模板对不上 / 没站在预期界面 | 干跑看「识图日志」的带框图 + 分数 |
-| 双击 `.ps1` 一闪而过 | 报错看不见 | 从终端跑同一个脚本；`启动界面.ps1` 出错会弹窗 |
 | `uv run` 报 Python 版本 | 系统 Python < 3.11 | uv 会自己下 Python，别用系统的 `python` 直接跑 |
 
 ### 权限那段到底在说什么
@@ -251,7 +273,7 @@ python -m games run mingjiangsha/jingji --dry-run --max-ticks 10
 ```
 
 只要出现"权限不够"，**别去调坐标、别去重裁模板** —— 那些都是白费。
-用管理员身份重开（`.\dev.ps1` 或桌面那个快捷方式）。
+用管理员身份重开（双击 `gamebot.exe` —— 它内嵌的 UAC 清单会自己请求提权；或者走 `.\dev.ps1`）。
 
 > 顺带一句：低权限进程读到的"目标窗口级别"**可能偏低**（Windows 会隐藏提权
 > 进程的信息），所以"读出来相等"也不代表真的够。拿不准就直接管理员跑。
@@ -272,13 +294,14 @@ game-bot/
 │       ├── steps/          每个节点做什么
 │       └── templates/      模板图 + rawMaterial/ 原始截图 + README.md 裁剪说明
 ├── logs/
-│   ├── ui.log              界面日志（pythonw 启动时）
+│   ├── ui.log              界面日志（每次开界面都写）
 │   ├── screenshots/        抓屏、带框的识图记录（默认留 200 张）
 │   ├── journals/           每轮运行的结构化记录
 │   └── tools/              一次性工具与排查脚本（见那里的 README.md）
 ├── docs/          架构与专题文档
 ├── dev.ps1        管理员开发终端
-└── 启动界面.ps1   界面启动器（双击/快捷方式）
+├── gamebot.exe    打包好的界面（双击这个；改了代码要重新打包）
+└── packaging/     打包脚本（build_exe.py + 入口 entry.py）
 ```
 
 ---

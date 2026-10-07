@@ -38,8 +38,13 @@ uv sync --extra windows --extra ui
 
 ### 界面
 
-**双击桌面的 `gamebot 界面（管理员）`** → 点一下 UAC 的"是" → 界面出来。
-没有命令行、没有控制台窗口。
+**双击项目根目录的 `gamebot.exe`**（或桌面快捷方式）→ 系统弹 UAC → 点"是" → 界面出来。
+
+**没有黑窗口**：这个 exe 是 PyInstaller 打的，内嵌了 GUI 子系统声明
+（不分配控制台）和 UAC 清单（双击自动请求提权）。
+
+改了代码要重新打包：`uv run python packaging/build_exe.py --verify`。
+**模板 / 脚本定义 / 日志不在 exe 里**，改完立刻生效，不用重新打包。
 
 ### 开发
 

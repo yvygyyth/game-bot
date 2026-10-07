@@ -51,3 +51,8 @@ desktop.ini
 
 # 提交信息临时文件（用 git commit -F 时容易忘了删）
 .git-msg*
+# PyInstaller 打包产物（可重新生成：uv run python packaging/build_exe.py）
+/build/
+/dist/
+/gamebot.exe
+/packaging/*.spec

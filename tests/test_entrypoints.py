@@ -1,4 +1,4 @@
-"""开发/使用入口：``dev.ps1``、``启动界面.ps1``、``games doctor``。
+"""开发/使用入口：``dev.ps1``、打包好的 ``gamebot.exe``、``games doctor``。
 
 ## 为什么值得有测试
 
@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import ast
 import pathlib
-
-import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -126,53 +124,94 @@ class TestDevLauncher:
 
         用了它会抛 "You cannot call a method on a null-valued expression"，
         **参数全部丢掉** —— 进程起来了、什么都没做、立刻退出。
-        这个坑在 ``启动界面.ps1`` 里踩过，别在 ``dev.ps1`` 里再踩。
+        （这个坑在已经删掉的 ``启动界面.ps1`` 里踩过，别再踩。）
         """
-        for name in ("dev.ps1", "启动界面.ps1"):
-            assert ".ArgumentList" not in _code_lines(name), (
-                f"{name} 的**代码**里用了只存在于 PowerShell 7 的 ArgumentList"
-            )
+        assert ".ArgumentList" not in _code_lines("dev.ps1"), (
+            "dev.ps1 的**代码**里用了只存在于 PowerShell 7 的 ArgumentList"
+        )
 
 
 class TestGuiLauncher:
-    """``启动界面.ps1`` —— 双击一次就开，无控制台窗口，自动提权。"""
+    """打包成 exe —— **双击一个文件就能开，没有黑窗口**。
 
-    def test_it_exists(self):
-        assert (ROOT / "启动界面.ps1").is_file()
+    ## 为什么最后选了 exe
 
-    def test_it_uses_pythonw_not_python(self):
-        """``python.exe`` 是控制台程序 —— 双击会先弹一个黑窗口。
+    试过 `.bat` / `.ps1` / `.vbs` 三种启动器，都卡在同一件事上：**要提权，
+    而提权需要控制台子系统的程序当入口**（`powershell.exe` / `cmd.exe`），
+    那种程序一运行就分配控制台窗口 —— 双击必闪黑窗口。
+    `-WindowStyle Hidden` 发得太晚，盖不住那一瞬。
 
-        ``pythonw.exe`` 是同一个解释器的无控制台版本。
+    exe 一次解决两件事（PyInstaller 参数）：
+
+    * ``--windowed`` → **GUI 子系统**（不分配控制台）；
+    * ``--uac-admin`` → 嵌入 **UAC 清单**（双击自动请求提权）。
+
+    **和 Qt 无关** —— Qt 是纯 GUI 库，用 GUI 子系统的程序启动就没有控制台。
+
+    （这个做法来自同机器的 ``vision_workflow`` 项目，它的
+    ``scripts/build_exe.py`` 是这套参数的出处。）
+    """
+
+    def test_the_build_script_exists(self):
+        assert (ROOT / "packaging" / "build_exe.py").is_file()
+        assert (ROOT / "packaging" / "entry.py").is_file()
+
+    def test_it_builds_a_gui_subsystem_exe(self):
+        """``--windowed`` 是"没有黑窗口"的全部原因，不能删。"""
+        source = _source("packaging/build_exe.py")
+        assert '"--windowed"' in source or "'--windowed'" in source
+
+    def test_it_embeds_a_uac_manifest(self):
+        """``--uac-admin`` 是"双击自动提权"的全部原因，不能删。
+
+        游戏是提权运行的；级别不够时点击和快捷键**静默失效**。
         """
-        source = _source("启动界面.ps1")
-        assert "pythonw.exe" in source
+        source = _source("packaging/build_exe.py")
+        assert "--uac-admin" in source
 
-    def test_it_requests_elevation(self):
-        """游戏是提权运行的，不够就必须提权 —— 而且失败是静默的，
-        不能指望用户自己记得去右键。"""
-        source = _source("启动界面.ps1")
-        assert "Get-IntegrityLevel" in source
-        assert "RunAs" in source
+    def test_it_collects_the_packages_pyinstaller_misses(self):
+        """Qt 插件 / pynput 平台后端 / cv2 二进制 —— 自动分析经常漏。"""
+        source = _source("packaging/build_exe.py")
+        for package in ("PySide6", "pynput", "cv2"):
+            assert package in source, f"没有 collect-all {package}"
 
-    def test_it_does_not_redirect_output(self):
-        """**不要在这里做输出重定向。**
+    def test_it_declares_the_delayed_imports(self):
+        """这几个是延迟 import 的，静态分析看不到，必须 --hidden-import。"""
+        source = _source("packaging/build_exe.py")
+        for module in ("pynput.keyboard._win32", "win32gui", "pydirectinput"):
+            assert module in source, f"没有 hidden-import {module}"
 
-        ``Start-Process -RedirectStandardOutput`` 和 ``.NET Process.Start``
-        配 ``RedirectStandard*`` 都会**等到子进程退出**才返回 ——
-        对 GUI 就是永远不返回（实测卡 300 秒 / 45 秒），
-        留下一个看不见但永不退出的脚本进程。
+    def test_the_entry_anchors_the_working_directory(self):
+        """**双击 exe 时工作目录是 exe 所在目录**，而配置里的路径
+        （``config/``、``games/``、``logs/``、模板）全部相对项目根 ——
+        不锚定的话会报"配置文件不存在"。
 
-        日志改成应用自己写文件（``pythonw -m gamebot ui`` 写 ``logs/ui.log``）。
+        实测过：从 ``%TEMP%`` 启动入口脚本，日志照样写进项目根的
+        ``logs/ui.log``、快照也生成在项目根。
         """
-        code = _code_lines("启动界面.ps1")
-        assert "RedirectStandardOutput" not in code
-        assert "RedirectStandardError" not in code
+        source = _source("packaging/entry.py")
+        assert "chdir" in source
+        assert "pyproject.toml" in source, "找项目根要看标志文件"
+
+    def test_the_entry_defaults_to_the_ui(self):
+        """双击不带参数 = 开界面。"""
+        source = _source("packaging/entry.py")
+        assert 'or ["ui"]' in source
+
+    def test_it_does_not_use_powershell_or_cmd_launchers(self):
+        """**不许再引入控制台子系统的启动器。**
+
+        它们一定会闪黑窗口，而且我们已经有了不需要它们的方案。
+        """
+        for name in ("启动界面.ps1", "启动界面.vbs", "启动界面.bat", "启动界面.cmd"):
+            assert not (ROOT / name).exists(), (
+                f"{name} 又出现了 —— 控制台子系统的启动器会闪黑窗口，别用它"
+            )
 
     def test_ui_writes_its_own_log_file(self):
-        """上面那条的前提：界面自己写日志文件。"""
+        """GUI 子系统没有控制台，日志必须写文件 —— 否则出问题什么都看不到。"""
         source = _source("src/gamebot/__main__.py")
-        assert "logs/ui.log" in source or "ui.log" in source
+        assert "ui.log" in source
         assert "log_file" in source
 
 
@@ -201,25 +240,33 @@ class TestIntegrityModuleIsUsed:
 
 
 class TestWindowsPowerShellCompatibility:
-    """这两个脚本会在 **Windows PowerShell 5.1** 下跑（双击/快捷方式）。
+    """``dev.ps1`` 会在 **Windows PowerShell 5.1** 下跑。
 
     5.1 的 .NET 是 Framework，比 PowerShell 7 少一批 API。
     用错不会有明确报错，往往是"静默不生效" —— 所以在这里拦。
+
+    （界面那条链现在是 exe 了，不再经过 PowerShell。）
     """
 
-    @pytest.mark.parametrize("name", ["dev.ps1", "启动界面.ps1"])
-    def test_no_ps7_only_cmdlets(self, name: str):
-        code = _code_lines(name)
+    def test_no_ps7_only_cmdlets(self):
+        code = _code_lines("dev.ps1")
         # ``$PSCommandPath`` 在 5.1 有；这几个是 7 才稳的
         for banned in ("$PSNativeCommandUseErrorActionPreference", "ForEach-Object -Parallel"):
-            assert banned not in code, f"{name} 的代码里用了 PowerShell 7 专属的写法"
+            assert banned not in code, "dev.ps1 的代码里用了 PowerShell 7 专属的写法"
 
-    @pytest.mark.parametrize("name", ["dev.ps1", "启动界面.ps1"])
-    def test_files_are_utf8_with_bom_awareness(self, name: str):
-        """脚本里全是中文，**必须能按 UTF-8 解析**（不然双击就是一堆乱码）。
+    def test_files_are_utf8_with_bom_awareness(self):
+        """``dev.ps1`` 里全是中文，**必须能按 UTF-8 解析**（不然双击就是一堆乱码）。
 
-        这里只验证文件本身是合法 UTF-8 —— 编码在 Windows 上还有别的坑
-        （``.bat`` 的 GBK/chcp），所以那两个启动器刻意用 ``.ps1`` 而不是 ``.bat``。
+        编码在 Windows 上还有别的坑（``.bat`` 的 GBK/chcp）—— 那次踩过：
+        用 UTF-8 存的 `.bat` 里中文乱码，还把命令行解析错了，报
+        "'xxx' is not recognized as an internal or external command"。
+        所以启动器一律用 ``.ps1`` 或 exe，不用 ``.bat``。
         """
-        data = (ROOT / name).read_bytes()
-        data.decode("utf-8")  # 抛异常就是编码坏了
+        for name in ("dev.ps1",):
+            data = (ROOT / name).read_bytes()
+            data.decode("utf-8")  # 抛异常就是编码坏了
+
+    def test_no_batch_launchers(self):
+        """别再引入 ``.bat`` —— 编码坑 + 控制台子系统，两个问题都躲不开。"""
+        assert not list(ROOT.glob("*.bat")), "出现了 .bat 启动器"
+        assert not list(ROOT.glob("*.cmd")), "出现了 .cmd 启动器"
