@@ -36,6 +36,7 @@ from .execution.journal import Journal, JsonlJournal, NullJournal
 from .flow.engine import FlowEngine, RunReport
 from .flow.loader import load_scenario
 from .flow.scenario import Scenario
+from .utils.integrity import check_integrity
 from .utils.logging import get_logger, setup_logging
 from .vision.recorder import RecognitionRecorder
 
@@ -195,6 +196,16 @@ def build_session_from_config(
         session.mapper.source_width,
         screen.logic_size,
     )
+    # **输入能不能进得去**，在装配期就说清楚。
+    #
+    # 这件事的失败是**完全静默**的：SetCursorPos 照常把鼠标移过去，
+    # SendInput 返回成功，而目标窗口什么都收不到 —— 看起来像坐标错了、
+    # 像游戏不认合成输入，其实原因在权限级别上（见 utils.integrity）。
+    # 所以启动时检查一次，别让用户花几轮去猜。
+    if screen.window_title:
+        warning = check_integrity(screen.window_title)
+        if warning:
+            log.warning("%s", warning)
     return session
 
 

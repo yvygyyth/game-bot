@@ -71,6 +71,20 @@ def _report_foreground(session: Any, config: Any) -> None:
             )
     except Exception as exc:
         print(f"（读前台窗口失败: {type(exc).__name__}: {exc}）")
+
+    # **权限级别**：这一条最容易被忽略，而且失败是完全静默的。
+    # SetCursorPos 照常把鼠标移过去，SendInput 返回成功，游戏什么都收不到 ——
+    # 看起来像坐标错、像游戏不认合成输入，其实原因在这里。
+    try:
+        from gamebot.utils.integrity import check_integrity
+
+        warning = check_integrity(config.screen.window_title)
+        if warning:
+            print(f"\n{warning}\n")
+        else:
+            print("权限检查: 本进程完整性级别不低于游戏 —— 输入送得进去（UIPI 不是障碍）")
+    except Exception as exc:  # pragma: no cover - 读不到就不猜
+        print(f"（权限检查跳过: {type(exc).__name__}）")
     print()
 
 

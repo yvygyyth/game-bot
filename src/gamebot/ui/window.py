@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..utils.integrity import check_integrity
 from ..utils.logging import get_logger
 from .engine import EngineWorker
 from .logbridge import LogBridge
@@ -468,6 +469,8 @@ class MainWindow(QMainWindow):
             log.exception("装配失败")
             return
 
+        self._warn_about_integrity(config.screen.window_title)
+
         # 表单值在这里**读一次**（数据单向：表单是唯一的改值处）。
         # fill() 会把"用户没动过的字段"补上声明里的默认值，所以步骤那边
         # ctx.param(...) 一定拿得到值，不必再写一遍默认值 —— 默认值只有
@@ -669,6 +672,24 @@ class MainWindow(QMainWindow):
             }
         )
         log.info("快捷键已就绪（%d 条，F1 看清单）", len(self.keymap))
+
+    def _warn_about_integrity(self, window_title: str) -> None:
+        """**开始之前就说清楚"输入发不进游戏"**（如果真是这样）。
+
+        UIPI 的失败是彻底静默的：鼠标指针会真的移过去，``SendInput`` 也返回
+        成功，而游戏窗口什么都收不到 —— 表现和"坐标算错了"一模一样。
+        用户会去调坐标、重裁模板、换输入引擎，全都无效，因为原因在权限上。
+
+        写进**日志面板**（而不是弹对话框打断启动）：日志就在界面上，
+        第一眼能看到，而且事后回看还在。
+        """
+        if not window_title:
+            return
+        warning = check_integrity(window_title)
+        if not warning:
+            return
+        for line in warning.splitlines():
+            log.error("%s", line.strip())
 
     @Slot()
     def _show_shortcuts(self) -> None:
