@@ -79,16 +79,21 @@ CASES: tuple[tuple[str, str], ...] = (
     ("fight/done", "zhandou7.png"),
 )
 
-#: ``状态 id -> 它那张模板文件名``（和 ``pages.py`` 里的常量一一对应）。
+#: ``状态 id -> 它那张模板的**相对路径**``（和 ``pages.py`` 里的常量一一对应）。
+#:
+#: ⚠️ **这里是重复的一份** —— 权威在 ``pages.py``。没直接 import，
+#: 是因为这个文件想在"框架还没装好"时也能跑（见模块 docstring）。
+#: 所以**改目录结构时要两处一起改**（踩过一次：模板按状态分了目录，
+#: 这份表没跟上，于是测试找不到文件）。
 TEMPLATE_OF: dict[str, str] = {
-    "lobby": "lobby.png",
-    "jj/before_create": "jingji__before_create.png",
-    "jj/after_create": "jingji__after_create.png",
-    "jj/after_add": "jingji__after_add.png",
-    "select/idle": "select__idle.png",
-    "select/picked": "select__picked.png",
-    "fight/hand": "fight__hand.png",
-    "fight/done": "fight__done.png",
+    "lobby": "lobby/lobby.png",
+    "jj/before_create": "jj/before_create/before_create.png",
+    "jj/after_create": "jj/after_create/after_create.png",
+    "jj/after_add": "jj/after_add/after_add.png",
+    "select/idle": "select/idle/idle.png",
+    "select/picked": "select/picked/picked.png",
+    "fight/hand": "fight/hand/hand.png",
+    "fight/done": "fight/done/done.png",
 }
 
 

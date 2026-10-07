@@ -76,22 +76,37 @@ from gamebot.types import Point, Region
 # **点击目标**（6 张）：决定"点哪里"。
 # 两组分开列 —— 改名时看得清影响面，也不会把"用来认的图"和"用来点的图"搞混。
 #
+# ## 路径 = 状态路径
+#
+# 模板**按状态分目录**，目录层级和下面那棵状态树一致：
+#
+#     lobby/lobby.png                       首页
+#     jj/before_create/before_create.png    jj/before_create
+#     select/picked/picked.png              select/picked
+#     fight/done/done.png                   fight/done
+#     clicks/…                              只用来点、不对应状态
+#
+# 于是"某个状态认不出来" -> 直接进同名目录看那张图，
+# **检索路径就是排错路径**。文件名不再带 ``jingji__`` / ``select__``
+# 那种前缀 —— 目录已经表达了，再写一遍是重复
+# （``select/picked/select__picked.png``）。
+#
 # 裁切要求和每张图该裁什么：见 templates/README.md。
 # --------------------------------------------------------------------------- #
-T_LOBBY = "lobby.png"
-T_BEFORE_CREATE = "jingji__before_create.png"
-T_AFTER_CREATE = "jingji__after_create.png"
-T_AFTER_ADD = "jingji__after_add.png"
-T_SELECT_IDLE = "select__idle.png"
-T_SELECT_PICKED = "select__picked.png"
-T_FIGHT_HAND = "fight__hand.png"
-T_FIGHT_DONE = "fight__done.png"
+T_LOBBY = "lobby/lobby.png"
+T_BEFORE_CREATE = "jj/before_create/before_create.png"
+T_AFTER_CREATE = "jj/after_create/after_create.png"
+T_AFTER_ADD = "jj/after_add/after_add.png"
+T_SELECT_IDLE = "select/idle/idle.png"
+T_SELECT_PICKED = "select/picked/picked.png"
+T_FIGHT_HAND = "fight/hand/hand.png"
+T_FIGHT_DONE = "fight/done/done.png"
 
-T_CLICK_SELECT_FIRST = "click__select_first.png"
-T_CLICK_FIGHT_MENU = "click__fight_menu.png"
-T_CLICK_FIGHT_SURRENDER = "click__fight_surrender.png"
-T_CLICK_FIGHT_CONFIRM = "click__fight_confirm.png"
-T_CLICK_FIGHT_NEXT = "click__fight_next.png"
+T_CLICK_SELECT_FIRST = "clicks/select_first.png"
+T_CLICK_FIGHT_MENU = "clicks/fight_menu.png"
+T_CLICK_FIGHT_SURRENDER = "clicks/fight_surrender.png"
+T_CLICK_FIGHT_CONFIRM = "clicks/fight_confirm.png"
+T_CLICK_FIGHT_NEXT = "clicks/fight_next.png"
 
 # --------------------------------------------------------------------------- #
 # 阈值
@@ -213,7 +228,7 @@ SELECT_FIRST_CARD = Region(190, 300, 230, 360)
 """选将界面里**第 1 张武将卡**的搜索范围（张飞那张）。
 
 "随便点一个然后点确认" —— 这里固定点第一个。想换武将就改这张卡的
-模板（``click__select_first.png``）和这个 roi。
+模板（``clicks/select_first.png``）和这个 roi。
 """
 
 # --------------------------------------------------------------------------- #
