@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from ..exceptions import BackendUnavailable, Cancelled
 from ..types import ActionResult, Point, Region
 from ..utils.logging import get_logger
-from .backends.base import BackendBundle, InputBackend, ScreenBackend, WindowBackend
+from .backends.base import BackendBundle, InputBackend, ScreenBackend
 from .vision import Matcher, TextReader, UnavailableTextReader
 
 if TYPE_CHECKING:
@@ -181,9 +181,6 @@ class Session(ABC):
     def to_logic(self, point: Point) -> Point:
         """源点 -> 逻辑点。日志和配置回写时用。"""
         return self.mapper.to_logic(point)
-
-    def region_to_screen(self, region: Region) -> Region:
-        return self.mapper.region_to_source(region)
 
     # -- 输入通道（供 L5 使用）------------------------------------------------
     @property
@@ -342,10 +339,6 @@ class BaseSession(Session):
     @property
     def screen_backend(self) -> ScreenBackend:
         return self._backends.screen
-
-    @property
-    def window_backend(self) -> WindowBackend | None:
-        return self._backends.window
 
     @property
     def matcher(self) -> Matcher:

@@ -87,7 +87,6 @@ T_SELECT_PICKED = "select__picked.png"
 T_FIGHT_HAND = "fight__hand.png"
 T_FIGHT_DONE = "fight__done.png"
 
-T_CLICK_JINGJI = "click__jingji_entry.png"
 T_CLICK_SELECT_FIRST = "click__select_first.png"
 T_CLICK_FIGHT_MENU = "click__fight_menu.png"
 T_CLICK_FIGHT_SURRENDER = "click__fight_surrender.png"

@@ -200,12 +200,3 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
         template_roots=roots,
         problems=tuple(problems),
     )
-
-
-def shorten_path(path: str, *, root: Path | None = None) -> str:
-    """把绝对路径缩成相对项目根的写法，界面上短一点。"""
-    base = root or Path.cwd()
-    try:
-        return str(Path(path).relative_to(base))
-    except ValueError:
-        return path

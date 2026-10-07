@@ -65,9 +65,9 @@ COLOR_BG = QColor("#1e1e1e")
 COLOR_NODE = QColor("#2d2d30")
 COLOR_NODE_GROUP = QColor("#26343f")
 #: 当前状态**和流程预期不一致**时的底色 —— 也就是"需要重定位"的那一刻。
-COLOR_NODE_MISALIGNED = QColor("#7a2f2f")
-COLOR_NODE_EDGE = QColor("#3d3d40")
 COLOR_BORDER = QColor("#5a5a5e")
+#: 当前状态**和流程预期不一致**时的底色 —— 也就是"需要重定位"的那一刻。
+COLOR_NODE_MISALIGNED = QColor("#7a2f2f")
 #: **绿 = 一致**：识别出来的状态就是流程预期的那个，一切正常。
 COLOR_BORDER_OK = QColor("#4ec9b0")
 #: **红 = 不一致**：流程以为在别处，需要重定位。**最该被看见的一刻。**

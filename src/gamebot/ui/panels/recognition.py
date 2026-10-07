@@ -59,9 +59,6 @@ POLL_MS = 300
 
 _COLUMNS = ("#", "时间", "类型", "目标", "结果", "分数", "位置", "搜索范围", "图")
 
-_HIT_COLOR = "#4ec9b0"
-_MISS_COLOR = "#e5c07b"
-
 
 class RecognitionPanel(QWidget):
     """上一次识图匹配的图 + 全部匹配的结构化日志。"""

@@ -319,7 +319,6 @@ class FlowEngine:
         self._pending_recover: tuple[float, PageId, str] | None = None
         #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _note_stall）
         self._stall_rounds = 0
-        self._recovery_warned: set[tuple[NodeId, PageId]] = set()
         self.params: dict[str, Any] = dict(params or {})
         """运行参数（入参）的**引擎侧**那一份，开跑时合进上下文。
 
@@ -388,7 +387,6 @@ class FlowEngine:
         self._stop_message = ""
         self._pending_recover = None
         self._stall_rounds = 0
-        self._recovery_warned.clear()
 
         # 2) 清运行期上下文：跟踪器（当前状态 + 变更历史）、黑板、中止标志、
         # 缓存的帧。同一个引擎跑第二遍时黑板会带着上一遍的数据 —— 那会让

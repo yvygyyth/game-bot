@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from ..atomic.frame import Frame
     from .executor import StepOutcome
 
-__all__ = ["Journal", "JournalEntry", "JsonlJournal", "MemoryJournal", "NullJournal"]
+__all__ = ["Journal", "JournalEntry", "JsonlJournal", "NullJournal"]
 
 
 @dataclass(slots=True)
@@ -159,19 +159,6 @@ class NullJournal(Journal):
 
     def record(self, entry: JournalEntry) -> None:
         return None
-
-
-class MemoryJournal(Journal):
-    """存在内存里，给测试断言用。"""
-
-    def __init__(self) -> None:
-        self.entries: list[JournalEntry] = []
-
-    def record(self, entry: JournalEntry) -> None:
-        self.entries.append(entry)
-
-    def clear(self) -> None:
-        self.entries.clear()
 
 
 class JsonlJournal(Journal):

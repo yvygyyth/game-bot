@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,69 +23,12 @@ from .page import UNKNOWN_PAGE, PageId, PageLeaf, PageMatch, PageTree
 
 log = get_logger("state.tracker")
 
-__all__ = ["Blackboard", "PageChange", "PageState", "PageTracker"]
+__all__ = ["PageChange", "PageState", "PageTracker"]
 
 
 # --------------------------------------------------------------------------- #
 # 共享黑板
 # --------------------------------------------------------------------------- #
-class Blackboard:
-    """流程共享的键值存储。
-
-    框架只提供容器，不解释内容 —— 脚本想存什么就存什么
-    （今天刷了几次、上次体力值、连败计数）。比往步骤里塞上下文引用清晰得多。
-
-    刻意不做类型约束、不做 schema 校验。需要结构化数据就约定 key 前缀
-    （``"battle.retry_count"``），而不是改这个类。
-    """
-
-    __slots__ = ("_data",)
-
-    def __init__(self, initial: Mapping[str, Any] | None = None) -> None:
-        self._data: dict[str, Any] = dict(initial or {})
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self._data[key] = value
-
-    def update(self, **values: Any) -> None:
-        self._data.update(values)
-
-    def bump(self, key: str, delta: int = 1, *, start: int = 0) -> int:
-        """计数器自增，返回新值。统计"刷了多少次"最常用。"""
-        current = self._data.get(key, start)
-        value = (current if isinstance(current, int) else start) + delta
-        self._data[key] = value
-        return value
-
-    def pop(self, key: str, default: Any = None) -> Any:
-        return self._data.pop(key, default)
-
-    def __contains__(self, key: object) -> bool:
-        return key in self._data
-
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self._data[key] = value
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def as_dict(self) -> dict[str, Any]:
-        return dict(self._data)
-
-    def clear(self) -> None:
-        self._data.clear()
-
-    def __repr__(self) -> str:
-        return f"Blackboard({self._data!r})"
 
 
 # --------------------------------------------------------------------------- #
