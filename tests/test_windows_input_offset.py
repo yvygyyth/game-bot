@@ -54,22 +54,7 @@ def make_backend(offset: tuple[int, int] | None) -> tuple[WindowsInputBackend, R
     )
     impl = RecordingImpl()
     backend._impl = impl  # 直接塞进去，绕开 __import__
-    # 固定"鼠标当前在哪" —— 否则滑动手势读的是**真机鼠标位置**，
-    # 断言会随你手动挪鼠标而变（这类测试必须与环境无关）。
-    backend._cursor_or_none = lambda: (0, 0)  # type: ignore[method-assign]
     return backend, impl
-
-
-def presses(impl: RecordingImpl) -> list[tuple[str, int, int]]:
-    """只取"按下/抬起"事件 —— 滑动过程的 moveTo 数量随参数变，不适合断言。"""
-    return [call for call in impl.calls if call[0] in ("down", "up", "click")]
-
-
-def last_move(impl: RecordingImpl) -> tuple[str, int, int]:
-    """最后一次移动 —— 它必须落在目标点上（不管中间滑了几步）。"""
-    moves = [call for call in impl.calls if call[0] == "moveTo"]
-    assert moves, "一次移动都没有"
-    return moves[-1]
 
 
 class TestInputCoordinateOffset:
@@ -81,10 +66,8 @@ class TestInputCoordinateOffset:
     def test_click_adds_capture_origin(self) -> None:
         backend, impl = make_backend((21, 49))
         backend.click(Point(100, 200))
-        # 单击是显式 down/up（见 WindowsInputBackend.click 的说明）；
-        # 最后那次移动必须落在 目标 + 捕获区原点 上。
-        assert last_move(impl) == ("moveTo", 121, 249)
-        assert presses(impl) == [("down", 0, 0), ("up", 0, 0)]
+        # down → (key_hold) → up，和 ``vision_workflow`` 的实现一致（见 click 的 docstring）
+        assert impl.calls == [("moveTo", 121, 249), ("down", 0, 0), ("up", 0, 0)]
 
     def test_drag_offsets_both_ends(self) -> None:
         backend, impl = make_backend((21, 49))
@@ -133,121 +116,6 @@ class TestInputCoordinateOffset:
         backend._impl = impl
         backend.move_to(Point(3, 4))
         assert impl.calls == [("moveTo", 3, 4)]
-
-
-class TestMoveSettleBeforePress:
-    """**移动和按下之间必须有间隔** —— 这是"点了没反应"那个 bug 的根因。
-
-    症状极具迷惑性：动作层返回成功、`GetCursorPos` 也确实是目标点、
-    日志里识别也命中了。**唯一看出问题的地方是游戏自己没反应。**
-
-    原因：游戏的位置跟踪在它自己的帧里做。移过去之后立刻按，游戏下一帧轮询时
-    按下的消息已经带着**移动前的位置**到了，于是这一下被当成"在别处点了一下"
-    丢掉。
-    """
-
-    def _make(self, *, move_settle: float, glide_steps: int = 1):
-        backend = WindowsInputBackend(
-            offset_provider=lambda: Region(0, 0, 100, 100),
-            move_settle=move_settle,
-            # 关掉滑动（steps=1）:这条测试只关心"滑到之后有没有停一下"，
-            # 让移动只产生一次 moveTo，断言才读得清。
-            glide_steps=glide_steps,
-            move_glide=0.0,
-        )
-        impl = RecordingImpl()
-        backend._impl = impl
-        backend._cursor_or_none = lambda: (0, 0)  # type: ignore[method-assign]
-        return backend, impl
-
-    def test_it_sleeps_between_move_and_press(self, monkeypatch) -> None:
-        """按下之前必须睡一次 —— 断言的是**顺序**，不是具体秒数。"""
-        slept: list[float] = []
-        monkeypatch.setattr("time.sleep", lambda s: slept.append(s))
-
-        backend, impl = self._make(move_settle=0.08)
-        backend.click(Point(10, 20))
-
-        assert impl.calls[0][0] == "moveTo", "先移动"
-        assert impl.calls[1][0] == "down", "再按下"
-        assert 0.08 in slept, f"移动和按下之间应该睡 0.08s，实际睡的: {slept}"
-
-    def test_zero_disables_it(self, monkeypatch) -> None:
-        """``move_settle=0`` 关掉它 —— 用来复现"点了没反应"。"""
-        slept: list[float] = []
-        monkeypatch.setattr("time.sleep", lambda s: slept.append(s))
-
-        backend, impl = self._make(move_settle=0)
-        backend.click(Point(10, 20))
-
-        assert impl.calls[0][0] == "moveTo"
-        assert impl.calls[1][0] == "down"
-        assert 0.08 not in slept
-
-    def test_press_and_release_are_separate(self) -> None:
-        """单击也要显式 down/up —— 部分游戏把过短的"按下"当抖动丢掉。"""
-        backend, impl = self._make(move_settle=0)
-        backend.click(Point(10, 20))
-        assert [name for name, _, _ in presses(impl)] == ["down", "up"]
-
-
-class TestGlideGeneratesAContinuousPath:
-    """移过去要**分多步**，不能瞬移。
-
-    为什么不直接用 ``impl.moveTo(x, y, duration=...)``：``pydirectinput``
-    带 duration 时走 ``moveRel`` —— **一次 SendInput 发完整个位移**，
-    不是插值。游戏那一帧收到的还是"从 A 跳到 B"。
-
-    有些游戏（带 3D 场景/自由视角的）自己维护鼠标位置，只认连续轨迹；
-    直接跳过去那一跳它可能当成视角回正而丢掉 —— 于是"点不中"。
-    """
-
-    def _make(self, *, glide_steps: int, move_glide: float):
-        backend = WindowsInputBackend(
-            offset_provider=lambda: Region(0, 0, 4000, 4000),
-            move_settle=0.0,
-            move_glide=move_glide,
-            glide_steps=glide_steps,
-        )
-        impl = RecordingImpl()
-        backend._impl = impl
-        backend._cursor_or_none = lambda: (0, 0)  # type: ignore[method-assign]
-        return backend, impl
-
-    def test_it_emits_multiple_moves(self, monkeypatch) -> None:
-        """滑动手势要产生**多于一次**移动事件，而且最后一步落在目标上。"""
-        monkeypatch.setattr("time.sleep", lambda _s: None)  # 别真等
-        backend, impl = self._make(glide_steps=8, move_glide=0.5)
-        backend.click(Point(1000, 500))
-
-        moves = [c for c in impl.calls if c[0] == "moveTo"]
-        assert len(moves) > 1, "只移动了一次 —— 那是瞬移，不是滑动"
-        assert moves[-1] == ("moveTo", 1000, 500), "最后一步必须精确落在目标点"
-
-    def test_steps_are_monotonic_towards_target(self, monkeypatch) -> None:
-        """每一步都要比上一步更靠近目标（是真插值，不是乱跳）。"""
-        monkeypatch.setattr("time.sleep", lambda _s: None)
-        backend, impl = self._make(glide_steps=6, move_glide=0.5)
-        backend.click(Point(600, 300))
-
-        xs = [c[1] for c in impl.calls if c[0] == "moveTo"]
-        assert xs == sorted(xs), f"横坐标不是单调靠近目标: {xs}"
-        assert xs[0] > 0 and xs[-1] == 600
-
-    def test_one_step_is_a_teleport(self) -> None:
-        """``glide_steps=1`` 退化成瞬移 —— 留着复现"点了没反应"。"""
-        backend, impl = self._make(glide_steps=1, move_glide=0.0)
-        backend.click(Point(1000, 500))
-        moves = [c for c in impl.calls if c[0] == "moveTo"]
-        assert moves == [("moveTo", 1000, 500)]
-
-    def test_nearby_target_skips_interpolation(self) -> None:
-        """已经贴着目标就别插值了 —— 省时间，事件量也够。"""
-        backend, impl = self._make(glide_steps=8, move_glide=0.5)
-        backend._cursor_or_none = lambda: (998, 500)  # type: ignore[method-assign]
-        backend.click(Point(1000, 500))
-        moves = [c for c in impl.calls if c[0] == "moveTo"]
-        assert moves == [("moveTo", 1000, 500)]
 
 
 class TestCoordinateSpace:

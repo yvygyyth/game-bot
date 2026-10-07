@@ -40,12 +40,15 @@ class TestTable:
         assert {"run", "stop", "help"} <= actions
 
     def test_every_global_shortcut_has_a_fallback(self):
-        """每条全局快捷键**都要有备选键**。
+        """每条全局快捷键**仍然留着备选键**（虽然现在用不上了）。
 
-        理由不是预防性设计 —— 是实测出来的：这台机器上裸 ``F5`` / ``F9`` /
-        ``F12`` / ``Esc`` **全都注册不上**（被别的软件占了），``Ctrl+Alt+*``
-        全都可以。没有备选就等于"这条全局快捷键在有些机器上永远不生效"，
-        而且失败是静默的。
+        备选是 ``RegisterHotKey`` 时代的必需品：那个 API 对已被占用的组合返回
+        ``False``，而这台机器上裸 ``F5`` / ``F9`` / ``F12`` / ``Esc`` 全都被占。
+
+        现在换成 ``pynput`` 的监听钩子（不占键、不会被占用挡住），所以首选永远
+        生效 —— 但字段和值都留着：一来不用改 :class:`Keymap` 的结构，
+        二来哪天真要退回去也还有现成的备选。见
+        :attr:`~gamebot.ui.shortcuts.Shortcut.global_fallback`。
         """
         for spec in SHORTCUTS:
             if spec.global_hotkey:
@@ -53,7 +56,7 @@ class TestTable:
                 assert spec.global_fallback != spec.keys
 
     def test_fallback_uses_modifiers(self):
-        """备选键必须**带修饰键** —— 裸键被占的概率高得离谱，那正是要备选的原因。"""
+        """备选键必须**带修饰键** —— 裸键被占的概率高得离谱，那正是当初要备选的原因。"""
         for spec in SHORTCUTS:
             if spec.global_fallback:
                 assert "+" in spec.global_fallback, (
@@ -62,7 +65,7 @@ class TestTable:
                 )
 
     def test_fallback_key_is_parseable(self, qt_app):
-        """备选键也得能解析成虚拟键码 —— 写错了它永远轮不上，等于没有。"""
+        """备选键也得能解析 —— 写错了它永远轮不上，等于没有。"""
         from gamebot.ui.hotkeys import parse_hotkey
 
         for spec in SHORTCUTS:
@@ -70,7 +73,9 @@ class TestTable:
                 continue
             parsed = parse_hotkey(spec.action, spec.global_fallback)
             assert parsed is not None, f"{spec.action} 的备选键解析不出来"
-            assert parsed.mods, f"{spec.action} 的备选键没解析出修饰位"
+            assert "<" in parsed.pynput_keys, (
+                f"{spec.action} 的备选键没解析出修饰键: {parsed.pynput_keys!r}"
+            )
 
     def test_stop_is_f9_and_run_is_f5(self):
         """用户点名要的：停止用 ``F9``，不用 ``Esc``。

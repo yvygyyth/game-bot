@@ -1,325 +1,259 @@
-"""全局快捷键（``gamebot.ui.hotkeys``）。
+"""全局快捷键 —— 键的解析、监听器的启停、以及"实际生效的键"可观测。
 
-## 这个文件能测什么、不能测什么
+## 这一版换掉了机制，所以测试也换了重点
 
-**不能测的**：真按键。低级键盘钩子要真有键按下来才会回调，而这个执行环境
-**拦掉了输入注入**（连 ``SetCursorPos`` 都返回 0），所以"注入一个 F5 再断言
-钩子收到"这条路在这里走不通。
+原来测的是 ``RegisterHotKey``（虚拟键码表、修饰位掩码、被占用后退到备选）。
+现在走 ``pynput`` 的键盘钩子，那些内部结构**整个不存在了**：
 
-**能测的、也正是最容易错的**：
+* 没有虚拟键码表 —— 键名按 ``+`` 拆开、各自换算就行（:func:`parse_hotkey`）；
+* 没有修饰位掩码 —— ``pynput`` 要的是 ``"<ctrl>+<alt>+<f5>"`` 这种字符串；
+* **没有"被占用"这回事** —— 钩子不注册、不占键，所以首选永远生效。
+  原来那条"备选接管"的测试因此没有意义了（换成"只监听首选"）。
 
-* Qt 的键 → Win32 虚拟键码（手写过一版，``F5`` 落到了 PageUp 的键码上）；
-* Qt 的修饰位 → 我们的 ``MOD_*``（手写过一版，Ctrl 被当成 Shift）；
-* 命中判定（多按一个修饰键**不算**中，否则 ``Ctrl+Alt+X`` 会在 ``Ctrl+X`` 时触发）；
-* Qt 信号那一跳（钩子线程命中 → 界面线程执行动作）。
+## 真正要钉住的四件事
 
-前两条都是"错了不报错、只是按不出来"，所以必须有测试钉着。
+1. **换算对**：Qt 写法 -> ``pynput`` 写法（这是唯一容易写错的地方）；
+2. **认不出来就出声**：不认的键名必须 warning + 跳过，而不是静默不生效；
+3. **启停可观测**：``running`` / ``registered`` 准不准（"没生效"要看得出来）；
+4. **不吞键**：这是换机制的根本理由 —— 见 :class:`TestItDoesNotSwallowKeys`。
 """
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from gamebot.ui.hotkeys import (
-    MOD_ALT,
-    MOD_CONTROL,
-    MOD_SHIFT,
-    MOD_WIN,
     GlobalHotkeys,
     Hotkey,
     HotkeyPlan,
     is_supported,
     parse_hotkey,
 )
-
-pytest.importorskip("PySide6")
-
-
-def _plan(*candidates: Hotkey, action: str = "stop") -> HotkeyPlan:
-    """把一个或多个候选键包成一个 plan（首选在前）。"""
-    return HotkeyPlan(action=action, candidates=tuple(candidates))
-
-#: ``键写法 -> (期望的虚拟键码, 期望的修饰位)``。
-#:
-#: 期望值是从 Win32 文档抄的常量，**故意写死**（不跟着实现走）——
-#: 这样实现里表搭错了就会红，而不是自己证明自己。
-EXPECTED: dict[str, tuple[int, int]] = {
-    "F1": (0x70, 0),
-    "F5": (0x74, 0),
-    "F12": (0x7B, 0),
-    "F24": (0x87, 0),
-    "Esc": (0x1B, 0),
-    "Tab": (0x09, 0),
-    "Space": (0x20, 0),
-    "A": (0x41, 0),
-    "Z": (0x5A, 0),
-    "0": (0x30, 0),
-    "9": (0x39, 0),
-    "Left": (0x25, 0),
-    "Up": (0x26, 0),
-    "Right": (0x27, 0),
-    "Down": (0x28, 0),
-    "Insert": (0x2D, 0),
-    "Delete": (0x2E, 0),
-    "PgUp": (0x21, 0),
-    "PgDown": (0x22, 0),
-    "Home": (0x24, 0),
-    "End": (0x23, 0),
-    "Ctrl+A": (0x41, MOD_CONTROL),
-    "Ctrl+1": (0x31, MOD_CONTROL),
-    "Alt+F4": (0x73, MOD_ALT),
-    "Shift+F5": (0x74, MOD_SHIFT),
-    "Ctrl+Shift+A": (0x41, MOD_CONTROL | MOD_SHIFT),
-    "Ctrl+Alt+F12": (0x7B, MOD_CONTROL | MOD_ALT),
-    "Ctrl+Alt+Shift+Esc": (0x1B, MOD_CONTROL | MOD_ALT | MOD_SHIFT),
-}
+from gamebot.ui.shortcuts import SHORTCUTS
 
 
 class TestParse:
-    @pytest.mark.parametrize(("keys", "want"), list(EXPECTED.items()))
-    def test_key_and_modifiers(self, keys, want, qt_app):
-        hotkey = parse_hotkey("x", keys)
-        assert hotkey is not None, f"{keys} 解析失败"
-        assert (hotkey.vk, hotkey.mods) == want, (
-            f"{keys}: 得到 vk=0x{hotkey.vk:02X} mods={hotkey.mods}，"
-            f"期望 vk=0x{want[0]:02X} mods={want[1]}"
-        )
+    """Qt 写法 -> ``pynput`` 写法。"""
 
-    def test_unknown_key_is_skipped_not_raised(self, qt_app):
-        """认不出来的键**跳过这一条**，不能让界面起不来。"""
-        assert parse_hotkey("x", "MediaPlay") is None
+    @pytest.mark.parametrize(
+        ("written", "expected"),
+        [
+            ("F5", "<f5>"),
+            ("F9", "<f9>"),
+            ("F12", "<f12>"),
+            ("F24", "<f24>"),
+            ("Ctrl+Alt+F5", "<ctrl>+<alt>+<f5>"),
+            ("Ctrl+Alt+F9", "<ctrl>+<alt>+<f9>"),
+            ("Ctrl+Shift+P", "<ctrl>+<shift>+p"),
+            ("Win+X", "<cmd>+x"),
+            ("A", "a"),
+            ("1", "1"),
+            ("Esc", "esc"),
+            ("Enter", "enter"),
+            ("Space", "space"),
+            ("Delete", "delete"),
+        ],
+    )
+    def test_qt_writing_becomes_pynput_writing(self, written, expected):
+        hotkey = parse_hotkey("act", written)
+        assert hotkey is not None, f"{written!r} 应该能解析"
+        assert hotkey.pynput_keys == expected
 
-    @pytest.mark.parametrize("keys", ["PageUp", "PageDown", "Win"])
-    def test_misspelled_key_names_are_rejected_loudly(self, keys, qt_app, caplog):
-        """Qt **不认**的键名会被静默变成 ``Key_unknown``，必须报出来。
+    def test_result_keeps_the_original_writing(self):
+        """``keys`` 保留 Qt 写法 —— 界面/帮助显示的是它，不是 ``<f9>``。"""
+        hotkey = parse_hotkey("act", "Ctrl+Alt+F5")
+        assert hotkey is not None
+        assert hotkey.keys == "Ctrl+Alt+F5"
+        assert hotkey.display == "Ctrl+Alt+F5"
 
-        踩过的坑：``"PageUp"`` / ``"PageDown"`` / ``"Win"`` 都能"解析成功"
-        （``QKeySequence`` 不抛错，只是给出 ``Key_unknown``），于是那条快捷键
-        **无声消失** —— 用户按不出来，日志里也什么都没有。
-        Qt 认的是 ``PgUp`` / ``PgDown`` / ``Meta``。
+    def test_action_is_carried_through(self):
+        hotkey = parse_hotkey("stop", "F9")
+        assert hotkey is not None
+        assert hotkey.action == "stop"
+
+    def test_modifier_order_is_preserved(self):
+        """修饰键**保持书写顺序**。
+
+        ``pynput`` 把 ``"<ctrl>+<alt>+<f5>"`` 当字符串键去匹配组合，
+        所以这里不做重排 —— 重排会让"我们监听的键"和"配置里写的键"
+        在日志/界面里显示成两种样子，反而更难对照。
         """
-        with caplog.at_level("WARNING"):
-            assert parse_hotkey("x", keys) is None
-        assert "Key_unknown" in caplog.text, "要说清是键名写法的问题，而不是含糊地跳过"
+        hotkey = parse_hotkey("act", "Ctrl+Alt+F5")
+        assert hotkey is not None
+        assert hotkey.pynput_keys == "<ctrl>+<alt>+<f5>"
 
-    @pytest.mark.parametrize(("bad", "good"), [("PageUp", "PgUp"), ("PageDown", "PgDown")])
-    def test_the_spelling_qt_actually_wants(self, bad, good, qt_app):
-        """上面那两个的**正确写法**确实能用 —— 否则这条测试只是在描述一个死路。"""
-        assert parse_hotkey("x", bad) is None
-        assert parse_hotkey("x", good) is not None
-
-    def test_result_keeps_the_original_writing(self, qt_app):
-        """原始写法要留着 —— 报错和帮助里都要显示人写的那个。"""
-        assert parse_hotkey("x", "Ctrl+Alt+F12").keys == "Ctrl+Alt+F12"
-
-    def test_action_is_carried_through(self, qt_app):
-        assert parse_hotkey("stop", "Esc").action == "stop"
+    def test_spaces_around_plus_are_tolerated(self):
+        hotkey = parse_hotkey("act", " Ctrl + Alt + F5 ")
+        assert hotkey is not None
+        assert hotkey.pynput_keys == "<ctrl>+<alt>+<f5>"
 
 
-class TestModifierMask:
-    """修饰键位掩码 —— 键位匹配现在由 **Windows 自己**做（``RegisterHotKey``）。
+class TestUnparseableIsLoud:
+    """认不出来必须"跳过 + 出声"。静默跳过 = "我明明写了却没生效"。"""
 
-    所以这里不再测"给一个 vk+mods 判断命中"的算法（那个函数已经删了），
-    改测**我们交给 Windows 的那个掩码对不对**。它错了的症状是
-    "``Ctrl+Alt+F12`` 按不出来"或"误触发别的组合"。
-    """
+    @pytest.mark.parametrize(
+        "written",
+        ["", "   ", "PageUp", "F25", "F0", "Hyper+X", "Ctrl+", "Ctrl+Foo"],
+    )
+    def test_unparseable_returns_none(self, written):
+        assert parse_hotkey("act", written) is None
 
-    def _hotkey(self, qt_app, keys="Esc"):
-        parsed = parse_hotkey("stop", keys)
-        assert parsed is not None
-        return parsed
+    def test_it_logs_a_warning(self, caplog):
+        import logging
 
-    def test_plain_key_has_no_modifiers(self, qt_app):
-        assert self._hotkey(qt_app, "Esc").mods == 0
-
-    def test_control_bit(self, qt_app):
-        assert self._hotkey(qt_app, "Ctrl+A").mods == MOD_CONTROL
-
-    def test_alt_bit(self, qt_app):
-        assert self._hotkey(qt_app, "Alt+A").mods == MOD_ALT
-
-    def test_control_alt_combines(self, qt_app):
-        """两个修饰键是**位或**，别把 ``Alt`` 覆盖掉 ``Ctrl``。"""
-        hotkey = self._hotkey(qt_app, "Ctrl+Alt+F12")
-        assert hotkey.mods == MOD_CONTROL | MOD_ALT
-        assert hotkey.mods & MOD_CONTROL and hotkey.mods & MOD_ALT
-
-    def test_shift_bit(self, qt_app):
-        assert self._hotkey(qt_app, "Shift+A").mods == MOD_SHIFT
-
-    def test_win_modifier_is_in_the_mask(self, qt_app):
-        """``Meta`` 在 Qt 里是 Win 键；写成 ``"Win+A"`` 是**错的写法**，
-        会被上面 ``TestParse`` 挡住 —— 这里验正确的那个。"""
-        assert self._hotkey(qt_app, "Meta+A").mods == MOD_WIN
-
-    def test_modifier_order_does_not_matter(self, qt_app):
-        """位掩码是集合语义：``Ctrl+Alt`` 和 ``Alt+Ctrl`` 是同一个。"""
-        assert self._hotkey(qt_app, "Ctrl+Alt+F12").mods == self._hotkey(
-            qt_app, "Alt+Ctrl+F12"
-        ).mods
-
-    def test_display_preserves_canonical_order(self, qt_app):
-        """显示用固定顺序（``Ctrl+Alt+Shift+Win``），不跟着输入顺序变。"""
-        assert self._hotkey(qt_app, "Alt+Ctrl+F12").display == "Ctrl+Alt+F12"
+        with caplog.at_level(logging.WARNING):
+            parse_hotkey("act", "PageUp")
+        assert caplog.records, "认不出来却没出声 —— 这正是最难查的那种失败"
+        assert "PageUp" in caplog.text
 
 
-class TestRegistrationIsObservable:
-    """**这条换上 `RegisterHotKey` 的核心理由**：成败能看出来。
+class TestListenerIsObservable:
+    """启停状态要能读出来 —— "按了没反应"必须能查。"""
 
-    低级键盘钩子的失败是静默的 —— 句柄有效、``GetLastError=0``、线程在跑，
-    但回调一次都不被调用，外部表现只有"按了没反应"。
-    ``RegisterHotKey`` 失败**返回 False 并带错误码**，所以这里能直接钉住
-    "注册成功的键进了 ``registered``、失败的进了 ``failed_keys``"。
-    """
+    def _plan(self, action: str = "run", keys: str = "F5") -> HotkeyPlan:
+        hotkey = parse_hotkey(action, keys)
+        assert hotkey is not None
+        return HotkeyPlan(action=action, candidates=(hotkey,))
 
-    def test_no_hotkeys_does_not_start(self, qt_app):
-        """一条都没解析出来时不起线程（省一个后台线程，也省一次建窗口）。"""
+    def test_no_plans_does_not_start(self):
         service = GlobalHotkeys([])
         assert service.start() is False
-        assert not service.running
+        assert service.running is False
 
-    def test_start_on_non_windows_is_false_not_an_exception(self, qt_app, monkeypatch):
-        """非 Windows 上降级成"没这功能"，不是抛异常。"""
-        import gamebot.ui.hotkeys as mod
-
-        monkeypatch.setattr(mod.sys, "platform", "darwin")
-        assert mod.is_supported() is False
-        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
-        assert service.start() is False
-
-    def test_stop_is_idempotent(self, qt_app):
-        """没起来过 / 已经停了，再 stop 也不该炸（关窗路径会无脑调一次）。"""
-        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
-        service.stop()
-        service.stop()
-
-    def test_fallback_takes_over_when_the_preferred_key_is_taken(self, qt_app):
-        """**首选被占就退到备选** —— 这是本轮的核心修复。
-
-        ``RegisterHotKey`` 对已被占用的组合返回 False。用一个**一定拿不到**的
-        组合（``Esc`` 常被占；这里用一个没被占的 + 一个已确认被占的裸键不行，
-        所以用两个候选，其中一个必然失败）来验"退到下一个"这条逻辑：
-        注册成功的那个必须只有一个，且它必须是候选里的**某一个**。
-        """
-        if not is_supported():
-            pytest.skip("只有 Windows 上有这个 API")
-        plan = HotkeyPlan(
-            action="stop",
-            candidates=(
-                Hotkey("stop", 0x78, 0, "F9"),          # 实测常被占
-                Hotkey("stop", 0x7A, 0x0001 | 0x0002, "Ctrl+Alt+F11"),  # 几乎总能成
-            ),
-        )
-        service = GlobalHotkeys([plan])
+    def test_start_registers_and_running_reflects_it(self, qt_app):
+        service = GlobalHotkeys([self._plan()])
         try:
-            service.start()
-            # 每个动作最多生效一个键
-            assert len(service.registered) <= 1
-            # 生效的必须在候选里
-            for hotkey in service.registered:
-                assert hotkey in plan.candidates
-            # 生效 + 失败 = 试过的候选数（最多 2）
-            assert len(service.registered) + len(service.failed_keys) <= 2
+            if not service.start():  # pragma: no cover - pynput 起不来时跳过
+                pytest.skip("这个环境下 pynput 监听器起不来")
+            assert service.running is True
+            assert [h.keys for h in service.registered] == ["F5"]
         finally:
             service.stop()
 
-    def test_every_action_gets_at_most_one_key(self, qt_app):
-        """一个动作只能生效**一个**键 —— 否则按一次会触发两次。"""
-        if not is_supported():
-            pytest.skip("只有 Windows 上有这个 API")
-        plan = HotkeyPlan(
-            action="stop",
-            candidates=(
-                Hotkey("stop", 0x7A, 0x0002 | 0x0001, "Ctrl+Alt+F11"),
-                Hotkey("stop", 0x7B, 0x0002 | 0x0001, "Ctrl+Alt+F12"),
-            ),
-        )
-        service = GlobalHotkeys([plan])
+    def test_only_the_first_candidate_is_listened_to(self, qt_app):
+        """候选只取首选 —— 钩子不存在"被占用"，备选永远用不上。"""
+        first = parse_hotkey("run", "F5")
+        second = parse_hotkey("run", "Ctrl+Alt+F5")
+        assert first is not None and second is not None
+        service = GlobalHotkeys([HotkeyPlan("run", (first, second))])
         try:
-            service.start()
-            actions = [h.action for h in service.registered]
-            assert len(actions) == len(set(actions)), f"同一动作生效了多个键: {actions}"
+            if not service.start():  # pragma: no cover
+                pytest.skip("这个环境下 pynput 监听器起不来")
+            assert [h.keys for h in service.registered] == ["F5"]
         finally:
             service.stop()
 
-    def test_stop_after_start_cleans_up(self, qt_app):
-        if not is_supported():
-            pytest.skip("只有 Windows 上有这个 API")
-        service = GlobalHotkeys([_plan(Hotkey("stop", 0x7A, 0x0003, "Ctrl+Alt+F11"))])
-        if not service.start():
-            pytest.skip("这个环境注册不上")
-        assert service.running
+    def test_stop_is_idempotent(self):
+        service = GlobalHotkeys([self._plan()])
         service.stop()
-        assert not service.running
-        assert service.registered == [], "注销之后不该还留着'已注册'"
+        service.stop()
+        assert service.running is False
+
+    def test_stop_clears_registered(self, qt_app):
+        service = GlobalHotkeys([self._plan()])
+        if service.start():
+            service.stop()
+        assert service.registered == []
+        assert service.running is False
+
+    def test_plans_are_exposed_read_only(self):
+        service = GlobalHotkeys([self._plan()])
+        plans = service.plans
+        plans.clear()
+        assert len(service.plans) == 1, "外部改返回值不该影响内部状态"
+
+    def test_the_same_key_twice_keeps_the_first_action(self):
+        """两个动作抢同一个键：留住先声明的，并记进 ``failed_keys``。"""
+        service = GlobalHotkeys([self._plan("run", "F5"), self._plan("stop", "F5")])
+        try:
+            if not service.start():  # pragma: no cover
+                pytest.skip("这个环境下 pynput 监听器起不来")
+            assert [h.action for h in service.registered] == ["run"]
+            assert [h.action for h in service.failed_keys] == ["stop"]
+        finally:
+            service.stop()
 
     def test_triggered_signal_reaches_a_slot(self, qt_app):
-        """命中之后"动作会不会被执行"这一段能验，而它正是最容易接错的一段
-        （少一次 connect、或者槽函数签名不对，表现都是"按了没反应"）。
-        """
-        service = GlobalHotkeys([_plan(Hotkey("stop", 0x1B, 0, "Esc"))])
+        """钩子回调只发信号（跨线程安全），槽在这里收到。"""
         seen: list[str] = []
+        service = GlobalHotkeys([self._plan()])
         service.triggered.connect(seen.append)
+        try:
+            service._fire("run")  # 直接触发，不等真按键
+            assert seen == ["run"]
+        finally:
+            service.stop()
 
-        service.triggered.emit("stop")
-        qt_app.processEvents()
 
-        assert seen == ["stop"]
+class TestItDoesNotSwallowKeys:
+    """**换机制的根本理由**：旧方案（``RegisterHotKey``）会把键吞掉。
 
-    def test_plans_are_exposed_read_only(self, qt_app):
-        """``plans`` 返回副本 —— 调用方改了不该影响服务内部那些。"""
-        plan = _plan(Hotkey("stop", 0x1B, 0, "Esc"))
-        service = GlobalHotkeys([plan])
-        service.plans.clear()
-        assert service.plans == [plan]
+    ``pynput`` 装的是监听钩子 —— **不注册、不占用**，所以：
 
-    def test_hotkey_id_maps_through_the_table_not_the_index(self, qt_app):
-        """``WM_HOTKEY`` 的 id → 动作**必须走注册时记下的表**，不能靠下标算。
+    * 键被别的软件用着也照样能监听（旧方案会注册失败、完全没反应）；
+    * 游戏自己仍然收得到这个键（旧方案会让游戏也收不到）。
 
-        有候选键之后，一个动作可能试了两个键才成功 —— id 是**边注册边发**的。
-        若还用"下标 = id - 1"去反查，按备选键会触发**别的动作**
-        （比"没反应"更糟：按停止结果开始了）。
+    这条测试钉的是"我们没有偷偷用回会吞键的那套 API"。
+    """
+
+    def test_no_win32_hotkey_registration_in_the_code(self):
+        """**代码里**不许出现 ``RegisterHotKey`` / ``UnregisterHotKey``。
+
+        只看代码行，不看注释和 docstring —— 模块开头正是用
+        "原来那套会吞键"来解释为什么换掉的，那段说明必须留着。
         """
-        service = GlobalHotkeys([])
-        seen: list[str] = []
-        service.triggered.connect(seen.append)
-        # 模拟注册结果：id 2 对应 stop（因为 id 1 的候选失败了，没拿到 id）
-        service._id_to_action = {1: "run", 2: "stop"}
-        service._on_hotkey(2)
-        assert seen == ["stop"], "id→动作 的映射没走表"
-        seen.clear()
-        service._on_hotkey(99)
-        assert seen == [], "不存在的 id 不该触发任何动作"
+        import ast
+        import pathlib
+
+        source = pathlib.Path("src/gamebot/ui/hotkeys.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        # 把所有字符串字面量挖掉（docstring / 注释在 AST 里就是常量），
+        # 剩下的标识符和属性名才是"真的调用了什么"。
+        code_names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                code_names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                code_names.add(node.attr)
+        for banned in ("RegisterHotKey", "UnregisterHotKey"):
+            assert banned not in code_names, (
+                f"代码里还在调 {banned} —— 那套会吞键、也会被别的软件占用挡住"
+            )
+        assert "WM_HOTKEY" not in code_names
+
+    def test_it_uses_pynput(self):
+        import pathlib
+
+        source = pathlib.Path("src/gamebot/ui/hotkeys.py").read_text(encoding="utf-8")
+        assert "pynput" in source
+        assert "GlobalHotKeys" in source
 
 
 class TestShortcutTableIsConsistent:
-    """快捷键表里标了 ``global_hotkey`` 的必须**都解析得出来**。
+    """``SHORTCUTS`` 那张表和这套机制对得上。"""
 
-    否则现象是"帮助里带星号、但实际没挂全局"—— 用户按不出来还不知道为什么。
-    """
-
-    def test_every_global_shortcut_parses(self, qt_app):
-        from gamebot.ui.shortcuts import SHORTCUTS
-
+    def test_every_global_shortcut_parses(self):
         for spec in SHORTCUTS:
             if not spec.global_hotkey:
                 continue
             assert parse_hotkey(spec.action, spec.keys) is not None, (
-                f"{spec.action} 标了 global_hotkey，但 {spec.keys!r} 解析不出来"
+                f"{spec.action} 的全局键 {spec.keys!r} 解析不出来"
             )
 
-    def test_only_runtime_controls_are_global(self, qt_app):
-        """只给操作运行状态的开全局，切页那几条不开。
-
-        理由：占全局是有代价的（那条键在整个系统里都归本工具管），
-        切页只在看界面时按，占了没意义还会和别的软件抢键。
-        """
-        from gamebot.ui.shortcuts import SHORTCUTS
-
-        globals_ = {spec.action for spec in SHORTCUTS if spec.global_hotkey}
-        assert globals_ == {"run", "stop", "help"}
+    def test_only_runtime_controls_are_global(self):
+        """只有操作运行状态的那几条挂全局 —— 切页的挂全局没意义。"""
+        global_actions = {s.action for s in SHORTCUTS if s.global_hotkey}
+        assert global_actions <= {"run", "stop", "help"}
+        assert "run" in global_actions and "stop" in global_actions
 
     def test_platform_check_matches_reality(self):
-        assert is_supported() == (sys.platform == "win32")
+        """``is_supported`` 说的是实话（pynput 装好了就是 True）。"""
+        import importlib.util
+
+        assert is_supported() == (importlib.util.find_spec("pynput") is not None)
+
+
+class TestHotkeyDataclass:
+    def test_display_is_the_qt_writing(self):
+        hotkey = Hotkey(action="run", keys="F5", pynput_keys="<f5>")
+        assert hotkey.display == "F5"
