@@ -361,6 +361,9 @@ class WindowsInputBackend:
         *,
         engine: str = "direct",
         key_hold: float = 0.02,
+        move_settle: float = 0.08,
+        move_glide: float = 0.12,
+        glide_steps: int = 8,
         offset_provider: Any = None,
         coordinate_space: str = "source",
     ) -> None:
@@ -373,6 +376,13 @@ class WindowsInputBackend:
         self.engine = engine
         self.key_hold = key_hold
         self.coordinate_space = coordinate_space
+        #: 移到点上之后、按下之前等多久。**不是保险，是必需品** —— 见 :meth:`click`。
+        #: 0 关掉（调脚本时想复现"点了没反应"可以用）。
+        self.move_settle = move_settle
+        #: 滑到目标点的总时长和步数（见 :meth:`_glide`）。
+        #: ``move_glide=0`` 或 ``glide_steps=1`` 退化成瞬移 —— 复现问题用的。
+        self.move_glide = move_glide
+        self.glide_steps = glide_steps
         self._impl: Any = None
         self._offset_provider = offset_provider
 
@@ -451,6 +461,56 @@ class WindowsInputBackend:
         x, y = self._absolute(point)
         self._load().moveTo(x, y, duration=duration)
 
+    def _glide(self, impl: Any, x: int, y: int, *, steps: int, duration: float) -> None:
+        """把鼠标**分多步**移到 ``(x, y)``，中间发出真实的移动事件。
+
+        ## 为什么不直接用 ``impl.moveTo(x, y, duration=...)``
+
+        试过了，它不行：``pydirectinput.moveTo`` 带 duration 时走的是
+        ``moveRel(x - currentX, y - currentY, relative=True)`` ——
+        **一次 SendInput 发完整个位移**，不是插值。游戏那一帧收到的还是
+        "从 A 跳到 B"（甚至只有相对位移量），中间没有经过任何位置。
+
+        而这个方法每步都调 ``moveTo``（绝对坐标），所以每步都是一次真实的
+        移动事件 —— 游戏的指针轨迹是连续的。
+
+        ## 为什么需要连续轨迹
+
+        有些游戏（尤其是带 3D 场景/自由视角的）自己维护鼠标位置，
+        只认"连续移动"的轨迹；直接跳过去那一跳它可能当成视角回正而丢掉。
+        对这类游戏，"瞬移 + 点"和"滑过去 + 点"是**两种不同的结果**。
+
+        步数和总时长都夹住了：太短没效果（事件太少），太长是白等
+        （每步还带一次 SendInput）。
+
+        **这段原来是 ``drag()`` 里的内联代码**，抽出来给 :meth:`click` 共用 ——
+        两处各写一遍迟早不一致，而它们要解决的是同一个问题。
+        """
+        current = self._cursor_or_none()
+        if current is None or steps <= 1 or duration <= 0:
+            impl.moveTo(x, y, duration=0)
+            return
+        sx, sy = current
+        # 距离太近就不插值了：一步到位的事件量已经够，还省时间
+        if abs(x - sx) + abs(y - sy) < 4:
+            impl.moveTo(x, y, duration=0)
+            return
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            impl.moveTo(round(sx + (x - sx) * ratio), round(sy + (y - sy) * ratio), duration=0)
+            if step < steps:
+                time.sleep(duration / steps)
+
+    @staticmethod
+    def _cursor_or_none() -> tuple[int, int] | None:
+        """鼠标现在在哪。读不到就返回 None（不想因为读指针失败而点不出去）。"""
+        try:
+            import win32api
+
+            return win32api.GetCursorPos()
+        except Exception:
+            return None
+
     def click(
         self,
         point: Point,
@@ -459,12 +519,46 @@ class WindowsInputBackend:
         clicks: int = 1,
         interval: float = 0.1,
     ) -> None:
+        """**滑过去** -> 停一下 -> 按下抬起。
+
+        ## 两个"多做的一步"，都是踩出来的
+
+        **① 滑过去，不是瞬移。** 用 :meth:`_glide` 分多步移动，让游戏收到一条
+        连续轨迹。原来 ``moveTo(duration=0)`` 是一跳到位，有些游戏会把它当成
+        "视角回正"而丢掉这一次指针变化。
+
+        **② 滑到之后停一下再按。** 原来移动完**立刻**点，零间隔。
+        游戏的位置跟踪在它自己的帧里做，按压消息会带着**移动前的位置**到达 ——
+        于是这一下被当成"在别处点了一下"丢掉。
+
+        ## 这个 bug 为什么难查
+
+        从外面看每一步都对：动作层返回成功、``GetCursorPos`` 也确实是目标点、
+        日志里识别也命中了。**唯一能看出问题的地方是游戏自己没反应。**
+
+        实测症状：鼠标到了正确位置，但界面不跳转（``enter_jingji`` 在 journal 里
+        连续几十次 ``success``，流程就是不走）。
+
+        :param interval: 多击之间的间隔。
+        """
         impl = self._load()
         x, y = self._absolute(point)
-        impl.moveTo(x, y, duration=0)
+        self._glide(impl, x, y, steps=self.glide_steps, duration=self.move_glide)
+
+        # 等游戏把"鼠标到这儿了"处理进去。默认 0.08s ≈ 5 帧（60fps），
+        # 够它跑完一次位置更新；再长就只是白等。
+        if self.move_settle > 0:
+            time.sleep(self.move_settle)
+
         if clicks <= 1:
-            impl.click(button=button)
+            # 单击也显式拆成 down/up（不用 impl.click）：一是能控住按住时长
+            # ——部分游戏把过短的按下当抖动丢掉；二是和多击那条路径同一套动作，
+            # 少一条只在单击时才走的分支。
+            impl.mouseDown(button=button)
+            time.sleep(self.key_hold)
+            impl.mouseUp(button=button)
             return
+
         # 多次点击自己拆开：不同后端对 clicks/interval 的处理不一致，
         # 显式 mouseDown/mouseUp + sleep 最可控（双击尤其明显）。
         for index in range(clicks):
@@ -564,6 +658,9 @@ def build_windows_backends(
     client_area_only: bool = True,
     input_engine: str = "direct",
     coordinate_space: str = "source",
+    move_settle: float = 0.08,
+    move_glide: float = 0.12,
+    glide_steps: int = 8,
     **_ignored: Any,
 ) -> BackendBundle:
     """装配 Windows 三件套。
@@ -587,6 +684,9 @@ def build_windows_backends(
             engine=input_engine,
             offset_provider=screen.source_region,
             coordinate_space=coordinate_space,
+            move_settle=move_settle,
+            move_glide=move_glide,
+            glide_steps=glide_steps,
         ),
         window=WindowsWindowBackend(client_area_only=client_area_only),
     )
