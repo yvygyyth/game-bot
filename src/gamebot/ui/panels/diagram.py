@@ -102,6 +102,8 @@ class _Diagram(QGraphicsView):
         self._user_zoomed = False
         #: 画完了但还没适配（等有了真实尺寸再适配，见 showEvent）
         self._fit_pending = False
+        #: 正在重画（``_redraw`` 块内）—— 块内不自动适配
+        self._rebuilding = False
         #: 中键拖拽的起点（``None`` = 没在拖）。左键也能拖（``ScrollHandDrag``），
         #: 但左键在图元上会被它自己接管；中键是通用的"平移"手势，补一个。
         self._pan_from: QPointF | None = None
@@ -165,8 +167,16 @@ class _Diagram(QGraphicsView):
         if self._fit_pending and not self._user_zoomed:
             self.reset_view()
 
-    def reset_view(self) -> None:
-        """缩放到"刚好看得清"。
+    def reset_view(self, *, force: bool = False) -> None:
+        """缩放到"刚好看得清"。**用户自己调过之后就不再自动调它。**
+
+        这是修"一放大就缩回去"的**根本那一句**：重画（每轮一次）原来无条件
+        调它，于是 ``resetTransform()`` 把用户刚放大的比例顶回去。
+        现在它自己判断 —— 用户动过就不动。
+
+        :param force: 忽略"用户动过"。给**换了个场景**这种场合用：
+            换脚本之后必然想看到新图的全貌，而不是继承上一个脚本的视角。
+            （运行中的每轮重画**不要**传它 —— 那正是要避免的。）
 
         **不直接 fitInView**：场景很小（比如只有两三个节点）时它会忠实地把
         内容放大到铺满整个视口 —— 小图被拉到糊，而且看不出整体结构。
@@ -175,6 +185,10 @@ class _Diagram(QGraphicsView):
 
         视口还没布局好（几十像素）时只记下"待适配"，等 ``showEvent`` 再算。
         """
+        if not force and (self._user_zoomed or self._rebuilding):
+            # 用户已经把视角调好了（或者正在重画途中）—— 别碰它。
+            # 这里不报错也不提示：滚一下滚轮就是明确的"我要这个视角"。
+            return
         self._fit_pending = True
         self.resetTransform()
         bounds = self._scene.itemsBoundingRect()
@@ -190,7 +204,6 @@ class _Diagram(QGraphicsView):
         self.scale(scale, scale)
         self.centerOn(bounds.center())
         self._fit_pending = False
-        self._user_zoomed = False
 
     # -- 绘制零件 ---------------------------------------------------------- #
     def _node(
@@ -440,6 +453,49 @@ class _Diagram(QGraphicsView):
         text.setPos(10, 10)
         self._scene.addItem(text)
 
+    # -- 重画时保住视角 ------------------------------------------------------ #
+    def _redraw(self) -> Any:
+        """清场景 -> 重画的上下文管理器，**保住用户调好的视角**。
+
+        运行中每一轮都会重画（高亮当前状态），而重画会 ``_scene.clear()`` 再
+        把节点全建一遍。这带来两个问题：
+
+        1. 原来每次重画末尾都无条件调 :meth:`reset_view` —— 那会
+           ``resetTransform()`` 把**用户刚放大的比例顶回去**。运行中每轮一次，
+           所以"一放大就缩回去"。
+        2. 清场景那一瞬间 ``sceneRect`` 变空，滚动范围跟着塌掉、再撑开，
+           于是**平移量也会跳**（移到别处的视角会被拉回来）。
+
+        这个上下文做两件事：清之前记下**视口中心对应的场景坐标**，
+        画完恢复它；以及只在用户**没有自己调过**的时候才自动适配。
+
+        用法：
+
+            with self._redraw():
+                self._scene.clear()
+                ...画...
+
+        ``reset_view()`` 只在块内或块外被明确调用时才生效 ——
+        ``show_tree`` / ``show_graph`` 里那两处调用点已经改成走这里的判断。
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _cm() -> Any:
+            center = self.mapToScene(self.viewport().rect().center())
+            self._rebuilding = True
+            try:
+                yield
+            finally:
+                self._rebuilding = False
+                # 场景重建之后，把视角挪回原来那个场景坐标 ——
+                # 换了内容也不跳（用户在看哪就还在哪）。
+                # 空场景不恢复（centerOn 会把视图挪到 (0,0) 那种地方）。
+                if not self._scene.itemsBoundingRect().isEmpty():
+                    self.centerOn(center)
+
+        return _cm()
+
 
 def _elide(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -495,7 +551,23 @@ class StateTreeView(_Diagram):
             不一致时，两个都标出来（一个红、一个绿边），一眼就能看出"它以为在哪、
             实际在哪、是不是正在重定位"。
         :param overlay_pages: 命中的叠加层，标个 "+弹窗" 记号。
+
+        ## 重画不影响用户调好的视角
+
+        运行中每轮都会调它（高亮当前状态），但**用户放大过的比例和拖动到的
+        位置都保住**（见 :meth:`_redraw` 和 :meth:`reset_view`）。
         """
+        with self._redraw():
+            self._build_tree(tree, current_page, current_node_page, overlay_pages)
+
+    def _build_tree(
+        self,
+        tree: Any,
+        current_page: str,
+        current_node_page: str,
+        overlay_pages: tuple[str, ...],
+    ) -> None:
+        """真正画的那部分（由 :meth:`show_tree` 包在 ``_redraw`` 里调）。"""
         self._scene.clear()
         if tree is None or len(tree) == 0:
             self._empty("（没有状态树：先选一个脚本）")
@@ -560,6 +632,16 @@ class FlowDiagramView(_Diagram):
     def show_graph(
         self, graph: Any, *, current: str = "", bindings: Any = None
     ) -> None:
+        """重画整张图。**和 :meth:`StateTreeView.show_tree` 一样保住视角。**
+
+        运行中每轮都会调它（高亮当前节点），所以用户放大过的比例和拖动到的
+        位置都必须留住 —— 否则"一放大就缩回去"。
+        """
+        with self._redraw():
+            self._build_graph(graph, current, bindings)
+
+    def _build_graph(self, graph: Any, current: str, bindings: Any) -> None:
+        """真正画的那部分（由 :meth:`show_graph` 包在 ``_redraw`` 里调）。"""
         self._scene.clear()
         if graph is None or len(graph) == 0:
             self._empty("（没有流程图：先选一个脚本）")
@@ -674,8 +756,17 @@ class DiagramPanel(QWidget):
         layout.addWidget(vertical, 1)
 
     def set_scenario(self, scenario: Scenario | None) -> None:
+        """换一个脚本（或清空）。
+
+        **换场景时强制重新适配视角**：新图的结构和上一个没关系，
+        继承上一个的放大比例只会让人莫名其妙。而运行中的每轮
+        :meth:`refresh` **不会**强制 —— 那正是"用户调好的视角要留住"的地方。
+        """
         self._scenario = scenario
         self.refresh()
+        if scenario is not None:
+            self._tree_view.reset_view(force=True)
+            self._graph_view.reset_view(force=True)
 
     def refresh(
         self,
@@ -685,7 +776,14 @@ class DiagramPanel(QWidget):
         current_node_page: str = "",
         overlays: tuple[str, ...] = (),
     ) -> None:
-        """按当前运行状态重画。运行中每轮都会调（几毫秒，可以承受）。"""
+        """按当前运行状态重画。**运行中每轮都会调**（几毫秒，可以承受）。
+
+        ## 它**不**动视角
+
+        高亮"当前在哪一格"是每轮都变的，但用户放大/拖动出来的视角是他自己
+        调的。重画保比例、保位置（见 ``_Diagram._redraw``），
+        所以脚本跑着的时候也能安心放大看细节。
+        """
         scenario = self._scenario
         if scenario is None:
             self._tree_view.show_tree(None)
