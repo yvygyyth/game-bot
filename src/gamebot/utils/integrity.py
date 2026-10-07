@@ -215,12 +215,12 @@ def check_integrity(window_title: str = "") -> str | None:
     return (
         f"**权限不够，输入发不进游戏**：本进程完整性级别 = {mine.name}，"
         f"而「{window_title}」= {theirs.name}。\n"
-        "  Windows 的 UIPI 规定低完整性进程不能给高完整性窗口发输入 ——\n"
+        "  Windows 的 UIPI 规定：**发送方进程的级别必须 >= 目标窗口的级别**。\n"
         "  表现正是「鼠标会动、点击无效、失焦后快捷键也没反应」"
         "（SendInput 返回成功但被丢掉）。\n"
-        "  怎么办：**从一个普通（非提权受限）的终端启动本程序**，"
-        "例如直接在你的 cmd / PowerShell / Windows Terminal 里跑；\n"
-        "  如果是从某个沙箱或受限宿主里启动的，它继承的完整性级别会一直带下来。"
+        "  怎么办：**以管理员身份运行**（右键启动脚本 -> 以管理员身份运行，"
+        "或在管理员终端里跑）。\n"
+        "  这台机器上实测：Low / Medium 都不行，High（管理员）才可以。"
     )
 
 

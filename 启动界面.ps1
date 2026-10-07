@@ -1,22 +1,31 @@
 # gamebot 界面启动器
 #
-# **在资源管理器里双击本文件**（或右键 -> 使用 PowerShell 运行）。
+# ## 必须"以管理员身份运行"
 #
-# ## 为什么要"双击"这件事很重要
+# 这台机器上**游戏是提权运行的**，而 Windows 有一条硬规则：
 #
-# 这个脚本**必须由普通权限启动**，原因是 Windows 的 UIPI：
-# **低完整性级别的进程不能给高完整性级别的窗口发输入**。
-# 目标游戏是"普通用户"（Medium）级别，而比它低的进程：
+#     UIPI —— 发送方进程的完整性级别必须 >= 目标窗口的级别
+#
+# 级别不够时的表现**全部是静默的**，看起来像代码写错了：
 #
 #   * 鼠标指针**会**移到正确位置（SetCursorPos 不受 UIPI 限制）；
 #   * 但点击**不生效**（SendInput 返回成功，消息被悄悄丢掉）；
-#   * 失焦后全局快捷键也收不到（键盘钩子装在低权限进程里）。
+#   * 失焦后全局快捷键也收不到（低级键盘钩子收不到高完整性窗口的按键）。
 #
-# 这三件事**都不报错** —— 排查时看起来完全像"坐标算错了"或
-# "游戏不认合成输入"。真相在权限上。
+# 实测（这台机器）：
 #
-# 从资源管理器双击起来的进程会继承资源管理器（普通用户）的级别，
-# 所以"双击"不只是图方便，它是**能用的前提**。
+#     从普通终端启动（Low）      -> 点击无效、监听无效
+#     普通双击（Medium）         -> 点击无效、监听无效
+#     以管理员身份运行（High）    -> **能点击、能失焦监听** ✓
+#
+# 所以：**右键本文件 -> 以管理员身份运行**（或在管理员终端里跑
+# `uv run python -m gamebot ui`）。
+#
+# ## 为什么要检查并拦下来
+#
+# 因为失败是静默的：级别不够时程序**看起来完全正常**（启动成功、识别命中、
+# 动作层返回 success），只有游戏没反应。不拦的话下一步一定是去调坐标、
+# 重裁模板、换输入引擎 —— 全都无效，因为原因在权限上。
 #
 # ## 为什么不给 .bat
 #
@@ -97,25 +106,40 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 # ---- 权限检查：这是能不能操作游戏的前提 ----
 $mine = Get-IntegrityLevel -ProcessId $PID
 Write-Host ''
-if ($mine -in @('Medium', 'Medium+', 'High', 'System')) {
+if ($mine -in @('High', 'System')) {
     Write-Host "权限: $mine" -ForegroundColor Green -NoNewline
-    Write-Host '  —— 和游戏同级或更高，输入送得进去'
-} elseif ($mine -in @('Low', 'Untrusted')) {
+    Write-Host '  —— 管理员级别，比游戏高，输入送得进去'
+} elseif ($mine -in @('Medium', 'Medium+', 'Low', 'Untrusted')) {
     Write-Host "权限: $mine" -ForegroundColor Red -NoNewline
-    Write-Host '  —— 太低了，输入发不进游戏！' -ForegroundColor Red
+    Write-Host '  —— 可能不够，输入会**静默失效**！' -ForegroundColor Red
     Write-Host ''
-    Write-Host '  Windows 的 UIPI 规定：低权限进程不能给高权限窗口发输入。' -ForegroundColor Red
-    Write-Host '  表现是「鼠标会动，但点击无效、失焦后快捷键也没反应」——而且不报错。' -ForegroundColor Red
+    Write-Host '  这台机器上游戏是**提权运行**的，而 Windows 规定：' -ForegroundColor Yellow
+    Write-Host '    发送方进程的完整性级别必须 >= 目标窗口的级别（UIPI）。' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host '  请换一个方式启动：' -ForegroundColor Yellow
-    Write-Host '    * 在资源管理器里双击本文件；或者' -ForegroundColor Yellow
-    Write-Host '    * 在一个正常打开的终端（Windows Terminal / PowerShell）里跑' -ForegroundColor Yellow
-    Write-Host '        uv run python -m gamebot ui' -ForegroundColor Yellow
+    Write-Host '  级别不够的表现（全都不报错，看起来像代码写错了）：' -ForegroundColor Yellow
+    Write-Host '    * 鼠标会移到正确位置，但点击不生效；' -ForegroundColor Yellow
+    Write-Host '    * 失焦后全局快捷键也收不到（键盘钩子收不到高权限窗口的按键）。' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host '  不要从受限宿主（沙箱 / AI 工具自带的终端等）里启动 —— 级别会一直带下来。' -ForegroundColor Yellow
+    Write-Host '  实测对照：' -ForegroundColor Cyan
+    Write-Host '    Low / Medium -> 点击无效、监听无效' -ForegroundColor Cyan
+    Write-Host '    High（管理员）-> **能点击、能失焦监听** ✓' -ForegroundColor Cyan
     Write-Host ''
-    Read-Host '按回车关闭'
-    exit 1
+    Write-Host '  请改成：**右键本文件 -> 以管理员身份运行**，' -ForegroundColor Green
+    Write-Host '  或者在一个**管理员**终端里跑 uv run python -m gamebot ui。' -ForegroundColor Green
+    Write-Host ''
+    $answer = Read-Host '  现在就用管理员权限重新启动吗？(Y/n)'
+    if ($answer -eq '' -or $answer -match '^[Yy]') {
+        Write-Host ''
+        Write-Host '  正在请求管理员权限…（会弹 UAC）' -ForegroundColor Yellow
+        # 用 Start-Process -Verb RunAs 重新拉起自己（提权）
+        Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', "`"$PSCommandPath`""
+        )
+        exit 0
+    }
+    Write-Host ''
+    Write-Host '  （继续启动，但输入很可能送不进去）' -ForegroundColor DarkGray
 } else {
     Write-Host "权限: $mine （读不出来，跳过判断）" -ForegroundColor DarkGray
 }
