@@ -45,7 +45,7 @@
 #      它会自己弹 UAC。
 #
 # 只在 VS Code 里改代码 / 跑单元测试的话，**不需要管理员** ——
-# 单元测试不碰真机输入。要碰真机（games run / games poke）才需要。
+# 单元测试不碰真机输入。要碰真机（games run / games doctor）才需要。
 
 param(
     [string]$Command = ''
@@ -173,7 +173,7 @@ Write-Host '  python -m games list                      # 有哪些脚本'
 Write-Host '  python -m games doctor mingjiangsha/jingji # **跑之前先自检**（权限/前台/模板/抓屏）'
 Write-Host '  python -m games run mingjiangsha/jingji --dry-run --max-ticks 5   # 空跑：只识别不动手'
 Write-Host '  python -m games run mingjiangsha/jingji    # 真跑'
-Write-Host '  python -m games poke  mingjiangsha/jingji 1365 585   # 点一下并报告全过程'
+Write-Host '  python -m games describe mingjiangsha/jingji          # 看状态树 + 流程图'
 Write-Host '  pytest tests/ -q                          # 单元测试（不需要管理员）'
 Write-Host ''
 Write-Host '真机操作前请先跑 doctor：它会查权限级别、前台窗口、模板、抓屏。' -ForegroundColor DarkGray

@@ -55,8 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", parents=[common], help="运行流程")
     p_run.add_argument("--dry-run", action="store_true", help="只识别不操作")
-    p_run.add_argument("--max-runtime", type=float, default=None, help="总时长上限（秒）")
-    p_run.add_argument("--max-ticks", type=int, default=None, help="最大轮数")
     p_run.add_argument("--window", default=None, help="覆盖窗口标题")
     p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
 

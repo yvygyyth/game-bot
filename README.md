@@ -143,7 +143,8 @@ game-bot/
 │   ├── config/                  # 配置模型与加载
 │   └── utils/                   # 日志、计时
 ├── tests/                       # 框架的结构测试 + 单元测试
-└── main.py                      # 不安装也能跑：uv run python main.py run
+├── gamebot.exe                  # 打包好的界面：双击它（见 docs/getting-started.md）
+└── packaging/                   # 打包脚本（build_exe.py + 入口 entry.py）
 ```
 
 **框架和业务是分开的**：`src/gamebot/` 不认识任何具体游戏；
@@ -212,23 +213,18 @@ uv run gamebot run                # 真跑
 > 不是能直接跑的东西。要查一个真脚本用
 > `uv run python -m games check <脚本>`。
 
-不装包也能用（`main.py` 自动把 `src/` 加进 `sys.path`）：
-
-```bash
-uv run python main.py capture -o a.png
-```
-
 ### 写脚本（业务层）
 
 ```bash
 uv run python -m games list                          # 有哪些脚本
 uv run python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
 uv run python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
+uv run python -m games doctor   mingjiangsha/jingji  # 跑真机之前先自检（权限/前台/模板/抓屏）
 
-# 真的跑起来。建议按 check -> --dry-run -> 真跑 的顺序来
+# 真的跑起来。建议按 doctor -> --dry-run -> 真跑 的顺序来
 uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
-uv run python -m games run mingjiangsha/jingji --max-runtime 300          # 真跑
-uv run python -m games run mingjiangsha/jingji --node jingji              # 从中间某个节点开始调
+uv run python -m games run mingjiangsha/jingji                            # 真跑
+uv run python -m games run mingjiangsha/jingji --param rounds=3           # 传运行参数
 ```
 
 `run` 跑完会打三样最该看的东西：**停止原因**、**每次重定位**
@@ -391,7 +387,7 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 | 改界面 | `uv run gamebot ui`（可加 `--script mingjiangsha/jingji` 预选） | **不用** |
 | 跑测试 | `uv run pytest` | **不用**（假后端） |
 | 改识图/流程 | `uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20` | **要** |
-| 只跑某一条分支 | 上面加 `--node <节点>`：把游戏手动摆到那一步，不用从头玩 | **要** |
+| 只跑某一条分支 | 界面上选「从哪个节点开始」；命令行没有这个开关（那是调试用的少数派场景） | **要** |
 | 看定义对不对 | `uv run python -m games check mingjiangsha/jingji` | 不用 |
 | 调真机识别 | 起来跑一次，看界面的「识图日志」（带红框的图 + 分数表） | **要** |
 | 无头环境（CI / 没显示器） | `QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png` | 不用 |

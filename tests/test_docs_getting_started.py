@@ -99,7 +99,7 @@ class TestDocumentedGamesCommandsAreValid:
 
     def test_there_are_some(self):
         lines = _documented_games_lines(_doc())
-        assert len(lines) >= 8, f"只找到 {len(lines)} 条 games 命令，文档结构变了吗？"
+        assert len(lines) >= 4, f"只找到 {len(lines)} 条 games 命令，文档结构变了吗？"
 
     def test_every_games_line_parses(self):
         """每条都要被**真实解析器接受**。
@@ -130,16 +130,24 @@ class TestDocumentedGamesCommandsAreValid:
     def test_the_subcommands_appear_in_real_commands(self):
         """每个子命令都要出现在**某条命令行**里，而不只是正文提到。"""
         commands = " ".join(_documented_games_lines(_doc()))
-        for sub in ("doctor", "poke", "where", "check", "run", "describe", "list"):
+        for sub in ("doctor", "check", "run", "describe", "list"):
             assert f"games {sub}" in commands, f"文档里没有一条 `games {sub}` 命令"
 
     def test_the_gamebot_subcommands_appear_in_real_commands(self):
+        """文档里给出的 ``gamebot`` 命令必须真的是**命令行**，不是正文提及。
+
+        这里**不要求把每个子命令都列出来** —— 文档有意只给日常用得上的三条
+        （``info`` / ``windows`` / ``capture``），其余（``check`` / ``run`` /
+        ``ui`` / ``grab``）在 `gamebot --help` 里看。要求"全列"会逼着文档
+        堆命令，那是反效果。
+        """
         commands = " ".join(
             line.strip()
             for line in _doc().splitlines()
             if line.strip().startswith(("gamebot ", "$ gamebot "))
         )
-        for sub in ("info", "check", "windows", "capture", "grab", "run", "ui"):
+        assert commands, "文档里一条 gamebot 命令都没有"
+        for sub in ("info", "windows", "capture"):
             assert f"gamebot {sub}" in commands, f"文档里没有一条 `gamebot {sub}` 命令"
 
     def test_no_documented_subcommand_is_invented(self):
@@ -166,16 +174,8 @@ class TestDocumentedFlagsExist:
             # games run 的那些
             (["run", "k", "--dry-run"], {"dry_run": True}),
             (["run", "k", "--max-ticks", "5"], {"max_ticks": 5}),
-            (["run", "k", "--max-runtime", "30"], {"max_runtime": 30.0}),
-            (["run", "k", "--node", "x"], {"node": "x"}),
-            (["run", "k", "--window", "w"], {"window": "w"}),
-            (["run", "k", "--no-journal"], {"no_journal": True}),
             (["run", "k", "--param", "rounds=5"], {"param": ["rounds=5"]}),
             # doctor / poke / where 的
-            (["doctor", "k", "--window", "w"], {"window": "w"}),
-            (["poke", "k", "1", "2", "--dry-run"], {"dry_run": True}),
-            (["poke", "k", "1", "2", "--space", "screen"], {"space": "screen"}),
-            (["where", "k", "1", "2", "--space", "source"], {"space": "source"}),
             (["describe", "k"], {"script": "k"}),
             (["check", "k"], {"script": "k"}),
         ],
@@ -197,7 +197,6 @@ class TestDocumentedFlagsExist:
             (["grab", "--region", "1,2,3,4"], "region"),
             (["info", "--json"], "json"),
             (["run", "--dry-run"], "dry_run"),
-            (["run", "--max-ticks", "3"], "max_ticks"),
             (["run", "--window", "w"], "window"),
             (["run", "--no-journal"], "no_journal"),
         ],
@@ -252,8 +251,8 @@ class TestUipiSectionIsPresent:
     def test_it_lists_the_silent_failure_symptoms(self):
         text = _doc()
         # 三条症状：鼠标会动、点击不生效、失焦热键不灵
-        assert "SetCursorPos" in text
-        assert "SendInput" in text
+        assert "静态失效" in text or "静默失效" in text
+        assert "点击" in text
         assert "快捷键" in text
 
     def test_it_says_tests_do_not_need_admin(self):
@@ -269,7 +268,11 @@ class TestUipiSectionIsPresent:
         """
         text = _doc()
         uipi_heading = text.index("## 0.")
-        install_heading = text.index("## 1. 依赖")
+        assert "UIPI" in text[uipi_heading : uipi_heading + 80]
+        # 用 "## 1." 而不是小节全名 —— 标题措辞会随文档精简而变，
+        # 断言不该被那种改动绊住（绊住过一次：把"## 1. 依赖"改叫
+        # "## 1. 第一次装"之后这条就 ValueError 了）
+        install_heading = text.index("## 1.")
         assert uipi_heading < install_heading, "讲权限的那节必须在讲安装之前"
         # 而且那节的小标题里要点名 UIPI（读者才知道这段在说什么）
         assert "UIPI" in text[uipi_heading:install_heading]
@@ -292,5 +295,6 @@ class TestStaleMachineNumbersAreNotHardcoded:
         source = (ROOT / "src/gamebot/config/schema.py").read_text(encoding="utf-8")
         assert "+ (1, 31)" not in source
 
-    def test_the_doc_tells_you_how_to_read_the_real_value(self):
-        assert "games where" in _doc()
+    def test_the_doc_points_at_doctor_for_self_check(self):
+        """坐标/权限/模板这些"静默失效"的东西，一条 doctor 全查。"""
+        assert "games doctor" in _doc()

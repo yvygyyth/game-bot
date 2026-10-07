@@ -223,7 +223,12 @@ class TestIntegrityModuleIsUsed:
         assert "check_integrity" in source
 
     def test_cli_reports_it(self):
-        source = _source("games/poke.py")
+        """命令行那边由 ``doctor`` 报。
+
+        （``poke`` / ``where`` 已经删了 —— 诊断命令不该有一堆，
+        留一个 ``doctor`` 把权限 / 前台 / 模板 / 抓屏全查了。）
+        """
+        source = _source("games/doctor.py")
         assert "check_integrity" in source
 
     def test_gui_shows_it_in_the_log_panel(self):

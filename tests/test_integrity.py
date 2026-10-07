@@ -138,11 +138,14 @@ class TestBootstrapAndDiagnosticsUseIt:
         assert "check_integrity" in source
         assert "log.warning" in source
 
-    def test_poke_reports_it(self):
-        """``games poke`` 是"点了没反应"的第一诊断入口，必须报出来。"""
+    def test_doctor_reports_it(self):
+        """``games doctor`` 是跑真机前的自检入口，必须报出来。
+
+        （``poke`` / ``where`` 已经删了 —— 诊断命令留一个统一的就够。）
+        """
         import pathlib
 
-        source = pathlib.Path("games/poke.py").read_text(encoding="utf-8")
+        source = pathlib.Path("games/doctor.py").read_text(encoding="utf-8")
         assert "check_integrity" in source
 
     def test_window_shows_it_in_the_log_panel(self):

@@ -173,7 +173,7 @@ def _level_of_pid_win32(pid: int) -> IntegrityLevel | None:
 def check_integrity(window_title: str = "") -> str | None:
     """**能不能给这个窗口发输入？** 不能就返回一段给人看的说明，能就返回 ``None``。
 
-    这是给启动路径和 ``games poke`` 用的一站式检查：
+    这是给启动路径、``games doctor`` 和界面用的一站式检查：
 
     * 非 Windows -> ``None``（这个平台上没有 UIPI 这回事）；
     * 没给窗口标题 / 找不到窗口 -> ``None``（没什么可判的）；

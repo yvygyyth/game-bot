@@ -49,7 +49,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# 让业务层在"框架还没安装"时也能直接跑（和 main.py 一个思路）。
+# 让业务层在"框架还没安装"时也能直接跑。
 # 装了之后这行是无害的：src 已经在 sys.path 里了。
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:  # pragma: no cover - 取决于怎么启动

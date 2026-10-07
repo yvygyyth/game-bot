@@ -84,12 +84,12 @@ class ScreenConfig:
     screen 空间里。
 
     **别把 ``O`` 的数值记成常量** —— 它随窗口位置变，而且低权限进程读到的
-    值可能不准。要看本机真实值：``python -m games where <脚本> <x> <y>``。
+    值可能不准。要看本机真实值：``python -m games doctor <脚本>``。
 
     ## 校准
 
     这个换算依赖"捕获区在屏幕上的位置"，而它由窗口位置决定。两者对不上时
-    症状是"整体偏一个固定量"。用 ``uv run python -m games where <脚本>``
+    症状是"整体偏一个固定量"。用 ``uv run python -m games doctor <脚本>``
     把某个 source 坐标真正会点到的屏幕位置打出来，对着实际效果比一下就知道
     偏差是多少（详见那条命令的说明）。
     """

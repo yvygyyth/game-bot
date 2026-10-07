@@ -31,8 +31,6 @@ from gamebot.exceptions import GameBotError  # noqa: E402
 from games import get_script, list_scripts  # noqa: E402
 from games._spec import discovery_errors  # noqa: E402
 from games.doctor import cmd_doctor, register_doctor  # noqa: E402
-from games.poke import cmd_poke, register_poke  # noqa: E402
-from games.where import cmd_where, register_where  # noqa: E402
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -170,7 +168,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """
     from gamebot.bootstrap import build_context, build_engine
     from gamebot.exceptions import ConfigError
-    from gamebot.execution.journal import JsonlJournal, NullJournal
+    from gamebot.execution.journal import JsonlJournal
     from gamebot.flow.engine import StopReason
     from gamebot.utils.logging import setup_logging
 
@@ -184,7 +182,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     #
     # 界面那边是"表单值 → fill()"，这里是"--param → fill()"，两条路共用同一份
     # 声明做校验/转换。各写一份的话迟早出现"界面拦得住的、命令行拦不住"
-    # （或者反过来），而那种不一致查起来很难 —— 用户会以为是自己参数写错了。
+    # （或者反过来），而那种不一致很难查 —— 用户会以为是自己参数写错了。
     #
     # 顺带把**声明的默认值**也补齐：命令行只给一两个参数时，步骤读其它参数
     # 仍然拿得到值，不必再写一遍默认值。
@@ -195,19 +193,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     config = spec.build_config()
-    if args.window:
-        config.screen.window_title = args.window
     if args.dry_run:
         config.dry_run = True
 
     scenario = spec.build_scenario()
-    if args.max_runtime is not None:
-        scenario.options.max_runtime = args.max_runtime
     if args.max_ticks is not None:
         scenario.options.max_ticks = args.max_ticks
-    if args.node and scenario.graph.node(args.node) is None:
-        print(f"✗ 没有这个节点: {args.node!r}", file=sys.stderr)
-        return 2
 
     # 装配期就把能查的错查掉：配置 + 定义。
     scenario.validate()
@@ -215,17 +206,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     setup_logging(config.logging.level)
 
-    journal: Any = NullJournal()
-    if not args.no_journal:
-        journal = JsonlJournal(config.paths.resolve(config.paths.journals) / f"{spec.slug}.jsonl")
+    journal: Any = JsonlJournal(
+        config.paths.resolve(config.paths.journals) / f"{spec.slug}.jsonl"
+    )
 
     print(f"跑 {spec.key}（{spec.title}）")
     print(f"  窗口   {config.screen.window_title!r} @ {config.screen.source_size or '自动探测'}")
-    print(f"  起点   {args.node or scenario.graph.initial}")
+    print(f"  起点   {scenario.graph.initial}")
     print(f"  模式   {'空跑（只识别，不操作）' if config.dry_run else '真跑（会操作游戏）'}")
-    runtime = scenario.options.max_runtime or "不限"
     ticks = scenario.options.max_ticks or "不限"
-    print(f"  预算   {runtime}s / {ticks} 轮")
+    print(f"  预算   {ticks} 轮")
     if params:
         shown = "  ".join(f"{k}={v}" for k, v in params.items())
         print(f"  参数   {shown}")
@@ -313,25 +303,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="真的跑起来（会操作游戏）")
     p_run.add_argument("script", help="脚本 key，如 mingjiangsha/jingji")
-    p_run.add_argument("--dry-run", action="store_true", help="空跑：只识别不操作")
-    p_run.add_argument("--max-runtime", type=float, default=None, help="总时长上限（秒）")
-    p_run.add_argument("--max-ticks", type=int, default=None, help="最大轮数")
-    p_run.add_argument("--node", default="", help="从哪个节点开始（调试用，不解除状态校验）")
-    p_run.add_argument("--window", default="", help="覆盖窗口标题")
-    p_run.add_argument("--no-journal", action="store_true", help="不写 journal 文件")
+    p_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="空跑：只识别、不下发任何输入（调脚本时的默认姿势）",
+    )
+    p_run.add_argument("--max-ticks", type=int, default=None, help="最多跑几轮")
     p_run.add_argument(
         "--param",
         action="append",
         default=[],
         metavar="名字=值",
         help=(
-            "传给脚本的运行参数（入参）。可重复：--param rounds=5 --param dry=1。"
-            "步骤用 ctx.param('rounds', 默认值) 读；值会尽量转成 int/float/true/false"
+            "传给脚本的运行参数（入参），可重复。例如 --param rounds=3。"
+            "步骤用 ctx.param('rounds') 读。"
+            "不写就用脚本声明的默认值（和界面上表单的默认值同一份）。"
         ),
     )
 
-    register_where(sub)
-    register_poke(sub)
     register_doctor(sub)
 
     return parser
@@ -342,8 +331,6 @@ _HANDLERS = {
     "describe": cmd_describe,
     "check": cmd_check,
     "run": cmd_run,
-    "where": cmd_where,
-    "poke": cmd_poke,
     "doctor": cmd_doctor,
 }
 
