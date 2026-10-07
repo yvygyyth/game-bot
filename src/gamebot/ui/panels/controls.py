@@ -494,14 +494,32 @@ def _clean_title(text: str) -> str:
 
 
 def _list_windows(keyword: str = "") -> list[Any]:
-    """枚举可见窗口，返回 ``WindowInfo`` 列表。失败时返回空列表。
+    """枚举可见窗口，返回 ``WindowInfo`` 列表。
 
-    界面不该因为枚举不到就崩 —— 后端依赖平台（Windows 用 pywin32，
-    其它平台抛 ``BackendUnavailable``），这里一律吞掉。
+    ## 为什么异常要**区分对待**，不能一律吞掉
+
+    以前这里写的是"一律吞掉"（界面不该因为枚举不到就崩）。但那样一来，
+    **"装漏了 pywin32"和"当前真没有窗口"长得一模一样** —— 都是空列表、
+    都没有报错。实测踩到：``uv sync`` 只保留指定的 extras，
+    ``--extra windows`` 没带，pywin32 就被卸掉了，界面上"① 软件"那一栏
+    直接空了，而日志里一个字都没有。
+
+    现在分两种：
+
+    * ``BackendUnavailable``（缺依赖、平台不对）—— **是环境坏了**，
+      必须让它显式可见：记一条 ERROR 日志（带修法），界面那边也会显示出来；
+    * 其它异常（枚举本身出问题）—— 也记日志，同样不吞。
     """
     try:
         from ...atomic.backends.windows import WindowsWindowBackend
 
         return WindowsWindowBackend().list_windows(keyword)
-    except Exception:
+    except Exception as exc:
+        # **不再静默**：空列表和"环境坏了"必须能区分开
+        log.error(
+            "枚举窗口失败（%s: %s）——「软件」列表会显示为空。"
+            "如果是缺依赖，跑: uv sync --extra windows --extra ui",
+            type(exc).__name__,
+            exc,
+        )
         return []
