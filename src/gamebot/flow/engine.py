@@ -52,7 +52,7 @@ from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch, humanize
 from .binding import StateBinding
 from .graph import Decision, GraphCursor, Node, NodeId
-from .scenario import Scenario, UnknownPolicy
+from .scenario import Scenario
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -237,6 +237,32 @@ class FlowEngine:
     :param ctx: 运行时上下文（提供 session / 帧 / 黑板 / 中止）。
     :param executor: 执行器；None 时用 ``ctx.executor``。
     :param tracker: 页面跟踪器；None 时用 ``ctx.pages``。
+
+    ## 重定位的三个常数
+
+    出问题（认不出来 / 自检不符 / 某步失败）时**立刻**进入重定位流程，
+    但真正动手搜之前先等 :attr:`RECOVER_DELAY` 秒。三个数各有各的职责：
+
+    ==================  =====  ================================================
+    常数                默认   管什么
+    ==================  =====  ================================================
+    :attr:`RECOVER_DELAY`  5.0s  搜之前先等多久（**故意等的，见下**）
+    :attr:`RECOVER_PASSES` 2     搜几轮（一轮落空就整体再试一轮）
+    :attr:`RECENT_STATES`  5     优先查"最近待过"的几个状态
+    ==================  =====  ================================================
+
+    ## 为什么要那个前置延迟（不是保险，是必需）
+
+    "游戏界面正在过渡"和"游戏卡在一个不认识的地方"在**一帧里长得一模一样**：
+    都是"认不出来"。区分它们唯一的办法就是**等一会儿再看**。
+
+    5 秒的后缀很关键：点了按钮之后的动画、网络加载、结算翻页都在这个量级之内，
+    所以真正只是过渡的那些意外会**在延迟期间自己变回可识别的样子** ——
+    那时 `_pending_recover` 被清掉，一次搜索都不做，一个动作都不发。
+
+    而真正卡住的（比如点进了脚本没定义过的界面），延迟结束之后搜一遍、
+    两轮都没命中就**当场结束**，而不是靠宽容期慢慢耗 —— 用户看到的是
+    "停下来了，而且说清了为什么"，不是"卡着不动也不报错"。
     """
 
     def __init__(
@@ -286,7 +312,11 @@ class FlowEngine:
 
         self._stop_reason: StopReason | None = None
         self._stop_message = ""
-        self._unknown_since: float | None = None
+        #: 待执行的重定位：``(截止时刻, 期望状态, 为什么)``。**有它就说明
+        #: 已经判定"出问题了、该重定位"，只是在等前置延迟**（见 :attr:`RECOVER_DELAY`）。
+        #: 延迟期间自检一旦通过就把它清掉 —— 那正是这个延迟的用处：
+        #: 区分"真的出问题了"和"过场动画闪了一下"。
+        self._pending_recover: tuple[float, PageId, str] | None = None
         #: 当前节点上连续多少轮"没找到可做的事"（判"流程走完了"用，见 _note_stall）
         self._stall_rounds = 0
         self._recovery_warned: set[tuple[NodeId, PageId]] = set()
@@ -356,7 +386,7 @@ class FlowEngine:
         # （这条是 test_run_params 里"跑三遍"那个用例逼出来的。）
         self._stop_reason = None
         self._stop_message = ""
-        self._unknown_since = None
+        self._pending_recover = None
         self._stall_rounds = 0
         self._recovery_warned.clear()
 
@@ -506,7 +536,7 @@ class FlowEngine:
         #
         # 节点**不关联状态**（纯逻辑/纯等待节点）时不设状态、也不自检：
         # 流程图因此可以只写正常流程。认不出来（unknown）不算"走错了" ——
-        # 那是"看不清"，由 _handle_unknown 的宽容期处理。
+        # 那是"看不清"，走和关联状态时**同一条**延迟重定位（见 _recover_later）。
         bound = self.binding.state_of(node.id)
         if bound is not None:
             if anchor == bound:
@@ -515,7 +545,7 @@ class FlowEngine:
 
         # 没关联状态：只要锚点没有被**别的**节点认领，就继续待着（让位给认领它的）
         if anchor == UNKNOWN_PAGE:
-            self._handle_unknown(now)
+            self._recover_later(node.id, cause="节点不关联状态但认不出来", now=now)
             self._note_advance(now=now)
             return None
         owner = self.binding.node_for(anchor)
@@ -599,6 +629,29 @@ class FlowEngine:
         # （慢路径确认 + 关联表反查 + 记 Recovery）
         self._realign(self.ctx.frame(), node, bound, anchor, now=now, cause="步骤失败")
 
+    #: 重定位时先查"最近待过的状态"队列，查几个。
+    #:
+    #: 5 是刻意的：tick 0.4 秒上下时，这大约是**最近两秒**待过的地方 ——
+    #: 够覆盖"点了按钮进了下一屏"这种绝大多数意外，又不会把很久以前的
+    #: 状态拉进来（那等于没有优先级，还不如直接扩散）。
+    RECENT_STATES = 5
+
+    #: 重定位搜几轮。一轮落空说明"这一瞬间的画面不属于任何状态"，
+    #: 而过渡动画会持续几帧 —— 第二轮给画面一点时间变成可识别的样子。
+    #: 再多没意义：同一个画面探第三遍和第一遍没有区别。
+    RECOVER_PASSES = 2
+
+    #: 判定"出问题了"之后、真正开始搜之前，先等多久（秒）。
+    #:
+    #: **这个延迟就是"过渡动画"和"真卡住了"的分界线。** 界面在过渡时认不出来是
+    #: 正常的（点了按钮、加载中、翻页动画），等几秒它自己就变回可识别的样子 ——
+    #: 那时待执行的重定位会被清掉，一次搜索、一个动作都不做。
+    #:
+    #: 太短：过渡动画被误判成"卡住"，白搜一轮（虽然搜完会恢复）。
+    #: 太长：真卡住时要等很久才报错。
+    #: 5 秒是按"点按钮之后的动画 + 网络加载"这个量级定的。
+    RECOVER_DELAY = 5.0
+
     def _locate_now(self, *, now: float) -> PageId:
         """拿当前帧问一句"现在到底在哪个状态"（快路径，**不动跟踪器**）。
 
@@ -611,7 +664,7 @@ class FlowEngine:
           这里只是内部问一句，更新它会让确认计数凭空 +1 ——
           等于用一次内部查询把"连续 N 帧"的闸门放过去了。
         * 认不出来 / 底层报错都返回 ``UNKNOWN_PAGE``：那会走
-          :meth:`_handle_unknown` 的宽容期，是安全的默认。
+          :meth:`_recover_later` 的延迟重定位，是安全的默认。
         """
         frame = self.ctx.frame()
         found = self.scenario.tree.locate(frame, self.tracker.current_id, now=now)
@@ -633,7 +686,9 @@ class FlowEngine:
 
         这是"状态树用来在意外时重定位到某个流程节点"的实现：
 
-        1. 锚点认不出来（``unknown``）-> 宽容期内只等，超时按 ``on_unknown`` 处理。
+        1. 锚点认不出来（``unknown``）-> **记下"该重定位了"，然后等
+           :attr:`RECOVER_DELAY` 秒**。等的时候自检一旦通过就把这件事忘掉
+           （那只是过场动画）；等满了再搜树，搜不到就当场结束。
            认不出来时**绝不猜**，也绝不动作；
         2. 认得出但和预期不同 -> 用**慢路径**确认一下真实状态（快路径只验了预期），
            再问关联表"这归哪个节点管"，把游标挪过去；
@@ -645,13 +700,21 @@ class FlowEngine:
             只影响日志措辞，不改变行为：那件事只有一个正确做法。
         """
         if anchor == UNKNOWN_PAGE:
-            self._handle_unknown(now)
+            self._recover_later(expected, cause=cause, now=now)
             self._note_advance(now=now)
             return None
-        self._unknown_since = None
+        self._pending_recover = None
 
-        # 慢路径：末梢优先 + 逐步扩散。快路径只验了 expected，所以这里要重找一遍。
-        recovered = self.scenario.tree.recover(frame, near=expected, now=now)
+        # 认得出、只是和预期不同：**不用等**（画面已经明确可识别了），直接搜。
+        # 慢路径：先查"最近待过的"队列，再沿树扩散。快路径只验了 expected，
+        # 所以这里要重找一遍。
+        recovered = self.scenario.tree.recover(
+            frame,
+            near=expected,
+            recent=self.tracker.recent_ids(self.RECENT_STATES),
+            passes=self.RECOVER_PASSES,
+            now=now,
+        )
         candidate = recovered.value if recovered.ok else None
         if candidate is not None and candidate.id != UNKNOWN_PAGE and candidate.id != expected:
             anchor = candidate.id
@@ -728,26 +791,97 @@ class FlowEngine:
         base = self.scenario.options.tick_interval
         return base
 
-    def _handle_unknown(self, now: float) -> None:
-        """未知页面处理：先宽容等待，超时后按策略执行。"""
-        if self._unknown_since is None:
-            self._unknown_since = now
-            return
-        if now - self._unknown_since < self.scenario.options.unknown_grace:
+    def _recover_later(self, expected: PageId, *, cause: str, now: float) -> None:
+        """记下"该重定位了"，等 :attr:`RECOVER_DELAY` 秒再动手。
+
+        ## 为什么是"延迟"而不是"立刻搜"
+
+        游戏界面**正在过渡**和**真卡在一个不认识的地方**，在单帧里长得一模一样：
+        都是"认不出来"。区分它们唯一的办法是**等一会儿再看**。
+
+        延迟期间每轮都会重新走自检 —— 只要画面变回可识别的样子，
+        :meth:`_realign` 开头那句 ``self._pending_recover = None`` 就把待办清掉了。
+        于是真正只是过渡的那些意外**一次树搜索都不做、一个动作都不发**。
+
+        ## 延迟结束之后
+
+        搜树（队列优先 + 两轮）。搜到了就按重定位处理；**两轮全落空说明
+        画面不属于这套脚本认得的任何状态** —— 那时当场结束流程，
+        而不是继续等宽容期。用户看到的是"停下来了、有原因"，
+        而不是"卡着不动也不报错"。
+
+        ## 为什么不用宽容期那套（``on_unknown`` 策略）
+
+        那套用的是 ``EngineOptions.on_unknown``（WAIT / STOP / RECOVERY /
+        RELOAD_TICK），而这里要表达的是**更明确的一件事**：
+        "等够了、也搜过了、确实没有" —— 那只有一个正确处理：结束。
+        两套机制叠在一起只会让"到底等到什么时候"说不清。
+        （``on_unknown`` / ``unknown_grace`` 配置项**保留着**，因为它们是公开
+        API，删掉会让别人的配置突然报错；只是引擎不再用它们决定"停不停"了。）
+        """
+        deadline = now + self.RECOVER_DELAY
+        if self._pending_recover is None:
+            self._pending_recover = (deadline, expected, cause)
+            log.info(
+                "状态认不出来（%s）—— %.1fs 后重定位（期间画面恢复了就取消）",
+                cause,
+                self.RECOVER_DELAY,
+            )
             return
 
-        policy = self.scenario.options.on_unknown
-        log.warning(
-            "认不出页面已持续 %.2fs，按策略 %s 处理", now - self._unknown_since, policy.value
+        started, pending_expected, pending_cause = self._pending_recover
+        if now < started:
+            return  # 还没等够，继续等（下一轮再来自检）
+
+        # 等够了：动手搜。清掉待办，避免下一轮重复搜。
+        self._pending_recover = None
+        self._run_recovery_search(
+            expected=pending_expected, cause=pending_cause, now=now
         )
-        if policy is UnknownPolicy.STOP:
-            self.stop(StopReason.UNKNOWN, "长时间无法识别页面")
-        elif policy is UnknownPolicy.RECOVERY and self.scenario.options.recovery_node:
-            self.cursor.advance(self.scenario.options.recovery_node, now=now)
-            self._unknown_since = None
-        elif policy is UnknownPolicy.RELOAD_TICK:
-            self._unknown_since = None
-        # WAIT: 什么都不做，继续等
+
+    def _run_recovery_search(self, *, expected: PageId, cause: str, now: float) -> None:
+        """真去搜一遍树，并把结论用掉（搜到就重定位，搜不到就结束）。"""
+        recovered = self.scenario.tree.recover(
+            self.ctx.frame(),
+            near=expected,
+            recent=self.tracker.recent_ids(self.RECENT_STATES),
+            passes=self.RECOVER_PASSES,
+            now=now,
+        )
+        found = recovered.value if recovered.ok else None
+
+        if found is not None and found.id != UNKNOWN_PAGE and found.id != expected:
+            self.tracker.update(found, now=now, reason="重定位")
+            anchor = self.tracker.current_id
+            target = self.binding.node_for(anchor)
+            node_id = self.cursor.current
+            if target is None:
+                self._note_recovery(node_id, expected, anchor, None, found)
+                log.warning("重定位到状态 %r，但没有任何节点认领它 —— 保持原地", anchor)
+                return
+            self.cursor.advance(target, now=now)
+            self._note_recovery(node_id, expected, anchor, target, found)
+            log.info(
+                "%s：重定位到 %r（期望 %r）-> 节点 %r",
+                cause,
+                anchor,
+                expected,
+                target,
+            )
+            return
+
+        # ---- 搜完一个都没中：当场结束 ----
+        attempted = len(found.attempts) if found is not None else 0
+        self.report.errors.append(
+            f"重定位失败：{attempted} 次匹配、{self.RECOVER_PASSES} 轮、"
+            "树里所有状态都试过，画面不属于任何已知状态"
+        )
+        self.stop(
+            StopReason.UNKNOWN,
+            f"重定位失败：等了 {self.RECOVER_DELAY:.0f}s 又搜了 "
+            f"{self.RECOVER_PASSES} 轮（{attempted} 次匹配），"
+            "状态树里所有状态都认不出来 —— 画面不在这套脚本的状态集合里",
+        )
 
     def check_state(self, anchor: PageId | None = None) -> tuple[bool, str]:
         """"我该在的状态"和"实测状态"对得上吗（走关联表）。

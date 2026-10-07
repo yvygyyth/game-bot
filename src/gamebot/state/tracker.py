@@ -408,6 +408,40 @@ class PageTracker:
     def recent(self) -> list[PageState]:
         return list(self._history)
 
+    def recent_ids(self, limit: int) -> tuple[PageId, ...]:
+        """最近观测过的状态 id，**按最近优先、已去重**，最多 ``limit`` 个。
+
+        给重定位当"先查这几个"的队列用（见 ``PageTree.recover`` 的 ``recent``）。
+
+        ## 三个刻意的取舍
+
+        * **最近的排前面**：刚离开的那个状态最可能是要回去的；
+        * **去重**：同一个状态连续几十帧都在历史里，不去重队列会被它占满，
+          等于没有队列。名次取它**首次出现**的位置 —— 一个状态出现多次时，
+          最后一次出现已经是"那一段"的结束，而队列要表达的是
+          "最近待过哪几处"；
+        * **跳过"认不出来"**：``unknown`` 不是一个状态，放进队列没意义
+          （树里找不到它，探它只是白费一次匹配）。
+
+        ## 为什么从 ``_history`` 里推、不另存一个队列
+
+        ``_history`` 本来就是"每帧记一条"，队列是它的一个**视图**。
+        另存一份的话两处迟早不一致 —— 而"最近去过哪"只有一个真相。
+        """
+        if limit <= 0:
+            return ()
+        seen: set[PageId] = set()
+        picked: list[PageId] = []
+        for state in reversed(self._history):
+            page_id = state.id
+            if not page_id or page_id == UNKNOWN_PAGE or page_id in seen:
+                continue
+            seen.add(page_id)
+            picked.append(page_id)
+            if len(picked) >= limit:
+                break
+        return tuple(picked)
+
     @property
     def tick(self) -> int:
         return self._tick

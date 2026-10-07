@@ -44,7 +44,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -456,6 +456,18 @@ class PageMatch:
     values: dict[str, Any] = field(default_factory=dict)
     attempts: list[PageAttempt] = field(default_factory=list)
     message: str = ""
+
+    exhausted: bool = False
+    """**树里所有状态都试过了**，画面确实不属于任何已知状态。
+
+    只在 :meth:`PageTree.recover` 全落空时置真。它把两种 ``unknown`` 区分开：
+
+    * ``exhausted=False``：**还没搜完**（可能只是快路径先短路了）；
+    * ``exhausted=True``：搜完了、一个都没命中。
+
+    上层靠它决定"当场结束"还是"再等一帧" —— 前者适用于
+    "树里压根没这个状态"，后者适用于过场动画里的短暂认不出来。
+    """
 
     @property
     def is_unknown(self) -> bool:
@@ -1036,74 +1048,159 @@ class PageTree:
                 expanded.append(page)
         return expanded
 
+    #: 重定位最多搜几轮。**这是一个常数**（配 ``EngineOptions.recover_passes``
+    #: 可以覆盖）：一轮落空说明"这一瞬间的画面不属于任何状态"，
+    #: 但过场动画会持续几帧 —— 第二轮给画面一点时间变成可识别的样子。
+    #: 再多就没有意义了：同一个画面探第二遍和第三遍没有区别。
+    RECOVER_PASSES = 2
+
     def recover(
         self,
         frame: Frame,
         near: PageId | None = None,
         *,
+        recent: Sequence[PageId] = (),
+        passes: int | None = None,
         now: float = 0.0,
     ) -> ActionResult[PageMatch]:
-        """**慢路径**：从"最近的末梢"开始逐步扩大范围，把真实状态找出来。
+        """**慢路径**：找真实状态。先查"最近待过的"队列，再沿树扩散。
 
         用途只有一个：**意外时的重定位**（自检不过、或者快路径认不出来）。
         正常一轮别调它。
 
-        ## 扩散顺序（从近到远，并且从"看得少"到"看得多"）
+        ## 搜索顺序（三圈，从最可能到最不可能）
 
         ```
-        第 0 圈：near 自己（加上它的叠加层）
-        第 1 圈：它所在分组里的兄弟末梢
-        第 2 圈：上一层分组的全部末梢
-        ……      逐级往上，直到根
-        最后一圈：全局叠加层 + 认不出来
+        第 0 圈：near 自己（"我以为我在的那个"）
+        第 1 圈：recent 队列 —— 最近待过的几个状态，最近的先试
+        第 2 圈：沿树向上扩散（near 所在分组 → 上一层 → …→ 根），
+                每层内部按 ROI 面积升序
+        最后：  全局叠加层 + 认不出来
         ```
 
-        每一圈内部按 **ROI 面积升序** 试 —— "看得少"既更快、也更不容易误判，
-        这个理由和树剪枝的理由是同一个，所以扩散顺序也沿用它。
+        **为什么队列插在扩散前面**：扩散是从"我以为什么"往外爬，而队列记的是
+        "**我实际刚去过什么**"。游戏里绝大多数意外是"点了按钮、进了下一屏"——
+        目标状态往往就在最近去过的那几个里，一两次匹配就找到了，
+        不用把沿途每个分组都扫一遍。
+
+        ## 去重
+
+        每一轮内部，每个状态**最多探一次**（``probed`` 集合）。同一个状态既可能
+        出现在队列里、又落在扩散路径上，不去重就会重复匹配 —— 白花开销，
+        而且 ``attempts`` 里会出现两条一样的记录，排查时看着像"试了两次"。
+
+        去重**不跨轮**：轮数存在的意义正是"画面可能在两次尝试之间变了，
+        再探一遍"，跨轮共用的话第二轮一个状态都不会探、两轮等于一轮。
+
+        ## 两轮，以及"真的没有了"怎么表达
+
+        一轮搜完一个都没命中，就整体再搜一遍（最多 :attr:`RECOVER_PASSES` 轮）。
+        全部落空时返回 ``unknown``，并且把 :attr:`PageMatch.exhausted` **标起来** ——
+        它区分两种情况：
+
+        * ``unknown`` 但 ``exhausted=False``：**没搜完**（比如快路径先短路了）；
+        * ``unknown`` 且 ``exhausted=True``：**树里所有状态都试过了**，
+          画面确实不属于任何已知状态。
 
         :param near: 从哪附近开始找。一般是"我以为我在的那个状态"。
             给了不存在的 id 就退化成从根开始的全量搜索。
-        :return: 和 :meth:`locate` 同构；认不出来同样是 ``success(UNKNOWN_PAGE)``。
-            ``PageMatch.attempts`` 会记录**每一圈试过谁**，
+        :param recent: 最近待过的状态 id，**最近的排前面**（见
+            ``PageTracker.recent_ids``）。空的就跳过那一圈。
+        :param passes: 搜几轮。``None`` 用 :attr:`RECOVER_PASSES`。
+        :return: 和 :meth:`locate` 同构；认不出来是 ``success(UNKNOWN_PAGE)``。
+            ``PageMatch.attempts`` 记录**试过谁、结果如何** ——
             "为什么最后认成了这个"必须能直接读出来。
         """
         attempts: list[PageAttempt] = []
         near_page = self._pages.get(near) if near else None
+        rounds = max(1, self.RECOVER_PASSES if passes is None else passes)
 
-        # ---- 第 0 圈：near 自己 ----
-        if isinstance(near_page, PageLeaf) and near_page.has_conditions:
-            ok, _why, values = self._probe(frame, near_page, attempts)
-            if ok:
-                overlays = self._scan_overlays(frame, near_page.id, attempts, seen=set())
-                return ActionResult.success(
-                    self._build_match(frame, near_page.id, values, overlays, attempts, now=now)
+        for round_index in range(rounds):
+            found = self._recover_once(
+                frame,
+                near_page=near_page,
+                recent=recent,
+                probed=set(),  # 每一轮用新的 —— 见上面"去重不跨轮"
+                attempts=attempts,
+                now=now,
+            )
+            if found is not None:
+                return found
+            if round_index + 1 < rounds:
+                log.info(
+                    "重定位第 %d 轮没找到（已试 %d 次），再来一轮",
+                    round_index + 1,
+                    len(attempts),
                 )
 
-        # ---- 逐级往上扩散：每层把"这一层分组的全部末梢"试一遍 ----
-        # 起点是 near 的父分组（near 自己已经试过了）；near 不在树里就从根开始。
+        # ---- 全部落空 ----
+        # 最后再扫一遍叠加层：主状态认不出来，但可能只是弹了个窗 / 掉线了
+        overlays = self._scan_overlays(frame, UNKNOWN_PAGE, attempts, seen=set())
+        match = self._build_match(
+            frame, UNKNOWN_PAGE, {}, overlays, attempts, now=now
+        )
+        match.exhausted = True
+        log.warning(
+            "重定位失败：%d 次匹配（%d 轮、每轮都把树里所有状态试一遍）都没命中",
+            len(attempts),
+            rounds,
+        )
+        return ActionResult.success(match)
+
+    def _recover_once(
+        self,
+        frame: Frame,
+        *,
+        near_page: PageNode | None,
+        recent: Sequence[PageId],
+        probed: set[PageId],
+        attempts: list[PageAttempt],
+        now: float,
+    ) -> ActionResult[PageMatch] | None:
+        """走完三圈。命中就返回结果，全落空返回 ``None``（交给下一轮）。"""
+
+        def try_page(page: PageLeaf) -> ActionResult[PageMatch] | None:
+            """探一页；命中就组装结果，否则 None。**已探过的直接跳过。**"""
+            if page.id in probed or not page.has_conditions:
+                return None
+            probed.add(page.id)
+            ok, _why, values = self._probe(frame, page, attempts)
+            if not ok:
+                return None
+            overlays = self._scan_overlays(frame, page.id, attempts, seen=set())
+            return ActionResult.success(
+                self._build_match(frame, page.id, values, overlays, attempts, now=now)
+            )
+
+        # ---- 第 0 圈：near 自己 ----
+        if isinstance(near_page, PageLeaf):
+            hit = try_page(near_page)
+            if hit is not None:
+                return hit
+
+        # ---- 第 1 圈：最近待过的队列（最近的先试）----
+        for page_id in recent:
+            page = self._pages.get(page_id)
+            if isinstance(page, PageLeaf):
+                hit = try_page(page)
+                if hit is not None:
+                    return hit
+
+        # ---- 第 2 圈：沿树向上扩散：每层把"这一层分组的全部末梢"试一遍 ----
+        # 起点是 near 的父分组（near 自己试过了）；near 不在树里就从根开始。
         level = self._parent.get(near_page.id) if near_page is not None else None
         visited_levels: set[PageId | None] = set()
         while level not in visited_levels:
             visited_levels.add(level)
-            for page in self._states_below(level, exclude_ids={near} if near else set()):
-                ok, _why, values = self._probe(frame, page, attempts)
-                if ok:
-                    overlays = self._scan_overlays(frame, page.id, attempts, seen=set())
-                    return ActionResult.success(
-                        self._build_match(frame, page.id, values, overlays, attempts, now=now)
-                    )
+            for page in self._states_below(level, exclude_ids=set()):
+                hit = try_page(page)
+                if hit is not None:
+                    return hit
             if level is None:
                 break
             level = self._parent.get(level)
 
-        # ---- 最后一圈：叠加层（主状态认不出来，但可能只是弹了个窗 / 掉线了） ----
-        fallback_overlays = self._scan_overlays(frame, UNKNOWN_PAGE, attempts, seen=set())
-
-        return ActionResult.success(
-            self._build_match(
-                frame, UNKNOWN_PAGE, {}, fallback_overlays, attempts, now=now
-            )
-        )
+        return None
 
     # ------------------------------------------------------------------ #
     # 定位用的内部件
