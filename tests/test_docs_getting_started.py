@@ -144,10 +144,10 @@ class TestDocumentedGamesCommandsAreValid:
         commands = " ".join(
             line.strip()
             for line in _doc().splitlines()
-            if line.strip().startswith(("gamebot ", "$ gamebot "))
+            if "gamebot " in line and not line.strip().startswith(("#", "|"))
         )
         assert commands, "文档里一条 gamebot 命令都没有"
-        for sub in ("info", "windows", "capture"):
+        for sub in ("ui", "info", "windows", "capture"):
             assert f"gamebot {sub}" in commands, f"文档里没有一条 `gamebot {sub}` 命令"
 
     def test_no_documented_subcommand_is_invented(self):
@@ -258,24 +258,53 @@ class TestUipiSectionIsPresent:
     def test_it_says_tests_do_not_need_admin(self):
         """免得每次改点代码都去提权。"""
         text = _doc()
-        assert "单元测试" in text and "不需要" in text
+        assert "pytest" in text
+        assert "不用" in text
 
-    def test_the_section_comes_before_everything_else(self):
-        """**按小标题顺序**判，不是"UIPI 首次出现在前 1/4"。
+    def test_the_startup_command_comes_first(self):
+        """**启动命令必须在最前面** —— 用户原话：
 
-        后者形同虚设：正文里别处也会提到 UIPI，只要那句话落在前 1/4 就过。
-        试过 —— 把"§0 权限"整节挪到文档最后，用"位置"判的测试照样全绿。
+        > "启动命令呢，我写其他项目都是启动命令运行的，exe都是打包后的产物"
+
+        所以文档第一屏要能直接抄到那条命令，而不是先讲一大段权限。
+        权限那节仍然要在（它是这次排查最重要的结论），但**在命令之后**。
         """
         text = _doc()
-        uipi_heading = text.index("## 0.")
-        assert "UIPI" in text[uipi_heading : uipi_heading + 80]
-        # 用 "## 1." 而不是小节全名 —— 标题措辞会随文档精简而变，
-        # 断言不该被那种改动绊住（绊住过一次：把"## 1. 依赖"改叫
-        # "## 1. 第一次装"之后这条就 ValueError 了）
-        install_heading = text.index("## 1.")
-        assert uipi_heading < install_heading, "讲权限的那节必须在讲安装之前"
-        # 而且那节的小标题里要点名 UIPI（读者才知道这段在说什么）
-        assert "UIPI" in text[uipi_heading:install_heading]
+        startup = text.index("uv run python -m gamebot ui")
+        admin = text.index("## 1.")
+        assert startup < admin, "启动命令必须排在讲权限之前"
+        # 前 1/4 里就该有那条命令（第一屏能抄到）
+        assert startup < len(text) // 4, "启动命令太靠后了，第一屏看不到"
+
+    def test_it_says_the_startup_command_needs_no_admin(self):
+        """**一条普通命令就能跑** —— 这是用户明确要的。
+
+        不能写成"必须先管理员"：改代码、跑测试、空跑都不需要提权，
+        那样写会让人觉得每次启动都得过 UAC。
+        """
+        text = _doc()
+        assert "普通权限就能跑" in text or "不用" in text
+        assert "uv run python -m gamebot ui" in text
+
+    def test_it_says_when_admin_is_actually_needed(self):
+        """但"真点游戏"确实需要 —— 那张表要把两种情况分开。"""
+        text = _doc()
+        assert "真跑" in text
+        assert "\\dev.ps1" in text
+
+    def test_the_uipi_section_still_exists(self):
+        """权限那节不能因为"命令优先"就被删掉 —— 它是静默失效的唯一解释。"""
+        text = _doc()
+        uipi = text.index("UIPI")
+        assert "完整性级别" in text
+        assert "静默失效" in text
+        assert uipi > text.index("uv run python -m gamebot ui")
+
+    def test_the_exe_is_marked_as_a_build_artifact(self):
+        """exe 是**打包产物**，不是启动方式 —— 别再把它写成主路径。"""
+        text = _doc()
+        assert "打包产物" in text
+        assert "packaging/build_exe.py" in text
 
 
 class TestStaleMachineNumbersAreNotHardcoded:
