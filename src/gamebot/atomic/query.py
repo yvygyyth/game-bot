@@ -69,7 +69,7 @@ class ImageQuery:
 
     template: str
     region: Region | None = None
-    confidence: float = 0.9
+    confidence: float = 0.85
     use_pyramid: bool = True
     grayscale: bool = True
 

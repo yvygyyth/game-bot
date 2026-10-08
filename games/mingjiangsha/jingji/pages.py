@@ -109,17 +109,12 @@ T_FIGHT_DONE = "fight/done.png"
 #: 这张属于 ``fight`` 状态，所以放 ``fight/`` 下。
 T_FIGHT_SPACE = "fight/space.png"
 
-T_CLICK_SELECT_FIRST = "clicks/select_first.png"
-T_CLICK_FIGHT_MENU = "clicks/fight_menu.png"
-T_CLICK_FIGHT_SURRENDER = "clicks/fight_surrender.png"
+T_CLICK_SELECT_FIRST = "select/select_first.png"
+T_CLICK_FIGHT_MENU = "fight/fight_menu.png"
+T_CLICK_FIGHT_SURRENDER = "fight/fight_surrender.png"
 T_CLICK_FIGHT_CONFIRM = "clicks/fight_confirm.png"
-T_CLICK_FIGHT_NEXT = "clicks/fight_next.png"
+T_CLICK_FIGHT_NEXT = "fight/fight_next.png"
 
-# --------------------------------------------------------------------------- #
-# 阈值
-# --------------------------------------------------------------------------- #
-CONF = 0.85
-"""状态锚点的阈值。"""
 
 # --------------------------------------------------------------------------- #
 # 搜索区域：**现在全图找，一个 roi 都不设**
@@ -255,7 +250,7 @@ FEATURE_TREE = PageGroup(
             LOBBY,
             name="首页",
             min_stable_frames=2,  # 首页那排卡有滑入动画，等它停稳
-            queries=(ImageQuery(T_LOBBY, confidence=CONF),),
+            queries=(ImageQuery(T_LOBBY),),
             description="首页：「竞技」卡（熊猫头）",
         ),
         PageGroup(
@@ -266,19 +261,19 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "jj/before_create",
                     name="竞技场 · 建队前",
-                    queries=(ImageQuery(T_BEFORE_CREATE, confidence=CONF),),
+                    queries=(ImageQuery(T_BEFORE_CREATE),),
                     description="右下角是「创建队伍」",
                 ),
                 PageLeaf(
                     "jj/after_create",
                     name="竞技场 · 建队后",
-                    queries=(ImageQuery(T_AFTER_CREATE, confidence=CONF),),
+                    queries=(ImageQuery(T_AFTER_CREATE),),
                     description="右下角是「添加伙伴」",
                 ),
                 PageLeaf(
                     "jj/after_add",
                     name="竞技场 · 加完伙伴",
-                    queries=(ImageQuery(T_AFTER_ADD, confidence=CONF),),
+                    queries=(ImageQuery(T_AFTER_ADD),),
                     description="右下角是「开始匹配」",
                 ),
             ),
@@ -291,13 +286,13 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "select/idle",
                     name="选将 · 未选",
-                    queries=(ImageQuery(T_SELECT_IDLE, confidence=CONF),),
+                    queries=(ImageQuery(T_SELECT_IDLE),),
                     description="「确定」是灰的 —— 还没点武将",
                 ),
                 PageLeaf(
                     "select/picked",
                     name="选将 · 已选",
-                    queries=(ImageQuery(T_SELECT_PICKED, confidence=CONF),),
+                    queries=(ImageQuery(T_SELECT_PICKED),),
                     description="「确定」是金的 —— 武将已选",
                 ),
             ),
@@ -310,13 +305,13 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "fight/hand",
                     name="战斗 · 换牌",
-                    queries=(ImageQuery(T_FIGHT_HAND, confidence=CONF),),
+                    queries=(ImageQuery(T_FIGHT_HAND),),
                     description="「是否需要更换初始手牌？」（每局开头）",
                 ),
                 PageLeaf(
                     "fight/done",
                     name="战斗 · 结算",
-                    queries=(ImageQuery(T_FIGHT_DONE, confidence=CONF),),
+                    queries=(ImageQuery(T_FIGHT_DONE),),
                     description="结算页的「确认」",
                 ),
             ),
@@ -325,7 +320,7 @@ FEATURE_TREE = PageGroup(
             "over",
             name="刷完了",
             terminal=True,
-            queries=(ImageQuery(T_LOBBY, confidence=CONF),),
+            queries=(ImageQuery(T_LOBBY),),
             description=(
                 "局数刷够了，流程到此结束。"
                 "它的识别特征**故意和首页一样**（还是那张竞技卡）—— 因为点完"
