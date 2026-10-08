@@ -50,7 +50,6 @@ from gamebot.execution.builtins import wait_for
 from gamebot.types import ActionResult
 
 from ..pages import (
-    CONF,
     FIGHT_HAND_CANCEL,
     T_CLICK_FIGHT_CONFIRM,
     T_FIGHT_MENU,
@@ -93,7 +92,7 @@ def _wait_then_click(ctx: RunContext, template: str, label: str) -> ActionResult
     全图找。**想提速就在这里加 ``region=``** —— 只此一处，
     别在别的地方再建一份（那就成了第二份实现）。
     """
-    query = ImageQuery(template, confidence=CONF)
+    query = ImageQuery(template)
     appeared = wait_for(ctx, query, timeout=WAIT_FIGHT)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(

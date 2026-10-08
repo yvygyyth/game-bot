@@ -40,7 +40,7 @@ from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult
 from gamebot.types import Point as _Point
 
-from ..pages import CONF, T_SELECT_HEALTH, T_SELECT_PICKED
+from ..pages import T_SELECT_HEALTH, T_SELECT_PICKED
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -106,7 +106,7 @@ def pick_general(ctx: RunContext) -> ActionResult[Any]:
     """
     # 全图找。提速时加 region= —— 武将卡那一排大致在
     # 客户区 y 200~620、x 100~2450（8 张等距，间距约 268）。
-    found = ctx.frame().find_all_images(T_SELECT_HEALTH, confidence=CONF)
+    found = ctx.frame().find_all_images(T_SELECT_HEALTH)
     if not found.ok or not found.value:
         return ActionResult.not_found(
             "选将界面里一个血条都没找到（界面还没画出来？）",
@@ -145,4 +145,4 @@ def confirm_general(ctx: RunContext) -> ActionResult[Any]:
     """
     # 全图找。提速时加 region= —— 确定按钮在**屏幕中间**
     # （客户区约 x 1120~1500, y 750~825）。
-    return click_image(ctx, T_SELECT_PICKED, confidence=CONF, settle=CONFIRM_SETTLE)
+    return click_image(ctx, T_SELECT_PICKED, settle=CONFIRM_SETTLE)

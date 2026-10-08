@@ -48,7 +48,13 @@ from gamebot.vision.opencv_matcher import OpenCvMatcher
 from games.mingjiangsha.game import CLIENT_SIZE
 from games.mingjiangsha.jingji.bindings import BINDINGS
 from games.mingjiangsha.jingji.graph import SCENARIO
-from games.mingjiangsha.jingji.pages import CONF
+
+#: 这个测试**自己定**阈值，不 import 业务那边的 —— 业务现在不设阈值
+#: （一律走框架默认），而这里的诊断有别的目的：
+#:
+#: * ``CONF`` 用框架默认的 0.9，和**运行期实际会发生的事**对齐；
+#: * 诊断矩阵里另外用 ``confidence=0.0`` 看原始分数（那个和阈值无关）。
+CONF = 0.9
 
 #: 设成 1 就把"识别对不对"变成**硬断言**（默认只报告）。
 STRICT = os.environ.get("JINGJI_CHECK_TEMPLATES", "") not in ("", "0")

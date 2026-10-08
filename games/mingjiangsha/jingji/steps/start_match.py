@@ -35,7 +35,6 @@ from gamebot.types import ActionResult, Region
 from gamebot.types import Point as _Point
 
 from ..pages import (
-    CONF,
     T_AFTER_ADD,
     T_AFTER_CREATE,
     T_BEFORE_CREATE,
@@ -56,7 +55,7 @@ CLICK_SETTLE = 0.6
 
 def create_team(ctx: RunContext) -> ActionResult[Any]:
     """建队前：点「创建队伍」。"""
-    return click_image(ctx, T_BEFORE_CREATE, confidence=CONF, settle=CLICK_SETTLE)
+    return click_image(ctx, T_BEFORE_CREATE, settle=CLICK_SETTLE)
 
 
 def add_pet(ctx: RunContext) -> ActionResult[Any]:
@@ -64,7 +63,7 @@ def add_pet(ctx: RunContext) -> ActionResult[Any]:
 
     和「创建队伍」**同一个位置**（只有文字不同），所以加框时可以共用同一个框。
     """
-    return click_image(ctx, T_AFTER_CREATE, confidence=CONF, settle=CLICK_SETTLE)
+    return click_image(ctx, T_AFTER_CREATE, settle=CLICK_SETTLE)
 
 
 def start_match(ctx: RunContext) -> ActionResult[Any]:
@@ -84,7 +83,7 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
     **"看不出来就不做"是这里的核心**：宁可漏掉一次勾选（下次登录还会弹，
     只影响体验），也不能在没弹窗时往那个坐标点一下（可能点到别的东西）。
     """
-    clicked = click_image(ctx, T_AFTER_ADD, confidence=CONF, settle=TIP_SETTLE)
+    clicked = click_image(ctx, T_AFTER_ADD, settle=TIP_SETTLE)
     if not clicked.ok:
         return clicked
 
@@ -140,7 +139,7 @@ def _find_tip(ctx: RunContext) -> Region | None:
     **只对"只裁复选框"成立**；改成裁**整个提示框**之后，多出来的两行文字
     把区分度拉开了（0.327 vs 1.000）。
     """
-    found = ctx.frame().find_image(T_TIP, confidence=CONF)
+    found = ctx.frame().find_image(T_TIP)
     if not found.ok or found.value is None:
         return None
     # 命中矩形在 meta 的 ``rect`` 里（``find_image`` 的第一返回值是**中心点**，

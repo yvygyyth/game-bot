@@ -49,7 +49,6 @@ from gamebot.types import ActionResult
 
 from ..form import ROUNDS_PARAM
 from ..pages import (
-    CONF,
     FIGHT_NEXT_SETTLE,
     T_FIGHT_DONE,
     T_FIGHT_NEXT,
@@ -75,12 +74,12 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     # 结算面板是**滑入**的，所以是"等它出现"而不是"假定它已经在"。
     # 找图命中的是**中心点**（matcher 返回 top_left + 模板一半），
     # 所以直接点它就是点在那行字上。
-    blank = click_image(ctx, T_FIGHT_SPACE, confidence=CONF, settle=FIGHT_NEXT_SETTLE)
+    blank = click_image(ctx, T_FIGHT_SPACE, settle=FIGHT_NEXT_SETTLE)
     if not blank.ok:
         return blank
 
     # ---- 2. 等「下一步」出现，点它 ----
-    next_query = ImageQuery(T_FIGHT_NEXT, confidence=CONF)
+    next_query = ImageQuery(T_FIGHT_NEXT)
     appeared = wait_for(ctx, next_query, timeout=WAIT_FIGHT)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(
@@ -94,9 +93,7 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     # ---- 3. 点结算页的「确认」（复用状态锚点那张模板）----
     # 全图找。提速时加 region= —— 结算页的「确认」在**底部中间**
     # （客户区约 x 1200~1445, y 1250~1315）。
-    confirmed = click_image(
-        ctx, T_FIGHT_DONE, confidence=CONF, settle=FIGHT_NEXT_SETTLE
-    )
+    confirmed = click_image(ctx, T_FIGHT_DONE, settle=FIGHT_NEXT_SETTLE)
     if not confirmed.ok:
         return confirmed
 
