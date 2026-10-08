@@ -3,23 +3,34 @@
 **按父状态分目录**，跟 `pages.py` 里那棵状态树的**分组节点**走：
 
 ```
-lobby/lobby.png        首页（「竞技」卡上的熊猫头）
-jj/before_create.png   竞技场 · 建队前（右下角「创建队伍」）
-jj/after_create.png    竞技场 · 建队后（右下角「添加伙伴」）
-jj/after_add.png       竞技场 · 加完伙伴（右下角「开始匹配」）
-select/idle.png        选将 · 未选（「确定」灰的）
-select/picked.png      选将 · 已选（「确定」金的）
-fight/hand.png         战斗 · 换牌（「是否需要更换初始手牌？」）
-fight/done.png         战斗 · 结算（结算页「确认」）
+lobby/lobby.png            首页（「竞技」卡上的熊猫头）
+jj/before_create.png       竞技场 · 建队前（右下角「创建队伍」）
+jj/after_create.png        竞技场 · 建队后（右下角「添加伙伴」）
+jj/after_add.png           竞技场 · 加完伙伴（右下角「开始匹配」）
+jj/tip.png                 匹配后的提示框（+ check / check_yes：勾选、确定）
+select/idle.png            选将 · 未选（「确定」灰的）
+select/picked.png          选将 · 已选（「确定」金的）
+select/select_first.png    选将 · 血条勾玉那一列（每张卡都有）
+fight/hand.png             战斗 · 换牌（「是否需要更换初始手牌？」）
+fight/done.png             战斗 · 结算（结算页「确认」）
+fight/space.png            「点击空白区域到下一步」那行提示文字
+fight/fight_menu.png       右上角金色圆结（展开投降菜单）
+fight/fight_surrender.png  菜单里的「投降」
+fight/fight_next.png       结算中间底部「下一步」
+fight/close.png            「取消」（换牌弹窗里那个）
+fight/faQiTouXiang.png     「发起投降」
 
-clicks/select_first.png     ← 只用来**点**，不对应状态
-clicks/fight_menu.png
-clicks/fight_surrender.png
-clicks/fight_confirm.png
-clicks/fight_next.png
+clicks/fight_confirm.png    ← 只用来**点**、不对应状态
 
 rawMaterial/                ← 你的原始截图，别动
 ```
+
+> 完整清单（含每张的裁剪框）见下面两张表 —— 这里只画目录结构，
+> 免得两处各列一份、迟早对不上。
+
+**目录 = 分组节点**：`clicks/` 只放"不对应任何状态"的点击目标，
+属于某个状态的一律放它自己目录下（所以 `fight/fight_menu.png`
+不叫 `clicks/…`）。
 
 ## 为什么这样分（以及为什么不更细）
 
@@ -94,23 +105,37 @@ rawMaterial/                ← 你的原始截图，别动
 
 | 模板 | 从哪张截图裁 | 裁什么 | 现状 |
 |---|---|---|---|
-| `clicks/select_first.png` | `select1.png` | **第 1 张武将卡**（张飞那张） | 230×360 |
-| `clicks/fight_menu.png` | `zhandou2.png` | 右上角那个**金色圆结** | 70×70 ✓ |
-| `clicks/fight_surrender.png` | `zhandou3.png` | 展开菜单里的「**投降**」 | 70×70 ✓ |
+| `select/select_first.png` | `select1.png` | **血条勾玉那一列**（每张卡都有） | 25×84 ✓ |
+| `fight/fight_menu.png` | `zhandou2.png` | 右上角那个**金色圆结** | 70×70 ✓ |
+| `fight/fight_surrender.png` | `zhandou3.png` | 展开菜单里的「**投降**」 | 70×70 ✓ |
 | `clicks/fight_confirm.png` | `zhandou4.png` | 投降弹窗里的「**确认**」 | 240×75 |
-| `clicks/fight_next.png` | `zhandou6.png` | 结算中间底部「**下一步**」 | 245×65 |
+| `fight/fight_next.png` | `zhandou6.png` | 结算中间底部「**下一步**」 | 245×65 |
 | `fight/space.png` | `zhandou5.png` | 「**点击空白区域到下一步**」那行提示文字 | 392×42 ✓ |
 
-> `fight/space.png` 放在 `fight/` 而不是 `clicks/` —— 它**属于 `fight` 状态**
-> （结算页，就是 `fight/done` 那个界面）。`clicks/` 只放不对应状态的。
-> 它是**点击目标而不是状态锚点**，所以常量叫 `T_FIGHT_SPACE`。
+### 选将那张是**血条**，不是"第一张卡"
 
-### 还没接进流程的两张
+`select/select_first.png` 是**每张武将卡都有**的血条勾玉列，所以用法是
+``find_all_images``（一次命中多张卡各一处），挑一个点 —— 点哪张卡都行。
+
+**为什么拿血条当特征**：卡面上每局都变的是**立绘和名字**，拿它们当模板
+下一局就失效；而每个武将**必定有血条**，长相和位置都不变。
+
+实测（`logs/tools/check_select_health.py`）：`select1.png` 在阈值 0.85 下
+命中 **22** 个点（同卡竖直方向能错开落位），按 x 聚成 **7 列** ——
+列中心 `410 / 678 / 945 / 1213 / 1537 / 1805 / 2072`，
+相邻间距 267~268，中间有一处 324（**真实的界面空隙**，4+4 两排之间）。
+`pick_general` 取**最左那一列**的中点 `(410, 525)`：
+挑最左而不是"第一个命中的"，因为 `find_all_images` 按分数降序返回，
+分数会浮动 —— 按 x 挑才是确定的。
+
+### 还没接进流程的
 
 | 模板 | 是什么 | 打算怎么用 |
 |---|---|---|
 | `fight/close.png` | 「**取消**」按钮（换牌弹窗里那个） | 它和投降弹窗的「确认」**长得一模一样**，不能单独拿去找。**先用状态确认**（走到这一步时已经是 `fight/hand`），再点 |
-| `fight/faQiTouXiang.png` | 「**发起投降**」 | 投降链：`fight_menu`（金色圆结）→ `faQiTouXiang` → `fight_confirm`。现在这条链用的是 `clicks/fight_surrender.png` |
+| `fight/faQiTouXiang.png` | 「**发起投降**」 | 投降链：`fight_menu`（金色圆结）→ `faQiTouXiang` → `fight_confirm`。现在这条链用的是 `fight/fight_surrender.png` |
+| `jj/check.png` / `jj/check_yes.png` | 提示框上的勾选 / 确定 | 可能想替掉现在那套**亮度判据**（见下面「提示弹窗」） |
+| `jj/tip.png` | 提示框本体 | 同上 |
 
 > **`FIGHT_HAND_CANCEL`**（固定坐标）暂时保留：状态已经保证"我在换牌弹窗里"，
 > 所以点固定坐标是安全的。`close.png` 是配合状态使用的备选。

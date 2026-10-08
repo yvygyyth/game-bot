@@ -153,7 +153,7 @@ SCENARIO = ScenarioSpec(
         Node(
             "pick_general",
             steps=[pick_general],
-            description="选将：点第 1 张武将卡",
+            description="选将：找血条，点一张武将卡",
             transitions=[
                 Transition(
                     "confirm_general", on_page("select/picked"), 10, "武将已选（确定变金）"

@@ -109,11 +109,36 @@ T_FIGHT_DONE = "fight/done.png"
 #: 这张属于 ``fight`` 状态，所以放 ``fight/`` 下。
 T_FIGHT_SPACE = "fight/space.png"
 
-T_CLICK_SELECT_FIRST = "select/select_first.png"
-T_CLICK_FIGHT_MENU = "fight/fight_menu.png"
-T_CLICK_FIGHT_SURRENDER = "fight/fight_surrender.png"
+#: **武将卡右侧那列血条勾玉**（25×84 = 竖排几个绿勾玉）。
+#:
+#: ⚠️ **这张不是"点第一张卡"** —— 它是**每张卡都有**的血条。
+#: 所以用法是 ``find_all_images``（一次命中多张卡各一处），
+#: 挑一个点就行 —— 点哪张卡都无所谓（"随便点一个"）。
+#:
+#: 为什么拿血条当识别特征：卡面上**每局都不一样**的是立绘和名字，
+#: 拿它们当模板下一局就失效；而**每个武将必定有血条**，
+#: 血条的长相和位置都不变。
+T_SELECT_HEALTH = "select/select_first.png"
+
+T_FIGHT_MENU = "fight/fight_menu.png"
+T_FIGHT_SURRENDER = "fight/fight_surrender.png"
 T_CLICK_FIGHT_CONFIRM = "clicks/fight_confirm.png"
-T_CLICK_FIGHT_NEXT = "fight/fight_next.png"
+T_FIGHT_NEXT = "fight/fight_next.png"
+
+# --------------------------------------------------------------------------- #
+# 阈值
+# --------------------------------------------------------------------------- #
+CONF = 0.85
+"""识图的统一阈值。
+
+⚠️ **这个常量有 4 个步骤 import 它**（``steps/`` 里的 ``advance_fight`` /
+``finish_round`` / ``pick_general`` / ``start_match``）。要删它就得先把那些
+引用一起改掉 —— 删了定义留着 import，症状是 ``AttributeError``，
+而报错点在那个步骤文件里、不在定义处，容易找错方向。
+
+为什么不把 0.85 写死在各处：阈值是**一起调的**（这批模板同一次裁的、
+同一个分辨率），散在四个文件里改起来会漏。
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -231,8 +256,9 @@ FIGHT_HAND_CANCEL = Point(1513, 815)
 SELECT_FIRST_CARD = Region(190, 300, 230, 360)
 """选将界面里**第 1 张武将卡**的搜索范围（张飞那张）。
 
-"随便点一个然后点确认" —— 这里固定点第一个。想换武将就改这张卡的
-模板（``clicks/select_first.png``）和这个 roi。
+⚠️ **现在没人用了**（``pick_general`` 改成找血条、全图搜），留着是当
+"提速时框这儿"的参考：8 张卡那一排大致在客户区 ``x 100~2450``。
+真要设 roi 就用实测数据，别照抄这个框。
 """
 
 # --------------------------------------------------------------------------- #

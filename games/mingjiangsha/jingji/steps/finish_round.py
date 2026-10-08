@@ -5,7 +5,7 @@
 | 序 | 对应图 | 点什么 | 怎么定位置 |
 |---|---|---|---|
 | 1 | `zhandou5` | 「点击空白区域到下一步」 | 找 ``T_FIGHT_SPACE``（**提示文字本身**） |
-| 2 | `zhandou6` | 「下一步」 | 模板 ``T_CLICK_FIGHT_NEXT`` |
+| 2 | `zhandou6` | 「下一步」 | 模板 ``T_FIGHT_NEXT`` |
 | 3 | `zhandou7` | 「确认」 | 找 ``T_FIGHT_DONE``（就是状态锚点那张） |
 
 ## 第 1 步为什么从固定坐标改成找图
@@ -51,8 +51,8 @@ from ..form import ROUNDS_PARAM
 from ..pages import (
     CONF,
     FIGHT_NEXT_SETTLE,
-    T_CLICK_FIGHT_NEXT,
     T_FIGHT_DONE,
+    T_FIGHT_NEXT,
     T_FIGHT_SPACE,
     WAIT_FIGHT,
 )
@@ -80,11 +80,11 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
         return blank
 
     # ---- 2. 等「下一步」出现，点它 ----
-    next_query = ImageQuery(T_CLICK_FIGHT_NEXT, confidence=CONF)
+    next_query = ImageQuery(T_FIGHT_NEXT, confidence=CONF)
     appeared = wait_for(ctx, next_query, timeout=WAIT_FIGHT)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(
-            "等不到「下一步」出现（点空白区没生效？）", template=T_CLICK_FIGHT_NEXT
+            "等不到「下一步」出现（点空白区没生效？）", template=T_FIGHT_NEXT
         )
     step = actions.click_source_point(ctx.session, appeared.value)
     if not step.ok:

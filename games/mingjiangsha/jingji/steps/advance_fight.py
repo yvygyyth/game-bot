@@ -8,8 +8,8 @@
 | 序 | 对应玩家截图 | 点什么 | 怎么定位置 |
 |---|---|---|---|
 | 1 | `zhandou1` | 「取消」（不换手牌） | **固定坐标** |
-| 2 | `zhandou2` | 右上角金色圆结（展开菜单） | 模板 ``T_CLICK_FIGHT_MENU`` |
-| 3 | `zhandou3` | 「投降」 | 模板 ``T_CLICK_FIGHT_SURRENDER`` |
+| 2 | `zhandou2` | 右上角金色圆结（展开菜单） | 模板 ``T_FIGHT_MENU`` |
+| 3 | `zhandou3` | 「投降」 | 模板 ``T_FIGHT_SURRENDER`` |
 | 4 | `zhandou4` | 投降弹窗的「确认」 | 模板 ``T_CLICK_FIGHT_CONFIRM`` |
 
 走完这四步画面就到结算页（``fight/done``），剩下的交给 :mod:`.finish_round`。
@@ -53,8 +53,8 @@ from ..pages import (
     CONF,
     FIGHT_HAND_CANCEL,
     T_CLICK_FIGHT_CONFIRM,
-    T_CLICK_FIGHT_MENU,
-    T_CLICK_FIGHT_SURRENDER,
+    T_FIGHT_MENU,
+    T_FIGHT_SURRENDER,
     WAIT_FIGHT,
 )
 
@@ -74,8 +74,8 @@ def advance_fight(ctx: RunContext) -> ActionResult[Any]:
 
     # ---- 2~4. 等目标出现 → 点它 ----
     for template, label in (
-        (T_CLICK_FIGHT_MENU, "右上角圆结"),
-        (T_CLICK_FIGHT_SURRENDER, "投降"),
+        (T_FIGHT_MENU, "右上角圆结"),
+        (T_FIGHT_SURRENDER, "投降"),
         (T_CLICK_FIGHT_CONFIRM, "投降确认"),
     ):
         step = _wait_then_click(ctx, template, label)
