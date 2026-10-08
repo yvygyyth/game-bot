@@ -81,6 +81,37 @@ from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Point, Region
 
 # --------------------------------------------------------------------------- #
+# 一个状态想用**多张图**判断时怎么写
+#
+# 现在每个叶子都只用一张模板。哪天某个状态"有两张差不多的样子"（按钮灰/金、
+# 白天/夜晚、两个角度），三种写法都行 —— ``any_image`` / ``all_images``
+# 从 ``gamebot.atomic.query`` 拿（或从 ``gamebot.atomic`` 顶层）：
+#
+# ```python
+# # ① 任一命中就算（any）—— 一个状态有两张样子时最常用
+# PageLeaf("select/idle", queries=(any_image("select/idle_a.png", "select/idle_b.png"),))
+#
+# # ② 全部命中才算（all）—— queries 默认就是 AND，直接列出来也一样
+# PageLeaf("x", queries=(ImageQuery("a.png"), ImageQuery("b.png")))
+# PageLeaf("x", queries=(all_images("a.png", "b.png"),))     # 和上一行等价
+#
+# # ③ 想怎么组合都行 —— 直接给个函数（返回 ActionResult）
+# def looks_like_x(frame) -> ActionResult:
+#     if frame.find_image("a.png").ok and not frame.find_image("bad.png").ok:
+#         return ActionResult.success(True)
+#     return ActionResult.not_found("不像")
+# PageLeaf("x", queries=(looks_like_x,))
+# ```
+#
+# 另外还有 ``NotQuery``（取反）和 ``PageLeaf.exclude``（否决条件：
+# 命中任一就不算这个状态）。
+#
+# ⚠️ **自己写的函数让它抛异常会很难查** —— ``locate`` 把查询的报错
+# **按"未命中"处理**，只在日志里留一条 WARNING。所以函数里拿不准就当
+# "没命中"返回 ``not_found``，别让异常跑出去。
+# --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
 # 模板名
 #
 # **状态锚点**（8 张）：决定"脚本知不知道自己在哪"。

@@ -53,6 +53,8 @@ from .query import (
     Query,
     TextQuery,
     VisibleQuery,
+    all_images,
+    any_image,
 )
 from .session import BaseSession, CoordinateMapper, Session, build_session
 from .vision import Matcher, MatchResult, TextBox, TextReader, UnavailableTextReader
@@ -89,6 +91,10 @@ __all__ = [  # noqa: RUF022 - 按层次分组比字母序有用，别改成字�
     "Query",
     "TextQuery",
     "VisibleQuery",
+    # L3 快捷构造（**不是**新的 Query 类型，所以不计进上面那 50 个：
+    # 它们只是 any/all 两个常见组合的糖，返回的仍是 OrQuery / AndQuery）
+    "all_images",
+    "any_image",
     # 子模块（函数族入口）
     "actions",
     "combinators",

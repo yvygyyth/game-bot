@@ -52,6 +52,10 @@ from typing import TYPE_CHECKING, Any, NoReturn
 # 帧内组合子（L4）。依赖方向是 state -> atomic，符合分层规则；
 # 它们只在**传进来的帧**上跑查询，不会让状态层自己截图。
 from ..atomic.combinators import find_all_of, find_any_of
+
+# 组合查询类型（L3）：``_specify`` 要 **isinstance** 它们才能递归进去套 roi，
+# 所以必须是运行期导入（放进 TYPE_CHECKING 会在跑的时候 NameError）。
+from ..atomic.query import AndQuery, NotQuery, OrQuery
 from ..exceptions import StateError
 from ..types import ActionResult, ActionStatus, Region
 from ..utils.logging import get_logger
@@ -870,16 +874,34 @@ class PageTree:
     ) -> Query:
         """把页面级的 roi / confidence 具化到单个查询上。
 
-        三件事，缺一个都会出问题：
+        四件事，缺一个都会出问题：
 
         1. **roi 和查询自己的 region 求交，谁也不覆盖谁**。覆盖 region 会让
            脚本作者显式写的框失效；反过来让 region 覆盖 roi，树剪枝（"子页面
            只看右下角"）就全废了 —— 而那是这棵树最大的性能收益来源；
         2. **只处理有 ``region`` 字段的查询**（Image/AllImages/Text/AllTexts/
-           Compare）。``PixelQuery`` 用的是 ``point``、``NotQuery`` 里套的是
-           别的查询，强行套 roi 是错的，原样返回；
-        3. **求交为空直接抛**，不静默变成"永远未命中"。
+           Compare）。``PixelQuery`` 用的是 ``point``，强行套 roi 是错的，
+           原样返回；
+        3. **组合查询要递归进去**（``AndQuery`` / ``OrQuery`` / ``NotQuery``）——
+           它们自己**没有** ``region`` 字段，所以第 2 条会把它们整个跳过，
+           于是里面的图片查询拿不到页面的 roi。踩过：``PageLeaf`` 带 roi 时
+           ``queries=(any_image(A, B),)`` 和 ``queries=(ImageQuery(A),
+           ImageQuery(B))`` **行为不一致** —— 前者不做 roi 剪枝。
+           快捷函数必须和手写等价，否则"用哪个写法"就成了隐形的性能问题；
+        4. **求交为空直接抛**，不静默变成"永远未命中"。
         """
+        # ③ 先递归组合查询：它们没有 region，直接跳过会漏掉里面的图片查询。
+        # 注意是 staticmethod，递归要用类名调（模块级没有这个名字）。
+        if isinstance(query, (OrQuery, AndQuery)):
+            return replace(
+                query,
+                queries=tuple(
+                    PageTree._specify(inner, roi, confidence) for inner in query.queries
+                ),
+            )
+        if isinstance(query, NotQuery):
+            return replace(query, query=PageTree._specify(query.query, roi, confidence))
+
         if not hasattr(query, "region"):
             return query
 

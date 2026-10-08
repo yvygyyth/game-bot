@@ -278,6 +278,54 @@ class NotQuery:
 
 
 # --------------------------------------------------------------------------- #
+# 快捷构造：大部分情况就是"一张图"或"两张图"
+# --------------------------------------------------------------------------- #
+def any_image(*names: str, confidence: float | None = None) -> OrQuery:
+    """**任一**模板命中即可（any）。
+
+    最常见的用法 —— **一个状态有两张差不多的样子**（按钮灰/金、白天/夜晚、
+    两个角度），任一张认出来都算这个状态::
+
+        PageLeaf("idle", queries=(any_image("btn_gray.png", "btn_gold.png"),))
+
+    等价于手写 ``OrQuery(queries=(ImageQuery(a), ImageQuery(b)))``，
+    这里只是省掉那层壳。
+
+    :param names: 模板名（相对模板根），**至少一个**。
+    :param confidence: 给所有模板设同一个阈值；``None`` = 让每个查询用
+        ``ImageQuery`` 自己的默认值。
+
+    > **一张图就别用它了** —— 直接 ``ImageQuery("x.png")`` 更清楚。
+    """
+    if not names:
+        raise ValueError("any_image 至少要一个模板名")
+    kwargs: dict[str, Any] = {} if confidence is None else {"confidence": confidence}
+    return OrQuery(queries=tuple(ImageQuery(name, **kwargs) for name in names))
+
+
+def all_images(*names: str, confidence: float | None = None) -> AndQuery:
+    """**全部**模板都命中才算（all）。
+
+    什么时候用它而不是"直接把几个 ``ImageQuery`` 列进 ``queries``"：
+    ``PageLeaf.queries`` **本来就是 AND**，所以多数情况下不需要::
+
+        # 这两行意思一样
+        PageLeaf("x", queries=(ImageQuery("a.png"), ImageQuery("b.png")))
+        PageLeaf("x", queries=(all_images("a.png", "b.png"),))
+
+    需要显式包一层的场合：**和别的组合子并列**时想让意图更明显 ——
+    比如 ``queries=(all_images(A, B), any_image(C, D))`` 一眼能看出两组。
+
+    :param names: 模板名（相对模板根），**至少一个**。
+    :param confidence: 同 :func:`any_image`。
+    """
+    if not names:
+        raise ValueError("all_images 至少要一个模板名")
+    kwargs: dict[str, Any] = {} if confidence is None else {"confidence": confidence}
+    return AndQuery(queries=tuple(ImageQuery(name, **kwargs) for name in names))
+
+
+# --------------------------------------------------------------------------- #
 # 类型别名 & 反序列化
 # --------------------------------------------------------------------------- #
 QueryLike: TypeAlias = Query | Callable[["Frame"], ActionResult[Any]]
