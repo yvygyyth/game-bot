@@ -29,21 +29,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 from gamebot.atomic import actions
 from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Region
+from gamebot.types import Point as _Point
 
 from ..pages import (
     CONF,
     T_AFTER_ADD,
     T_AFTER_CREATE,
     T_BEFORE_CREATE,
-    TIP_CHECKBOX,
-    TIP_CONFIRM,
-    TIP_SAMPLE,
-    TIP_SAMPLE_BRIGHTNESS,
+    T_TIP,
+    TIP_CHECKBOX_OFFSET,
+    TIP_CONFIRM_OFFSET,
     TIP_SETTLE,
 )
 
@@ -80,7 +78,7 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
     ## 不猜
 
     不"等弹窗出现"（没弹就白等满 timeout），而是：点按钮 → 睡
-    :data:`~..pages.TIP_SETTLE` → **看一眼那个复选框在不在** →
+    :data:`~..pages.TIP_SETTLE` → **认一下提示框在不在** →
     在就勾选 + 确定，不在就直接成功返回。
 
     **"看不出来就不做"是这里的核心**：宁可漏掉一次勾选（下次登录还会弹，
@@ -90,65 +88,64 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
     if not clicked.ok:
         return clicked
 
-    if not _tip_visible(ctx):
+    tip = _find_tip(ctx)
+    if tip is None:
         # 不记成失败 —— 没弹窗是**正常情况**，不是出错
         return clicked.with_meta(tip="没弹")
 
     # 先勾「本次登录不再提示」，再点确定。
     # 顺序反了会先关掉弹窗，那次勾选就没生效（下次登录还会弹）。
-    checked = actions.click_logic_point(ctx.session, TIP_CHECKBOX)
+    #
+    # 两个点都是**相对提示框左上角**算的（见 pages 里那两个 OFFSET 的说明）：
+    # 这样窗口或界面小位移时跟着走，而不是拿写死的绝对坐标去点。
+    ox, oy = tip.x, tip.y
+    checkbox = _Point(ox + TIP_CHECKBOX_OFFSET[0], oy + TIP_CHECKBOX_OFFSET[1])
+    checked = actions.click_logic_point(ctx.session, checkbox)
     if not checked.ok:
         return checked
     ctx.invalidate_frame()
 
-    confirmed = actions.click_logic_point(ctx.session, TIP_CONFIRM)
+    confirm = _Point(ox + TIP_CONFIRM_OFFSET[0], oy + TIP_CONFIRM_OFFSET[1])
+    confirmed = actions.click_logic_point(ctx.session, confirm)
     if not confirmed.ok:
         return confirmed
     ctx.invalidate_frame()
 
-    return clicked.with_meta(tip="已勾选并确认")
+    return clicked.with_meta(tip="已勾选并确认", tip_at=(ox, oy))
 
 
-def _tip_visible(ctx: RunContext) -> bool:
-    """提示框在不在？
+def _find_tip(ctx: RunContext) -> Region | None:
+    """提示框在不在？在的话返回它的框（**源坐标**）。
 
-    ## 判据：复选框那一小块方格的**平均亮度**
+    ## 判据：模板 ``jj/tip.png``（整个提示框）
 
-    弹窗里那个复选框是**浅色面板上的一个亮方块**，而同一个位置在别的界面上
-    是深色地形。实测（15 张截图，客户区 ``TIP_SAMPLE``）：:
+    提示框本体**特征足够丰富**（两行文字 + 复选框），所以单张模板就能可靠
+    认出它，实测 15 张截图区分得很干净::
 
-        tip1.png   219.5   <- 弹窗（未勾选）
-        tip2.png   219.5   <- 弹窗（已勾选）
-        zhandou1   199.4   <- 最接近的"非弹窗"
-        其余 12 张  50~166
+        tip1.png    1.000   <- 弹窗
+        tip2.png    0.997   <- 弹窗（已勾选）
+        其余 13 张  0.179 ~ 0.327   <- 最接近的只有 0.327
 
-    阈值 :data:`~..pages.TIP_SAMPLE_BRIGHTNESS` 取 **210**，落在两者之间。
+    ## 这里原先是"平均亮度"判据，为什么换掉
 
-    ## 为什么不用模板匹配
+    原来取复选框那一小块的平均亮度、和 210 比。它**能work但余量很薄**：
 
-    试过了：复选框**太素**（灰白方格），裁出来的模板在别的界面的空白块上
-    能拿到 0.89 分，比阈值还高 —— 会误判成"弹了"。而这一步误判的代价是
-    **往固定坐标点两下**，所以宁可换一个更钝但更可靠的判据。
+        zhandou1.png  199.4   <- 不是弹窗，离阈值 210 只差 10.6
+        tip1/tip2     219.5   <- 弹窗
 
-    这个判据**只在这一步成立**：调用它的时机是"刚点完开始匹配"，
-    此刻游戏一定还在竞技场界面上（那个位置是深色），所以对比是干净的
-    —— 和那 15 张截图里量到的一致。
+    也就是说 zhandou1 那张只要再亮一点就会误判成"弹了"，然后往提示框的
+    坐标点两下 —— 而这一步误判的代价正是"点了不该点的东西"。
+
+    当时的理由是"复选框太素，当模板会误命中（0.89 > 0.85）"。那条理由
+    **只对"只裁复选框"成立**；改成裁**整个提示框**之后，多出来的两行文字
+    把区分度拉开了（0.327 vs 1.000）。
     """
-    patch = _sample(ctx.frame(), TIP_SAMPLE)
-    if patch is None:  # pragma: no cover - 拿不到像素时保守返回"没弹"
-        return False
-    return float(np.asarray(patch).mean()) >= TIP_SAMPLE_BRIGHTNESS
-
-
-def _sample(frame: Any, region: Region) -> np.ndarray | None:
-    """从帧里取一块像素（**源坐标**）。
-
-    走 ``to_numpy()`` 而不是直接读 ``frame.array`` —— 前者是公开接口，
-    而且拿到的一定是 BGR ndarray；后者是实现细节。
-    """
-    try:
-        full = frame.to_numpy()
-    except Exception:  # pragma: no cover - 后端不支持时保守返回 None
+    found = ctx.frame().find_image(T_TIP, confidence=CONF)
+    if not found.ok or found.value is None:
         return None
-    y1, x1 = region.y, region.x
-    return np.asarray(full[y1 : y1 + region.h, x1 : x1 + region.w])
+    # 命中矩形在 meta 的 ``rect`` 里（``find_image`` 的第一返回值是**中心点**，
+    # 而相对偏移要从左上角算，所以需要这个框）。
+    rect = found.meta.get("rect")
+    if not isinstance(rect, Region):  # pragma: no cover - 后端没给框时保守放弃
+        return None
+    return rect
