@@ -40,7 +40,7 @@ from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult
 from gamebot.types import Point as _Point
 
-from ..pages import T_SELECT_HEALTH, T_SELECT_PICKED
+from ..templates import T_SELECT_HEALTH, T_SELECT_PICKED
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext

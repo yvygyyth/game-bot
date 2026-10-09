@@ -13,12 +13,16 @@ games/
     └── <功能>/                    二级：一个脚本功能一个目录
         ├── __init__.py            ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
         ├── form.py                动态表单声明（FORM，没人调参数就不用写）
-        ├── pages.py               状态（**一个文件就够**，再复杂也别拆）
-        ├── graph.py               流程（同上）
+        ├── pages.py               状态树（**一个文件就够**，再复杂也别拆）
+        ├── graph.py               流程图（同上）
         ├── bindings.py            关联表（状态末梢 ↔ 流程节点的 id 映射）
         ├── steps/                 ★ 一个步骤一个文件
+        ├── utils/                 边条件等小工具（不属于步骤、也不属于图数据）
         ├── shortcuts.py           这个功能专用的快捷方法
-        ├── templates/             这个功能的图片资源
+        ├── templates/             图片资源 + 路径索引
+        │   ├── __init__.py        ★ 全部 T_* 路径常量（权威出处）
+        │   ├── lobby/…            PNG（按父状态分目录）
+        │   └── README.md          裁切约定
         └── README.md              这个脚本怎么调
 ```
 
@@ -41,13 +45,16 @@ games/
 |---|---|---|
 | `pages.py` | 加一页、改一页的标识 | 状态之间**互相咬得很紧**（父子、ROI 继承、谁与谁能同时成立）—— 拆开就得来回跳 |
 | `graph.py` | 加一个节点、连一条边 | 同上：边是两两关系，"这个节点有几个出口"必须一眼看全 |
-| `steps/` | **改一个动作** | 一个步骤是自洽的：逻辑 + 它的模板 + 阈值 + 搜索范围。按步骤分文件，改一步只动一个文件 |
+| `templates/__init__.py` | 改一张图的路径 | 全部 `T_*` 只在这一处；状态树和步骤都从这儿 import |
+| `steps/` | **改一个动作** | 一个步骤是自洽的：逻辑 + ROI + 阈值 + 固定坐标。按步骤分文件，改一步只动一个文件 |
+| `utils/` | 改边条件 / 小判断 | 既不是步骤、也不是图上的静态数据（例如「刷够 N 局了吗」） |
 
-`steps/` 里每个文件包含**它那个步骤用到的一切**：
+`steps/` 里每个文件是**动作本身**；图路径统一从 `templates` 拿：
 
 ```python
 # games/<游戏>/<功能>/steps/advance_team.py
-T_CREATE_TEAM = "jj/create_team.png"                 # 这个步骤用的模板
+from ..templates import T_CREATE_TEAM
+
 TEAM_ROI = Region(1400, 630, 470, 360)               # 它的搜索范围
 CONF_BUTTON = 0.85                                   # 它的阈值
 
@@ -63,12 +70,12 @@ def create_team(ctx) -> ActionResult:                # 它的逻辑（**就是�
 不要在那里写逻辑 —— 这样 `from .steps import create_team` 照常能用，
 而"这个步骤到底长什么样"永远在一个文件里看得完。
 
-**页面标识放 `pages.py`，不要放 `steps/`。** `T_TITLE` 那种是页面身份，
-不是某个动作的图；混进 steps 之后改页面标识就得在步骤里翻。
+**模板路径放 `templates/__init__.py`，不要散落在 `pages.py` / `steps/`。**
+状态树和步骤都 `from ..templates import T_…`；改路径只改一处。
+只用一次的路径也写在索引里（方便 `check` / 文档对照），不要在调用点裸写字符串。
 
-**步骤要用的模板/ROI/阈值，写在那一步的模块里；如果页面树也要用同一个值，
-就在 `pages.py` 定义、步骤那边 import**（别两处各写一份 —— 改了页面 ROI
-忘了改步骤，症状是"状态认出来了但按钮找不到"，很难查）。
+**步骤专用的 ROI / 阈值 / 固定坐标**写在那一步的模块里；若状态树也要用同一个
+ROI，在 `pages.py` 定义、步骤那边 import（别两处各写一份）。
 
 
 **脚本永远在功能目录里。** 游戏目录是容器，不直接放脚本 ——
@@ -421,6 +428,7 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 
 ```
 games/mingjiangsha/jingji/templates/
+├── __init__.py              ★ T_* 路径索引（权威）
 ├── lobby/lobby.png          首页（顶层叶子，自己一组）
 ├── jj/before_create.png     jj 下三个叶子
 ├── jj/after_create.png
@@ -447,7 +455,7 @@ games/mingjiangsha/jingji/templates/
 
 ⚠️ **模板路径这一个真相有四份写法**，改目录要一起改：
 
-1. `games/<游戏>/<功能>/pages.py` 的 `T_*` 常量 —— **权威**
+1. `games/<游戏>/<功能>/templates/__init__.py` 的 `T_*` 常量 —— **权威**
 2. `logs/tools/build_templates.py` 的 `CROPS` 键
 3. `tests/<功能>_states.py` 里的 `TEMPLATE_OF`
 4. `templates/README.md` 的表格
@@ -499,7 +507,8 @@ games/mingjiangsha/jingji/templates/
 
 ## 加一个游戏 / 加一个功能
 
-**加一个功能**：在 `games/<游戏>/` 下建一个新目录，复制 `mingjiangsha/jingji/` 的骨架（`__init__.py` + `pages.py` + `graph.py` + `steps.py`）。
+**加一个功能**：在 `games/<游戏>/` 下建一个新目录，复制 `mingjiangsha/jingji/` 的骨架
+（`__init__.py` + `pages.py` + `graph.py` + `bindings.py` + `steps/` + `templates/` + 按需 `utils/` / `form.py`）。
 
 **加一个游戏**：按上面的布局建 `games/<游戏>/`，改三样 ——
 `SLUG` / `WINDOW_TITLE` / `SOURCE_SIZE`，然后是页面、模板、流程。

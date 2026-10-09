@@ -34,15 +34,7 @@ from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Region
 from gamebot.types import Point as _Point
 
-from ..pages import (
-    T_AFTER_ADD,
-    T_AFTER_CREATE,
-    T_BEFORE_CREATE,
-    T_TIP,
-    TIP_CHECKBOX_OFFSET,
-    TIP_CONFIRM_OFFSET,
-    TIP_SETTLE,
-)
+from ..templates import T_AFTER_ADD, T_AFTER_CREATE, T_BEFORE_CREATE, T_TIP
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -61,7 +53,7 @@ def create_team(ctx: RunContext) -> ActionResult[Any]:
 def add_pet(ctx: RunContext) -> ActionResult[Any]:
     """建队后：点「添加伙伴」。
 
-    和「创建队伍」**同一个位置**（只有文字不同），所以加框时可以共用同一个框。
+    和「创建队伍」同一个位置（只有文字不同），加框时可以共用同一个框。
     """
     return click_image(ctx, T_AFTER_CREATE, settle=CLICK_SETTLE)
 
@@ -69,42 +61,27 @@ def add_pet(ctx: RunContext) -> ActionResult[Any]:
 def start_match(ctx: RunContext) -> ActionResult[Any]:
     """加完伙伴：点「开始匹配」，然后处理**可能**弹出的提示框。
 
-    ## 提示框那一步不用状态表达
-
-    理由见 `pages.py` 的模块 docstring：它只在这一处出现，而且是"按了按钮
-    **可能**弹"。用它当状态要多一条边和一个"弹了就等"的判断，反而更绕。
-
-    ## 不猜
-
-    不"等弹窗出现"（没弹就白等满 timeout），而是：点按钮 → 睡
-    :data:`~..pages.TIP_SETTLE` → **认一下提示框在不在** →
-    在就勾选 + 确定，不在就直接成功返回。
-
-    **"看不出来就不做"是这里的核心**：宁可漏掉一次勾选（下次登录还会弹，
-    只影响体验），也不能在没弹窗时往那个坐标点一下（可能点到别的东西）。
+    不"等弹窗出现"（没弹就白等），而是：点按钮 → 睡一下 → 认一下在不在 →
+    在就勾选 + 确定。看不出来就不点，避免误点别处。
     """
-    clicked = click_image(ctx, T_AFTER_ADD, settle=TIP_SETTLE)
+    clicked = click_image(ctx, T_AFTER_ADD, settle=0.8)
     if not clicked.ok:
         return clicked
 
     tip = _find_tip(ctx)
     if tip is None:
-        # 不记成失败 —— 没弹窗是**正常情况**，不是出错
         return clicked.with_meta(tip="没弹")
 
-    # 先勾「本次登录不再提示」，再点确定。
-    # 顺序反了会先关掉弹窗，那次勾选就没生效（下次登录还会弹）。
-    #
-    # 两个点都是**相对提示框左上角**算的（见 pages 里那两个 OFFSET 的说明）：
-    # 这样窗口或界面小位移时跟着走，而不是拿写死的绝对坐标去点。
+    # 先勾「本次登录不再提示」，再点确定（顺序反了勾选不生效）。
+    # 偏移相对提示框左上角（tip1：框 (829,592)，复选框 (1148,874)，确定 (1085,951)）。
     ox, oy = tip.x, tip.y
-    checkbox = _Point(ox + TIP_CHECKBOX_OFFSET[0], oy + TIP_CHECKBOX_OFFSET[1])
+    checkbox = _Point(ox + 319, oy + 282)
     checked = actions.click_logic_point(ctx.session, checkbox)
     if not checked.ok:
         return checked
     ctx.invalidate_frame()
 
-    confirm = _Point(ox + TIP_CONFIRM_OFFSET[0], oy + TIP_CONFIRM_OFFSET[1])
+    confirm = _Point(ox + 256, oy + 359)
     confirmed = actions.click_logic_point(ctx.session, confirm)
     if not confirmed.ok:
         return confirmed
@@ -114,37 +91,12 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
 
 
 def _find_tip(ctx: RunContext) -> Region | None:
-    """提示框在不在？在的话返回它的框（**源坐标**）。
-
-    ## 判据：模板 ``jj/tip.png``（整个提示框）
-
-    提示框本体**特征足够丰富**（两行文字 + 复选框），所以单张模板就能可靠
-    认出它，实测 15 张截图区分得很干净::
-
-        tip1.png    1.000   <- 弹窗
-        tip2.png    0.997   <- 弹窗（已勾选）
-        其余 13 张  0.179 ~ 0.327   <- 最接近的只有 0.327
-
-    ## 这里原先是"平均亮度"判据，为什么换掉
-
-    原来取复选框那一小块的平均亮度、和 210 比。它**能work但余量很薄**：
-
-        zhandou1.png  199.4   <- 不是弹窗，离阈值 210 只差 10.6
-        tip1/tip2     219.5   <- 弹窗
-
-    也就是说 zhandou1 那张只要再亮一点就会误判成"弹了"，然后往提示框的
-    坐标点两下 —— 而这一步误判的代价正是"点了不该点的东西"。
-
-    当时的理由是"复选框太素，当模板会误命中（0.89 > 0.85）"。那条理由
-    **只对"只裁复选框"成立**；改成裁**整个提示框**之后，多出来的两行文字
-    把区分度拉开了（0.327 vs 1.000）。
-    """
+    """提示框在不在？在则返回其框（源坐标）。模板不含「确定」，点确定靠相对偏移。"""
     found = ctx.frame().find_image(T_TIP)
     if not found.ok or found.value is None:
         return None
-    # 命中矩形在 meta 的 ``rect`` 里（``find_image`` 的第一返回值是**中心点**，
-    # 而相对偏移要从左上角算，所以需要这个框）。
+    # find_image 返回中心点；相对偏移要从左上角算，取 meta.rect。
     rect = found.meta.get("rect")
-    if not isinstance(rect, Region):  # pragma: no cover - 后端没给框时保守放弃
+    if not isinstance(rect, Region):  # pragma: no cover
         return None
     return rect

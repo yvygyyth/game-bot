@@ -8,9 +8,9 @@
 | 序 | 对应玩家截图 | 点什么 | 怎么定位置 |
 |---|---|---|---|
 | 1 | `zhandou1` | 「取消」（不换手牌） | **固定坐标** |
-| 2 | `zhandou2` | 右上角金色圆结（展开菜单） | 模板 ``T_FIGHT_MENU`` |
-| 3 | `zhandou3` | 「投降」 | 模板 ``T_FIGHT_SURRENDER`` |
-| 4 | `zhandou4` | 投降弹窗的「确认」 | 模板 ``T_CLICK_FIGHT_CONFIRM`` |
+| 2 | `zhandou2` | 右上角金色圆结（展开菜单） | `fight/fight_menu.png` |
+| 3 | `zhandou3` | 「投降」 | `fight/fight_surrender.png` |
+| 4 | `zhandou4` | 投降弹窗的「确认」 | `clicks/fight_confirm.png` |
 
 走完这四步画面就到结算页（``fight/done``），剩下的交给 :mod:`.finish_round`。
 
@@ -47,20 +47,18 @@ from typing import TYPE_CHECKING, Any
 from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import wait_for
-from gamebot.types import ActionResult
+from gamebot.types import ActionResult, Point
 
-from ..pages import (
-    FIGHT_HAND_CANCEL,
-    T_CLICK_FIGHT_CONFIRM,
-    T_FIGHT_MENU,
-    T_FIGHT_SURRENDER,
-    WAIT_FIGHT,
-)
+from ..pages import WAIT_FIGHT
+from ..templates import T_CLICK_FIGHT_CONFIRM, T_FIGHT_MENU, T_FIGHT_SURRENDER
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
 __all__ = ["advance_fight"]
+
+#: 换牌弹窗「取消」—— 和投降「确认」长得一样，不能靠模板；状态已保证在换牌页。
+FIGHT_HAND_CANCEL = Point(1513, 815)
 
 
 def advance_fight(ctx: RunContext) -> ActionResult[Any]:

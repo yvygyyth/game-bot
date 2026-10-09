@@ -85,12 +85,11 @@ CASES: tuple[tuple[str, str], ...] = (
     ("fight/done", "zhandou7.png"),
 )
 
-#: ``状态 id -> 它那张模板的**相对路径**``（和 ``pages.py`` 里的常量一一对应）。
+#: ``状态 id -> 它那张模板的**相对路径**``（和 ``templates`` 包里的常量一一对应）。
 #:
-#: ⚠️ **这里是重复的一份** —— 权威在 ``pages.py``。没直接 import，
+#: ⚠️ **这里是重复的一份** —— 权威在 ``templates/__init__.py``。没直接 import，
 #: 是因为这个文件想在"框架还没装好"时也能跑（见模块 docstring）。
-#: 所以**改目录结构时要两处一起改**（踩过一次：模板按状态分了目录，
-#: 这份表没跟上，于是测试找不到文件）。
+#: 所以**改目录结构时要两处一起改**。
 TEMPLATE_OF: dict[str, str] = {
     "lobby": "lobby/lobby.png",
     "jj/before_create": "jj/before_create.png",
@@ -245,10 +244,10 @@ class TestDefinitionIsConsistent:
 
     def test_every_click_template_exists(self):
         """步骤里要点的那些模板也都在 —— 少一张就是"那一步永远点不动"。"""
-        import games.mingjiangsha.jingji.pages as pages
+        import games.mingjiangsha.jingji.templates as templates
 
-        names = [v for k, v in vars(pages).items() if k.startswith("T_CLICK_")]
-        assert names, "pages.py 里应该有 T_CLICK_* 系列的点击模板常量"
+        names = [v for k, v in vars(templates).items() if k.startswith("T_CLICK_")]
+        assert names, "templates 里应该有 T_CLICK_* 系列的点击模板常量"
         missing = [n for n in names if not (TEMPLATES / n).is_file()]
         assert missing == [], f"这些点击模板文件不存在: {missing}"
 

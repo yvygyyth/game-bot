@@ -134,7 +134,7 @@ game-bot/
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
 │   └── mingjiangsha/            #   名将杀：游戏级定义 + 各功能脚本
 │       ├── templates/           #     游戏级公共模板
-│       └── jingji/              #     竞技场脚本：状态 / 流程 / 步骤
+│       └── jingji/              #     竞技场：pages / graph / steps / templates / utils
 ├── logs/                        # 运行产物（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）

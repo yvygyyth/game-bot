@@ -18,8 +18,7 @@
 那个环节的背景一直在动（花瓣、光效、飘雪），熊猫头自己又随悬浮态变化 ——
 **没有可靠的可识别目标**。而玩家给了一个稳定的可点坐标，那就是最可靠的依据。
 
-代价：窗口位置或分辨率变了它就失效。所以只写一处
-（``pages.JINGJI_ENTRY``），改起来是一个数字。
+代价：窗口位置或分辨率变了它就失效。坐标只写下面这一处。
 """
 
 from __future__ import annotations
@@ -27,17 +26,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.types import ActionResult
-
-from ..pages import JINGJI_ENTRY
+from gamebot.types import ActionResult, Point
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
-__all__ = ["HOVER_SETTLE", "enter_jingji"]
+__all__ = ["HOVER_SETTLE", "JINGJI_ENTRY", "enter_jingji"]
+
+#: 「竞技」卡上熊猫头的客户区坐标。先移到这儿再点（悬浮态不完整时找图会失败）。
+JINGJI_ENTRY = Point(1365, 585)
 
 #: 悬浮之后等多久让熊猫头完整显示（秒）。
-#: 0.3 够一次重绘，又不至于让每一步都慢半拍。
 HOVER_SETTLE = 0.3
 
 
@@ -47,15 +46,13 @@ def enter_jingji(ctx: RunContext) -> ActionResult[Any]:
     if not moved.ok:
         return moved
 
-    # 悬浮态要一帧才生效。分开两次调用也让日志里能分清是"移动没生效"
-    # 还是"点击没生效" —— 合成一个动作就查不出来了。
+    # 悬浮态要一帧才生效；分开两次调用，日志能分清是移动还是点击失败。
     ctx.sleep(HOVER_SETTLE)
 
     clicked = actions.click_logic_point(ctx.session, JINGJI_ENTRY)
     if not clicked.ok:
         return clicked
 
-    # 画面马上要变（要进竞技场），作废当前帧
     ctx.invalidate_frame()
     return ActionResult.success(
         JINGJI_ENTRY, action="click", message="点了首页的竞技入口（熊猫头）"

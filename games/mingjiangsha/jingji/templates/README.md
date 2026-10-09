@@ -46,13 +46,10 @@ rawMaterial/                ← 你的原始截图，别动
 
 ⚠️ **改模板路径要同步改四处**（同一个真相的四份写法）：
 
-1. `games/mingjiangsha/jingji/pages.py` 的 `T_*` 常量 —— **权威**
+1. `games/mingjiangsha/jingji/templates/__init__.py` 的 `T_*` 常量 —— **权威**
 2. `logs/tools/build_templates.py` 的 `CROPS` 键
 3. `tests/test_jingji_states.py` 的 `TEMPLATE_OF`
 4. 本文档
-
-改完跑 `uv run python logs/tools/check_template_paths.py` ——
-它两个方向都查：**常量指向的文件在不在** + **有没有图没人引用**。
 
 ---
 
@@ -169,7 +166,7 @@ rawMaterial/                ← 你的原始截图，别动
 > 本来想用它避免"已经勾上了又点一下、把勾取消掉"，现在做不到。
 > 实际流程里只点一次（勾上之后游戏就不再弹这个框了），所以先没接。
 
-**两个可点位置是相对偏移**（`pages.py`）：
+**两个可点位置是相对偏移**（写在 `steps/start_match.py`）：
 
 | 常量 | 偏移 | 实测绝对位置 |
 |---|---|---|

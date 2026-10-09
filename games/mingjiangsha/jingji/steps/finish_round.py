@@ -48,13 +48,8 @@ from gamebot.execution.builtins import click_image, wait_for
 from gamebot.types import ActionResult
 
 from ..form import ROUNDS_PARAM
-from ..pages import (
-    FIGHT_NEXT_SETTLE,
-    T_FIGHT_DONE,
-    T_FIGHT_NEXT,
-    T_FIGHT_SPACE,
-    WAIT_FIGHT,
-)
+from ..pages import WAIT_FIGHT
+from ..templates import T_FIGHT_DONE, T_FIGHT_NEXT, T_FIGHT_SPACE
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -62,10 +57,10 @@ if TYPE_CHECKING:
 __all__ = ["ROUNDS_KEY", "finish_round", "noop"]
 
 #: 已完成的局数记在黑板里的这个键上。
-#:
-#: 用点分层级（``fight.rounds``）避免和别的键撞名 —— 和 ``ctx.param`` 的
-#: 命名习惯一致。
 ROUNDS_KEY = "fight.rounds"
+
+#: 点完空白区 / 「确认」后等界面跟上的时间（秒）。结算面板是滑入的。
+FIGHT_NEXT_SETTLE = 1.2
 
 
 def finish_round(ctx: RunContext) -> ActionResult[Any]:

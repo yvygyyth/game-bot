@@ -347,8 +347,8 @@ class TestJingjiStepsUseTheSharedHelpers:
 
     def test_create_team_clicks_through_the_shared_helper(self, tmp_path, matcher):
         """``create_team`` 命中就点、并把模板名带进 meta（journal 靠它）。"""
-        from games.mingjiangsha.jingji.pages import T_BEFORE_CREATE
         from games.mingjiangsha.jingji.steps import create_team
+        from games.mingjiangsha.jingji.templates import T_BEFORE_CREATE
 
         matcher.matches = {T_BEFORE_CREATE: (Point(2300, 880), 0.95)}
         run_ctx = self._make_ctx(tmp_path, matcher)
@@ -415,9 +415,9 @@ class TestEnterJingjiHoversBeforeItClicks:
         assert outcome.ok is True, outcome.message
         assert outcome.action["action"] == "click"
 
-    def test_it_uses_the_coordinate_from_pages(self, tmp_path):
-        """坐标只有一个出处（``pages.JINGJI_ENTRY``），步骤里不再写一遍。"""
-        from games.mingjiangsha.jingji.pages import JINGJI_ENTRY
+    def test_it_uses_the_coordinate_from_step(self, tmp_path):
+        """坐标只有一个出处（``enter_jingji.JINGJI_ENTRY``），别处不再写一遍。"""
+        from games.mingjiangsha.jingji.steps.enter_jingji import JINGJI_ENTRY
 
         # 有值、落在客户区内 —— 具体数字改了不用改测试
         assert 0 < JINGJI_ENTRY.x < 2560
