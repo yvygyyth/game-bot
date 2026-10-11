@@ -1,4 +1,4 @@
-"""竞技场 —— 运行参数表单。
+﻿"""竞技场 —— 运行参数表单。
 
 ## 只有一个参数：刷几局
 
@@ -21,7 +21,7 @@
 
 "刷几局"是**输入**（进去之前定好的），所以在这儿。
 "已经刷了几局"是**跑出来的状态**，写在 ``ctx.blackboard`` 里（见
-:func:`games.mingjiangsha.jingji.steps.finish_round.finish_round`）。
+:func:`games.mingjiangsha.scripts.jingji.steps.finish_round.finish_round`）。
 两件事都在 ``ctx`` 上，但不能混 —— 判断方法："用户还没点开始时它就有值了吗？"
 """
 

@@ -1,13 +1,14 @@
 """脚本注册表 —— 把"有哪些脚本"变成可以查询的东西。
 
-按目录约定自动发现，**不维护手写清单**：
+发现入口是每个游戏的 ``scripts/__init__.py``：
 
-* ``games/<游戏>/<功能>/__init__.py`` 里有 ``build_config`` 和 ``build_scenario``
-  -> 就是一个脚本，key 是 ``"<游戏>/<功能>"``；
-* 导入失败的包不会静默消失，而是进 :func:`discovery_errors` ——
-  一个写坏的脚本必须能被看见，否则"新脚本没出现在列表里"会变成谜题。
+* ``games/<游戏>/scripts/__init__.py`` 的 ``__all__`` 里导出的每个名字
+  必须是一个 :class:`~gamebot.feature.FeatureSpec`；
+* key 是 ``"<游戏>/<功能>"``（功能名 = 导出名 / ``SPEC.slug``，不含 ``scripts``）；
+* 导入失败或漏导出不会静默消失，而是进 :func:`discovery_errors`。
 
-**布局只有一种：``games/<游戏>/<功能>/``。** 游戏目录是容器，脚本永远在功能目录里。
+**布局：``games/<游戏>/scripts/<功能>/``** —— 功能目录放实现，
+``scripts/__init__.py`` 负责导出清单。
 """
 
 from __future__ import annotations
@@ -38,11 +39,24 @@ __all__ = [
 
 ROOT = Path(__file__).resolve().parent
 
+#: 游戏目录下脚本所在的固定子目录名
+SCRIPTS_DIRNAME = "scripts"
+
 #: 一级目录里这些不当作游戏
 _SKIP_GAME_DIRS = {"__pycache__", "templates", "assets", "docs", "_archive"}
 
-#: 二级目录里这些不当作功能
+#: ``scripts/`` 下这些不当作功能
 _SKIP_FEATURE_DIRS = {"__pycache__", "templates", "assets", "docs"}
+
+#: 游戏目录下这些不是脚本（旧布局误放、或游戏级工具）
+_SKIP_GAME_CHILDREN = {
+    "__pycache__",
+    "templates",
+    "assets",
+    "docs",
+    "utils",
+    SCRIPTS_DIRNAME,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +119,12 @@ def _game_dirs() -> list[Path]:
 
 
 def _feature_dirs(game_dir: Path) -> list[Path]:
+    scripts = game_dir / SCRIPTS_DIRNAME
+    if not scripts.is_dir():
+        return []
     return [
         p
-        for p in sorted(game_dir.iterdir())
+        for p in sorted(scripts.iterdir())
         if p.is_dir()
         and not p.name.startswith((".", "_"))
         and p.name not in _SKIP_FEATURE_DIRS
@@ -118,9 +135,10 @@ def _feature_dirs(game_dir: Path) -> list[Path]:
 def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
     """遍历所有 ``(key, 游戏, 功能, 目录)``。纯目录扫描，不导入。
 
-    布局只有一种：``games/<游戏>/<功能>/``，key 是 ``"<游戏>/<功能>"``。
+    布局只有一种：``games/<游戏>/scripts/<功能>/``，key 是 ``"<游戏>/<功能>"``
+    （``scripts`` 是目录约定，不进 key）。
 
-    游戏目录下**没有**功能子目录时不会产出脚本 —— 那种游戏只是还没写脚本，
+    游戏目录下**没有** ``scripts/<功能>/`` 时不会产出脚本 —— 那种游戏只是还没写脚本，
     不是错误（新建一个游戏目录、页面和模板先放好，是正常的中间状态）。
     """
     for game_dir in _game_dirs():
@@ -134,32 +152,46 @@ def iter_script_dirs() -> Iterator[tuple[str, str, str, Path]]:
 
 
 def _misplaced_scripts() -> list[tuple[str, str]]:
-    """找出把脚本函数直接写在游戏目录 ``__init__.py`` 里的地方。
+    """找出脚本放错位置的情况。
 
-    那是**位置错了**，不是另一种布局 —— 游戏目录是容器，脚本必须有自己的功能目录。
-    这种写法不会被 :func:`iter_script_dirs` 扫到，于是表现为"脚本没出现在列表里"，
-    很难查；所以这里专门报一条，把该放哪儿说清楚。
+    * 游戏目录 ``__init__.py`` 里直接写了 ``SPEC``；
+    * 功能目录直接挂在游戏下（旧布局），而不是 ``scripts/<功能>/``。
+
+    这两种都不会被 :func:`iter_script_dirs` 扫到，表现为"脚本没出现在列表里"。
     """
     found: list[tuple[str, str]] = []
     for game_dir in _game_dirs():
-        if _feature_dirs(game_dir):
-            # 有功能目录就说明这是个正常的容器，跳过（不 import，避免副作用）
-            continue
         init = game_dir / "__init__.py"
-        if not init.is_file():
-            continue
-        # 文本粗判就够了：这里只为了给一句人话提示，不值得为它 import 一个坏模块
-        text = init.read_text(encoding="utf-8", errors="replace")
-        if "SPEC = FeatureSpec" in text or "def build_scenario" in text:
-            found.append(
-                (
-                    game_dir.name,
-                    f"games/{game_dir.name}/__init__.py 里有 SPEC/build_scenario —— "
-                    f"脚本不能直接放在游戏目录下。给它建一个功能目录："
-                    f"games/{game_dir.name}/<功能>/，key 就是 "
-                    f"'{game_dir.name}/<功能>'",
+        if init.is_file():
+            text = init.read_text(encoding="utf-8", errors="replace")
+            if "SPEC = FeatureSpec" in text or "def build_scenario" in text:
+                found.append(
+                    (
+                        game_dir.name,
+                        f"games/{game_dir.name}/__init__.py 里有 SPEC/build_scenario —— "
+                        f"脚本不能直接放在游戏目录下。给它建："
+                        f"games/{game_dir.name}/{SCRIPTS_DIRNAME}/<功能>/，key 就是 "
+                        f"'{game_dir.name}/<功能>'",
+                    )
                 )
-            )
+
+        for child in sorted(game_dir.iterdir()):
+            if not child.is_dir() or child.name.startswith((".", "_")):
+                continue
+            if child.name in _SKIP_GAME_CHILDREN:
+                continue
+            if not (child / "__init__.py").is_file():
+                continue
+            text = (child / "__init__.py").read_text(encoding="utf-8", errors="replace")
+            if "SPEC = FeatureSpec" in text or "def build_scenario" in text:
+                found.append(
+                    (
+                        f"{game_dir.name}/{child.name}",
+                        f"games/{game_dir.name}/{child.name}/ 像是脚本，但位置不对 —— "
+                        f"请挪到 games/{game_dir.name}/{SCRIPTS_DIRNAME}/{child.name}/，"
+                        f"key 仍是 '{game_dir.name}/{child.name}'",
+                    )
+                )
     return found
 
 
@@ -195,7 +227,10 @@ def read_spec(module: Any, key: str) -> FeatureSpec:
 
 
 def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
-    """所有可运行的脚本，按 key 排序。结果会缓存（导入模块有副作用，别反复做）。"""
+    """所有可运行的脚本，按 key 排序。结果会缓存（导入模块有副作用，别反复做）。
+
+    每个游戏读 ``games.<游戏>.scripts`` 的 ``__all__`` —— 那是脚本清单的出处。
+    """
     global _SCRIPTS
     if _SCRIPTS is not None and not refresh:
         return sorted(_SCRIPTS.values(), key=lambda s: s.key)
@@ -203,30 +238,80 @@ def list_scripts(*, refresh: bool = False) -> list[ScriptSpec]:
     found: dict[str, ScriptSpec] = {}
     errors: list[tuple[str, str]] = _misplaced_scripts()
 
-    for key, game, slug, _path in iter_script_dirs():
-        module_name = f"games.{game}.{slug}"
+    for game_dir in _game_dirs():
+        game = game_dir.name
+        package_name = f"games.{game}.{SCRIPTS_DIRNAME}"
+        scripts_init = game_dir / SCRIPTS_DIRNAME / "__init__.py"
+        if not scripts_init.is_file():
+            # 还没建 scripts 包 —— 正常中间状态，不报错
+            continue
+
         try:
-            module = importlib.import_module(module_name)
+            package = importlib.import_module(package_name)
         except Exception as exc:
-            errors.append((key, f"{type(exc).__name__}: {exc}"))
+            errors.append((game, f"{package_name}: {type(exc).__name__}: {exc}"))
             continue
 
-        try:
-            feature = read_spec(module, key)
-        except ConfigError as exc:
-            errors.append((key, str(exc)))
+        exported = getattr(package, "__all__", None)
+        if not exported:
+            errors.append(
+                (
+                    game,
+                    f"{package_name}: __all__ 为空 —— 在 scripts/__init__.py 里导出各脚本的 SPEC"
+                    f"（如 ``from .jingji import SPEC as jingji``）",
+                )
+            )
             continue
 
-        found[key] = ScriptSpec(
-            key=key,
-            game=game,
-            slug=feature.slug or slug,
-            title=feature.title,
-            description=feature.description,
-            module=module_name,
-            feature=feature,
-            form=feature.form or FormSpec(),
-        )
+        for slug in exported:
+            key = f"{game}/{slug}"
+            feature = getattr(package, slug, None)
+            if not isinstance(feature, FeatureSpec):
+                detail = (
+                    "（没有这个名字）"
+                    if feature is None
+                    else f"（类型是 {type(feature).__name__}，要的是 FeatureSpec）"
+                )
+                errors.append(
+                    (
+                        key,
+                        f"{package_name}.__all__ 里的 {slug!r} 不是 FeatureSpec{detail}",
+                    )
+                )
+                continue
+
+            if feature.slug and feature.slug != slug:
+                errors.append(
+                    (
+                        key,
+                        f"{key}: 导出名 {slug!r} 和 SPEC.slug {feature.slug!r} 不一致",
+                    )
+                )
+                continue
+
+            module_name = f"{package_name}.{slug}"
+            found[key] = ScriptSpec(
+                key=key,
+                game=game,
+                slug=feature.slug or slug,
+                title=feature.title,
+                description=feature.description,
+                module=module_name,
+                feature=feature,
+                form=feature.form or FormSpec(),
+            )
+
+        # 目录里有、但没进 __all__ —— 很容易漏登记，明确报出来
+        exported_set = set(exported)
+        for feature_dir in _feature_dirs(game_dir):
+            if feature_dir.name not in exported_set:
+                errors.append(
+                    (
+                        f"{game}/{feature_dir.name}",
+                        f"games/{game}/{SCRIPTS_DIRNAME}/{feature_dir.name}/ 存在，"
+                        f"但没在 {package_name} 的 __all__ 里导出",
+                    )
+                )
 
     _SCRIPTS = found
     _ERRORS[:] = errors

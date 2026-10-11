@@ -1,4 +1,4 @@
-"""离线验证：竞技场的每个状态锚点能不能被正确、且**唯一**地认出来。
+﻿"""离线验证：竞技场的每个状态锚点能不能被正确、且**唯一**地认出来。
 
 ## 为什么需要它（不能用真机图代替）
 
@@ -46,8 +46,8 @@ from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.session import BaseSession
 from gamebot.vision.opencv_matcher import OpenCvMatcher
 from games.mingjiangsha.game import CLIENT_SIZE
-from games.mingjiangsha.jingji.bindings import BINDINGS
-from games.mingjiangsha.jingji.graph import SCENARIO
+from games.mingjiangsha.scripts.jingji.bindings import BINDINGS
+from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
 #: 这个测试**自己定**阈值，不 import 业务那边的 —— 业务现在不设阈值
 #: （一律走框架默认），而这里的诊断有别的目的：
@@ -66,7 +66,7 @@ _needs_finished_templates = pytest.mark.skipif(
 )
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
-TEMPLATES = HERE / "games" / "mingjiangsha" / "jingji" / "templates"
+TEMPLATES = HERE / "games" / "mingjiangsha" / "scripts" / "jingji" / "templates"
 RAW = TEMPLATES / "rawMaterial"
 
 #: 原始截图含标题栏，客户区从这一行开始（和 ``game.py`` 的说明一致）。
@@ -244,7 +244,7 @@ class TestDefinitionIsConsistent:
 
     def test_every_click_template_exists(self):
         """步骤里要点的那些模板也都在 —— 少一张就是"那一步永远点不动"。"""
-        import games.mingjiangsha.jingji.templates as templates
+        import games.mingjiangsha.scripts.jingji.templates as templates
 
         names = [v for k, v in vars(templates).items() if k.startswith("T_CLICK_")]
         assert names, "templates 里应该有 T_CLICK_* 系列的点击模板常量"

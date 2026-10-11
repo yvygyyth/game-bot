@@ -1,4 +1,4 @@
-# ---- Python ----
+﻿# ---- Python ----
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -39,7 +39,7 @@ games/mingjiangsha/fixtures/
 games/mingjiangsha/_candidates/
 # 名将杀的资产图（真机截图，14MB）—— 本地参考素材，自检在没有它们时会跳过那几项。
 # 模板（真正要在运行期用的那张小图）是入库的。
-games/mingjiangsha/jingji/assets/
+games/mingjiangsha/scripts/jingji/assets/
 
 # ---- IDE ----
 .idea/

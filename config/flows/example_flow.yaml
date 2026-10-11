@@ -1,4 +1,4 @@
-# 示例脚本定义
+﻿# 示例脚本定义
 #
 # 一份定义 = 状态树（我在哪） + 流程图（做什么）。
 #
@@ -81,7 +81,7 @@ states:
 #    字符串什么也检查不了。
 #
 #    所以下面这些节点只有名字，没有 steps。
-#    真脚本请看 games/mingjiangsha/jingji/graph.py。
+#    真脚本请看 games/mingjiangsha/scripts/jingji/graph.py。
 nodes:
   lobby: {}
   qianli: {}

@@ -1,4 +1,4 @@
-# 竞技场脚本 —— 模板
+﻿# 竞技场脚本 —— 模板
 
 **按父状态分目录**，跟 `pages.py` 里那棵状态树的**分组节点**走：
 
@@ -46,7 +46,7 @@ rawMaterial/                ← 你的原始截图，别动
 
 ⚠️ **改模板路径要同步改四处**（同一个真相的四份写法）：
 
-1. `games/mingjiangsha/jingji/templates/__init__.py` 的 `T_*` 常量 —— **权威**
+1. `games/mingjiangsha/scripts/jingji/templates/__init__.py` 的 `T_*` 常量 —— **权威**
 2. `logs/tools/build_templates.py` 的 `CROPS` 键
 3. `tests/test_jingji_states.py` 的 `TEMPLATE_OF`
 4. 本文档

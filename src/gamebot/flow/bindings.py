@@ -1,4 +1,4 @@
-"""关联表 —— **状态末梢 ↔ 流程节点** 的 id 双向映射。
+﻿"""关联表 —— **状态末梢 ↔ 流程节点** 的 id 双向映射。
 
 ## 它是独立的第三个产物
 
@@ -39,7 +39,7 @@
 ## 业务层怎么写
 
 ```python
-# games/<游戏>/<功能>/bindings.py
+# games/<游戏>/scripts/<功能>/bindings.py
 from gamebot.flow import Binding
 
 BINDINGS = (

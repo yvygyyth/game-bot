@@ -1,6 +1,6 @@
-"""竞技场 —— 模板路径索引。
+﻿"""竞技场 —— 模板路径索引。
 
-路径相对本目录（``games/mingjiangsha/jingji/templates/``）。
+路径相对本目录（``games/mingjiangsha/scripts/jingji/templates/``）。
 状态锚点与点击目标都写在这里，改路径只改这一处。
 
 目录约定见同目录 ``README.md``：``父状态/文件名.png``；

@@ -1,4 +1,4 @@
-"""业务层命令行。
+﻿"""业务层命令行。
 
     python -m games list                  列出所有脚本
     python -m games describe <脚本>       打印状态树 + 流程图（不连游戏）
@@ -155,7 +155,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """**真的跑起来**：装配 -> 跑流程 -> 打报告。
 
     和 ``gamebot run`` 的区别：那个跑的是 ``config/app.yaml`` 里那个"文档级"
-    示例流程；这个跑**业务层脚本**（``games/<游戏>/<功能>`` 的 ``build_config``
+    示例流程；这个跑**业务层脚本**（``games/<游戏>/scripts/<功能>`` 的 ``build_config``
     + ``build_scenario``）—— 也就是真正认识某个游戏的那份定义。
 
     跑完一定要看报告里的三样东西：

@@ -1,4 +1,4 @@
-# game-bot
+﻿# game-bot
 
 传统识图游戏脚本框架。不依赖任何 AI/模型，就是**截图 → 找图 → 判断 → 点击**。
 
@@ -260,11 +260,11 @@ uv run python -m games run mingjiangsha/jingji --param rounds=3           # 传�
 > 退出码有意义：预算跑完算成功（0），而"一个步骤都没执行、从头到尾 unknown"
 > 算失败（1）—— 那基本就是窗口标题不对 / 游戏没开 / 没站在预期界面上。
 
-业务层按**一级游戏、二级功能**组织，脚本永远在功能目录里
-（`games/<游戏>/<功能>/`）。约定见 [games/README.md](games/README.md)；
+业务层按**游戏 → scripts → 功能**组织，脚本永远在 `scripts/<功能>/` 里
+（`games/<游戏>/scripts/<功能>/`）。约定见 [games/README.md](games/README.md)；
 `mingjiangsha/jingji`（名将杀 · 竞技场）是一份完整的真机样板，
 里面记着几个**用数据定下来**的结论：悬浮态怎么处理、状态标识该选什么、
-阈值怎么定 —— 见 [games/mingjiangsha/jingji/README.md](games/mingjiangsha/jingji/README.md)。
+阈值怎么定 —— 见 [games/mingjiangsha/scripts/jingji/README.md](games/mingjiangsha/scripts/jingji/README.md)。
 
 ### 图形界面
 
@@ -460,7 +460,7 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 | 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位、YAML 加载全部实现 |
 | 执行层 | ✅ 完整 | 策略对象/步骤构造（`step_from_dict`）/结果记录/`Executor.run`/10 个 Step 的 `run()`/journal JSONL 落盘全部实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
-| 业务层 | 🟡 部分 | ★ 一级游戏 / 二级功能，注册表自动发现，`check`/`describe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
+| 业务层 | 🟡 部分 | ★ 游戏 → scripts → 功能，注册表自动发现，`check`/`describe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
 | 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥、journal JSONL 已实现；每次运行独立日志、结构化事件流待实现 |
 | UI | ✅ 阶段 2 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、开始/停止真的能跑、运行状态面板（含每次重定位）、实时画面（跑起来时复用引擎那一帧）、日志大框、检查。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
 | 测试 | ✅ 536 个用例 | 框架的结构契约与单元测试 |

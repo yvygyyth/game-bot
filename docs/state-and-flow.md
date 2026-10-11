@@ -1,4 +1,4 @@
-# 状态树 与 流程图：怎么结合
+﻿# 状态树 与 流程图：怎么结合
 
 > 这份文档记录的是**当前**的设计。它推翻过一次早期决定（"只拦不跳"），
 > 推翻的理由写在第五节里 —— 那一节比结论重要。
@@ -144,7 +144,7 @@ PageLeaf("x", queries=(looks_like_x,))
 也不藏在流程图里（节点**不**声明自己是哪个状态）：
 
 ```python
-# games/<游戏>/<功能>/bindings.py
+# games/<游戏>/scripts/<功能>/bindings.py
 BINDINGS = NodeBindings(pairs=(
     Binding("jingji", "home/jingji/before_create"),
 ))

@@ -1,4 +1,4 @@
-"""图怎么缩放 / 平移 —— 以及**重画时不能把它顶回去**。
+﻿"""图怎么缩放 / 平移 —— 以及**重画时不能把它顶回去**。
 
 ## 这个 bug 的成因（值得记下来）
 
@@ -42,7 +42,7 @@ class TestZoomSurvivesRedraw:
 
     def test_show_tree_keeps_the_zoom(self, panel, qt_app):
         from gamebot.state import PageTree
-        from games.mingjiangsha.jingji.pages import FEATURE_TREE
+        from games.mingjiangsha.scripts.jingji.pages import FEATURE_TREE
 
         tree = PageTree()
         tree.add(FEATURE_TREE)
@@ -63,7 +63,7 @@ class TestZoomSurvivesRedraw:
         )
 
     def test_show_graph_keeps_the_zoom(self, panel, qt_app):
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         scenario = SCENARIO.materialize(name="zoom-test")
         view = panel._graph_view
@@ -80,7 +80,7 @@ class TestZoomSurvivesRedraw:
 
     def test_many_redraws_do_not_accumulate_drift(self, panel, qt_app):
         """跑几十轮（真实运行就是这样）缩放必须一动不动。"""
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         scenario = SCENARIO.materialize(name="zoom-test")
         view = panel._graph_view
@@ -100,7 +100,7 @@ class TestAutoFitStillHappens:
     """让位归让位，**第一次看到图还是要自动适配** —— 否则开箱就是糊的。"""
 
     def test_first_draw_fits_by_itself(self, panel, qt_app):
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         scenario = SCENARIO.materialize(name="fit-test")
         view = panel._graph_view
@@ -113,7 +113,7 @@ class TestAutoFitStillHappens:
 
     def test_switching_script_refits(self, panel, qt_app):
         """换脚本要强制重新适配 —— 新图和上一个的视角没关系。"""
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         scenario = SCENARIO.materialize(name="refit-test")
         panel.set_scenario(scenario)
@@ -137,7 +137,7 @@ class TestAutoFitStillHappens:
 class TestPanSurvivesRedraw:
     def test_view_center_is_restored(self, panel, qt_app):
         """重画之后**看的内容**还是原来那块 —— 平移量不被清场景带走。"""
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         scenario = SCENARIO.materialize(name="pan-test")
         view = panel._graph_view

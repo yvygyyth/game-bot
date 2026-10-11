@@ -27,8 +27,9 @@
 
 其余全是声明：页面、节点、边、引擎选项。
 
-功能级模板根不单独声明：约定就是 ``games/<游戏>/<功能>/templates``，
-由 ``name`` 推导，写入 ``vision.extra_template_dirs``（优先于游戏级主根）。
+功能级模板根不单独声明：约定就是 ``games/<游戏>/scripts/<功能>/templates``，
+由 ``name``（``"<游戏>/<功能>"``）推导，写入 ``vision.extra_template_dirs``
+（优先于游戏级主根）。
 """
 
 from __future__ import annotations
@@ -49,10 +50,10 @@ __all__ = ["FeatureSpec"]
 class FeatureSpec:
     """一个功能脚本的完整声明。
 
-    业务层在 ``games/<游戏>/<功能>/__init__.py`` 里构造一个 ``SPEC`` 导出它。
+    业务层在 ``games/<游戏>/scripts/<功能>/__init__.py`` 里构造一个 ``SPEC`` 导出它。
 
-    :param name: ``"<游戏>/<功能>"``，命令行和界面都用它标识。
-        功能级模板根也由它推导：``games/<name>/templates``。
+    :param name: ``"<游戏>/<功能>"``，命令行和界面都用它标识（不含 ``scripts``）。
+        功能级模板根由它推导：``games/<游戏>/scripts/<功能>/templates``。
     :param title: 给人看的名字（进日志、进界面下拉框）。
     :param slug: 功能目录名（如 ``"jingji"``），用在 journal 文件名上。
     :param scenario: 状态树 + 流程图 + 引擎选项，**全是数据**
@@ -85,8 +86,9 @@ class FeatureSpec:
 
     @property
     def templates_dir(self) -> str:
-        """功能级模板根，**相对仓库根**。约定 ``games/<游戏>/<功能>/templates``。"""
-        return f"games/{self.name}/templates"
+        """功能级模板根，**相对仓库根**。约定 ``games/<游戏>/scripts/<功能>/templates``。"""
+        game, feature = self.name.split("/", 1)
+        return f"games/{game}/scripts/{feature}/templates"
 
     def __post_init__(self) -> None:
         """声明自身的检查。**构造这一行就报**，而不是等框架捞不着东西才猜。
@@ -130,8 +132,8 @@ class FeatureSpec:
         中间那步是**框架**填的，不是业务层写的：
 
         * ``name`` ← ``FeatureSpec.name``；
-        * ``vision.extra_template_dirs`` ← ``games/<name>/templates``（功能级模板根，
-          优先级高于游戏级）；
+        * ``vision.extra_template_dirs`` ← ``games/<游戏>/scripts/<功能>/templates``
+          （功能级模板根，优先级高于游戏级）；
         * ``timing.tick_interval`` ← ``scenario.options.tick_interval``
           —— 引擎节奏只声明**一次**，填在这里是为了让帧 TTL
           （``bootstrap`` 按它算）跟得上引擎。两处各写一个值的话，

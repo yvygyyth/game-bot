@@ -1,30 +1,35 @@
-# 业务层：怎么写一个脚本
+﻿# 业务层：怎么写一个脚本
 
 `src/gamebot/` 是**框架**，它不认识任何具体游戏。这里才是认识游戏的地方。
 
-## 布局：一级游戏、二级功能
+## 布局：游戏 → scripts → 功能
 
 ```
 games/
 └── <游戏>/                        一级：一个游戏一个目录（容器）
     ├── __init__.py               游戏级导出
     ├── game.py                   游戏级定义：窗口、锁定分辨率、基础配置
+    ├── utils/                    游戏级公共工具（跨脚本共用，如 go_back）
     ├── templates/                游戏级公共模板（多个脚本共用的图）
-    └── <功能>/                    二级：一个脚本功能一个目录
-        ├── __init__.py            ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
-        ├── form.py                动态表单声明（FORM，没人调参数就不用写）
-        ├── pages.py               状态树（**一个文件就够**，再复杂也别拆）
-        ├── graph.py               流程图（同上）
-        ├── bindings.py            关联表（状态末梢 ↔ 流程节点的 id 映射）
-        ├── steps/                 ★ 一个步骤一个文件
-        ├── utils/                 边条件等小工具（不属于步骤、也不属于图数据）
-        ├── shortcuts.py           这个功能专用的快捷方法
-        ├── templates/             图片资源 + 路径索引
-        │   ├── __init__.py        ★ 全部 T_* 路径常量（权威出处）
-        │   ├── lobby/…            PNG（按父状态分目录）
-        │   └── README.md          裁切约定
-        └── README.md              这个脚本怎么调
+    └── scripts/                  二级：脚本层（所有可运行脚本都放这里）
+        └── <功能>/                三级：一个脚本功能一个目录
+            ├── __init__.py        ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
+            ├── form.py            动态表单声明（FORM，没人调参数就不用写）
+            ├── pages.py           状态树（**一个文件就够**，再复杂也别拆）
+            ├── graph.py           流程图（同上）
+            ├── bindings.py        关联表（状态末梢 ↔ 流程节点的 id 映射）
+            ├── steps/             ★ 一个步骤一个文件
+            ├── utils/             边条件等小工具（不属于步骤、也不属于图数据）
+            ├── shortcuts.py       这个功能专用的快捷方法
+            ├── templates/         图片资源 + 路径索引
+            │   ├── __init__.py    ★ 全部 T_* 路径常量（权威出处）
+            │   ├── lobby/…        PNG（按父状态分目录）
+            │   └── README.md      裁切约定
+            └── README.md          这个脚本怎么调
 ```
+
+脚本 key 仍是 `<游戏>/<功能>`（不含 `scripts`）。例如目录
+`games/mingjiangsha/scripts/jingji/` 的 key 是 `mingjiangsha/jingji`。
 
 **游戏级目录里没有 `pages.py` / `shortcuts.py`。** 它们原来有，装的却是
 某一个功能的东西（竞技卡、竞技入口的 roi、点它的函数）—— 用某一个功能的
@@ -52,7 +57,7 @@ games/
 `steps/` 里每个文件是**动作本身**；图路径统一从 `templates` 拿：
 
 ```python
-# games/<游戏>/<功能>/steps/advance_team.py
+# games/<游戏>/scripts/<功能>/steps/advance_team.py
 from ..templates import T_CREATE_TEAM
 
 TEAM_ROI = Region(1400, 630, 470, 360)               # 它的搜索范围
@@ -78,14 +83,15 @@ def create_team(ctx) -> ActionResult:                # 它的逻辑（**就是�
 ROI，在 `pages.py` 定义、步骤那边 import（别两处各写一份）。
 
 
-**脚本永远在功能目录里。** 游戏目录是容器，不直接放脚本 ——
+**脚本永远在 `scripts/<功能>/` 里。** 游戏目录是容器，不直接放脚本 ——
 放进去的话注册表扫不到，表现是"脚本没出现在列表里"，很难查。
 真这么写了会明确报错并告诉你该放哪儿。
 
-一级按游戏、二级按功能的理由：
+分层的理由：
 
 * **游戏级**放"所有脚本都要用"的东西 —— 窗口标题、分辨率、公共弹窗。
   改一次全体受益，不用在每个脚本里重复；
+* **`scripts/`** 把可运行脚本和游戏级文件隔开，一个游戏有很多脚本时目录不糊；
 * **功能级**放"只跟这个玩法有关"的东西 —— 页面、流程、专用图、专用步骤。
   一个功能改坏了不影响别的。
 
@@ -95,15 +101,15 @@ ROI，在 `pages.py` 定义、步骤那边 import（别两处各写一份）。
 
 ## 唯一需要记住的规则
 
-脚本包的 `__init__.py` 导出**一个** `SPEC`，注册表就会**自动发现**它：
+两步：功能目录导出 `SPEC`，再在 `scripts/__init__.py` 里按功能名导出它：
 
 ```python
-# games/<游戏>/<功能>/__init__.py —— 这里**只有数据**，没有一行组装代码
+# games/<游戏>/scripts/<功能>/__init__.py —— 这里**只有数据**，没有一行组装代码
 from gamebot.feature import FeatureSpec
 from .graph import SCENARIO
 
 SPEC = FeatureSpec(
-    name="mingjiangsha/qianli",              # "<游戏>/<功能>"；模板根也按它推导
+    name="mingjiangsha/qianli",              # key；模板根按 games/<游戏>/scripts/<功能>/templates
     title="千里单骑刷本",                     # 给人看的名字
     slug="qianli",                           # 功能目录名（进 journal 文件名）
     description="自动刷本，连胜就继续",         # 可选
@@ -113,13 +119,23 @@ SPEC = FeatureSpec(
 )
 ```
 
-功能级模板根**不写**：约定就是 `games/<游戏>/<功能>/templates`，框架按 `name` 填进
+```python
+# games/<游戏>/scripts/__init__.py —— 这个游戏的脚本清单
+from .jingji import SPEC as jingji
+from .qianli import SPEC as qianli
+
+__all__ = ["jingji", "qianli"]
+```
+
+注册表读的是 `scripts/__all__`，不是扫目录。目录有了但忘了导出，会进 `discovery_errors`。
+
+功能级模板根**不写**：约定就是 `games/<游戏>/scripts/<功能>/templates`，框架按 `name` 填进
 `vision.extra_template_dirs`。
 
 `scenario` 是另一个纯数据对象，**三个产物各一个字段**：
 
 ```python
-# games/<游戏>/<功能>/graph.py
+# games/<游戏>/scripts/<功能>/graph.py
 from gamebot.flow import Binding, EngineOptions, Node, NodeBindings, Transition
 from gamebot.scenario_spec import ScenarioSpec
 from games import on_page
@@ -153,7 +169,7 @@ SCENARIO = ScenarioSpec(
 ```
 
 ```python
-# games/<游戏>/<功能>/bindings.py —— 独立的一个文件
+# games/<游戏>/scripts/<功能>/bindings.py —— 独立的一个文件
 from gamebot.flow import Binding, NodeBindings
 
 BINDINGS = NodeBindings(pairs=(
@@ -175,7 +191,7 @@ BINDINGS = NodeBindings(pairs=(
 ### 一个步骤就是一个函数
 
 ```python
-# games/<游戏>/<功能>/steps/click_skill.py
+# games/<游戏>/scripts/<功能>/steps/click_skill.py
 from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult
 
@@ -334,7 +350,7 @@ uv run python -m games run <脚本> --param farm.rounds=5 --param farm.timeout=6
 `form.py` 声明一个 `FORM`，界面上就会出现对应的控件：
 
 ```python
-# games/<游戏>/<功能>/form.py
+# games/<游戏>/scripts/<功能>/form.py
 from gamebot.params import FieldKind, FormSpec, ParamField
 
 FORM = FormSpec(
@@ -390,7 +406,7 @@ FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步�
 
 ## 参考实现
 
-[`mingjiangsha/jingji`](mingjiangsha/jingji/README.md)（名将杀 · 竞技场）是一份
+[`mingjiangsha/jingji`](mingjiangsha/scripts/jingji/README.md)（名将杀 · 竞技场）是一份
 完整的真机样板，里面记着几个用数据定下来的结论：
 
 * 悬浮会改变元素的样子时，怎么判断该加模板还是该收窄 ROI；
@@ -404,7 +420,7 @@ FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步�
 
 ```python
 config.vision.templates_dir = "games/<游戏>/templates"                  # 游戏级公共
-config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # 框架填
+config.vision.extra_template_dirs = ("games/<游戏>/scripts/<功能>/templates",)  # 框架填
 ```
 
 解析顺序是 **附加根 → 主根**，所以：
@@ -430,7 +446,7 @@ config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # �
 所以竞技场是这样（**目录 = 分组节点，文件 = 叶子**）：
 
 ```
-games/mingjiangsha/jingji/templates/
+games/mingjiangsha/scripts/jingji/templates/
 ├── __init__.py              ★ T_* 路径索引（权威）
 ├── lobby/lobby.png          首页（顶层叶子，自己一组）
 ├── jj/before_create.png     jj 下三个叶子
@@ -458,7 +474,7 @@ games/mingjiangsha/jingji/templates/
 
 ⚠️ **模板路径这一个真相有四份写法**，改目录要一起改：
 
-1. `games/<游戏>/<功能>/templates/__init__.py` 的 `T_*` 常量 —— **权威**
+1. `games/<游戏>/scripts/<功能>/templates/__init__.py` 的 `T_*` 常量 —— **权威**
 2. `logs/tools/build_templates.py` 的 `CROPS` 键
 3. `tests/<功能>_states.py` 里的 `TEMPLATE_OF`
 4. `templates/README.md` 的表格
@@ -510,7 +526,7 @@ games/mingjiangsha/jingji/templates/
 
 ## 加一个游戏 / 加一个功能
 
-**加一个功能**：在 `games/<游戏>/` 下建一个新目录，复制 `mingjiangsha/jingji/` 的骨架
+**加一个功能**：在 `games/<游戏>/scripts/` 下建一个新目录，复制 `mingjiangsha/scripts/jingji/` 的骨架
 （`__init__.py` + `pages.py` + `graph.py` + `bindings.py` + `steps/` + `templates/` + 按需 `utils/` / `form.py`）。
 
 **加一个游戏**：按上面的布局建 `games/<游戏>/`，改三样 ——

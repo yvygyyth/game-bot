@@ -1,4 +1,4 @@
-"""业务层的**声明契约**：一个功能导出**一个** ``SPEC``，里面只有数据。
+﻿"""业务层的**声明契约**：一个功能导出**一个** ``SPEC``，里面只有数据。
 
 ## 这一组在钉什么
 
@@ -77,9 +77,10 @@ class TestShippedScriptsDeclareSpec:
             scenario.validate()
             assert config.template_roots(), f"{spec.key} 没有模板根"
             assert config.name == spec.key, "配置名该等于脚本 key"
+            game, feature = spec.key.split("/", 1)
             assert config.vision.extra_template_dirs == (
-                f"games/{spec.key}/templates",
-            ), "功能级模板根该按 name 推导"
+                f"games/{game}/scripts/{feature}/templates",
+            ), "功能级模板根该按 games/<游戏>/scripts/<功能>/templates 推导"
             assert len(scenario.graph.nodes) >= 1
             assert scenario.graph.initial
 
@@ -124,7 +125,7 @@ class TestDeclarationsAreData:
         import ast
 
         tree = ast.parse(
-            pathlib.Path("games/mingjiangsha/jingji/__init__.py").read_text(encoding="utf-8")
+            pathlib.Path("games/mingjiangsha/scripts/jingji/__init__.py").read_text(encoding="utf-8")
         )
         called = {
             node.func.attr
@@ -136,7 +137,7 @@ class TestDeclarationsAreData:
 
     def test_scenario_spec_is_only_data(self):
         """``SCENARIO`` 的字段全是数据/对象，没有"怎么组装"的回调。"""
-        from games.mingjiangsha.jingji.graph import SCENARIO
+        from games.mingjiangsha.scripts.jingji.graph import SCENARIO
 
         assert isinstance(SCENARIO, ScenarioSpec)
         # 状态树是**一棵嵌套的树**，不是平铺的 (页面, 父id) 列表
@@ -167,7 +168,7 @@ class TestFeatureSpecIsTyped:
             _spec(**{field: "   "})
 
     def test_templates_dir_is_derived_from_name(self):
-        assert _spec().templates_dir == "games/game/feature/templates"
+        assert _spec().templates_dir == "games/game/scripts/feature/templates"
 
     def test_scenario_must_be_a_scenario_spec(self):
         with pytest.raises(ConfigError, match="ScenarioSpec"):

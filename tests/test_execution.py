@@ -1,4 +1,4 @@
-"""执行层：步骤是函数、执行器不再有策略。
+﻿"""执行层：步骤是函数、执行器不再有策略。
 
 ## 这个文件现在测什么
 
@@ -347,8 +347,8 @@ class TestJingjiStepsUseTheSharedHelpers:
 
     def test_create_team_clicks_through_the_shared_helper(self, tmp_path, matcher):
         """``create_team`` 命中就点、并把模板名带进 meta（journal 靠它）。"""
-        from games.mingjiangsha.jingji.steps import create_team
-        from games.mingjiangsha.jingji.templates import T_BEFORE_CREATE
+        from games.mingjiangsha.scripts.jingji.steps import create_team
+        from games.mingjiangsha.scripts.jingji.templates import T_BEFORE_CREATE
 
         matcher.matches = {T_BEFORE_CREATE: (Point(2300, 880), 0.95)}
         run_ctx = self._make_ctx(tmp_path, matcher)
@@ -362,7 +362,7 @@ class TestJingjiStepsUseTheSharedHelpers:
 
     def test_create_team_reports_not_found_when_missing(self, tmp_path, matcher):
         """没命中就如实 ``not_found`` —— 上层会拿实测状态去重定位，不在这里重试。"""
-        from games.mingjiangsha.jingji.steps import create_team
+        from games.mingjiangsha.scripts.jingji.steps import create_team
 
         matcher.matches = {}
         run_ctx = self._make_ctx(tmp_path, matcher)
@@ -389,7 +389,7 @@ class TestEnterJingjiHoversBeforeItClicks:
         from gamebot.config.schema import AppConfig, BackendKind
         from gamebot.context import RunContext
         from games.mingjiangsha.game import CLIENT_SIZE
-        from games.mingjiangsha.jingji.steps import enter_jingji
+        from games.mingjiangsha.scripts.jingji.steps import enter_jingji
 
         config = AppConfig.defaults()
         config.screen.backend = BackendKind.FAKE
@@ -417,7 +417,7 @@ class TestEnterJingjiHoversBeforeItClicks:
 
     def test_it_uses_the_coordinate_from_step(self, tmp_path):
         """坐标只有一个出处（``enter_jingji.JINGJI_ENTRY``），别处不再写一遍。"""
-        from games.mingjiangsha.jingji.steps.enter_jingji import JINGJI_ENTRY
+        from games.mingjiangsha.scripts.jingji.steps.enter_jingji import JINGJI_ENTRY
 
         # 有值、落在客户区内 —— 具体数字改了不用改测试
         assert 0 < JINGJI_ENTRY.x < 2560
