@@ -42,7 +42,6 @@ def _spec(**overrides) -> FeatureSpec:
         name="game/feature",
         title="标题",
         slug="feature",
-        templates_dir="games/game/feature/templates",
         scenario=ScenarioSpec(
             initial="home",
             tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
@@ -78,7 +77,9 @@ class TestShippedScriptsDeclareSpec:
             scenario.validate()
             assert config.template_roots(), f"{spec.key} 没有模板根"
             assert config.name == spec.key, "配置名该等于脚本 key"
-            assert config.vision.extra_template_dirs, "功能级模板根该被填上"
+            assert config.vision.extra_template_dirs == (
+                f"games/{spec.key}/templates",
+            ), "功能级模板根该按 name 推导"
             assert len(scenario.graph.nodes) >= 1
             assert scenario.graph.initial
 
@@ -160,10 +161,13 @@ class TestFeatureSpecIsTyped:
         with pytest.raises(ConfigError, match="<游戏>/<功能>"):
             _spec(name="mingjiangsha")
 
-    @pytest.mark.parametrize("field", ["title", "slug", "templates_dir"])
+    @pytest.mark.parametrize("field", ["title", "slug"])
     def test_blank_text_fields_are_rejected(self, field):
         with pytest.raises(ConfigError, match=field):
             _spec(**{field: "   "})
+
+    def test_templates_dir_is_derived_from_name(self):
+        assert _spec().templates_dir == "games/game/feature/templates"
 
     def test_scenario_must_be_a_scenario_spec(self):
         with pytest.raises(ConfigError, match="ScenarioSpec"):
@@ -191,11 +195,10 @@ class TestFeatureSpecIsTyped:
         kwargs = dict(
             name="game/feature",
             title="t",
-            slug="s",
             scenario=_spec().scenario,
             base_config=AppConfig.defaults,
         )
-        with pytest.raises(TypeError, match="templates_dir"):
+        with pytest.raises(TypeError, match="slug"):
             FeatureSpec(**kwargs)  # type: ignore[arg-type]
 
     def test_misspelled_field_is_a_type_error(self):
@@ -203,7 +206,6 @@ class TestFeatureSpecIsTyped:
             name="game/feature",
             title="t",
             slug="s",
-            templates_dir="x",
             scenario=_spec().scenario,
             base_config=AppConfig.defaults,
         )

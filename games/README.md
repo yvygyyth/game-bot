@@ -103,16 +103,18 @@ from gamebot.feature import FeatureSpec
 from .graph import SCENARIO
 
 SPEC = FeatureSpec(
-    name="mingjiangsha/qianli",              # "<游戏>/<功能>"，命令行和界面用它标识
+    name="mingjiangsha/qianli",              # "<游戏>/<功能>"；模板根也按它推导
     title="千里单骑刷本",                     # 给人看的名字
     slug="qianli",                           # 功能目录名（进 journal 文件名）
     description="自动刷本，连胜就继续",         # 可选
-    templates_dir="games/mingjiangsha/qianli/templates",
     scenario=SCENARIO,                       # 状态树 + 流程图 + 关联表 + 引擎选项
     base_config=game.base_config,            # 游戏级基础配置（可调用对象）
     form=FORM,                               # 可选：运行参数表单
 )
 ```
+
+功能级模板根**不写**：约定就是 `games/<游戏>/<功能>/templates`，框架按 `name` 填进
+`vision.extra_template_dirs`。
 
 `scenario` 是另一个纯数据对象，**三个产物各一个字段**：
 
@@ -224,9 +226,9 @@ def click_skill(ctx) -> ActionResult:
 
 | 写错了什么 | mypy 报什么 |
 |---|---|
-| 漏掉 `templates_dir` | `Missing positional argument "templates_dir"` |
+| 漏掉 `slug` | `Missing positional argument "slug"` |
 | 把 `form` 拼成 `from_` | `Unexpected keyword argument "from_" ... did you mean "form"?` |
-| `templates_dir` 传了 `Path` 而不是 `str` | `Argument "templates_dir" ... has incompatible type "Path"; expected "str"` |
+| `scenario` 传了 `dict` 而不是 `ScenarioSpec` | `Argument "scenario" ... has incompatible type "dict"; expected "ScenarioSpec"` |
 | `base_config` 传了**配置对象**而不是函数 | 运行期 `ConfigError`（这条类型上看不出来，所以构造期也查一遍） |
 
 以前是散装几个名字（`TITLE` / `build_config` / `build_scenario`），框架靠
@@ -245,9 +247,9 @@ def click_skill(ctx) -> ActionResult:
 
 ### 还需要导出的常量
 
-`SPEC` 之外，`SLUG` / `TITLE` / `TEMPLATES_DIR` 这类模块级常量**照旧留着** ——
-它们是给别处用的（比如 `shortcuts.py` 里拼模板路径），而 `SPEC` 是给**框架**用的
-那份声明。两者不重复：`SPEC` 里的值就从这些常量取。
+`SPEC` 之外，`SLUG` / `TITLE` 这类模块级常量**照旧留着** ——
+它们是给别处用的（比如拼路径、写日志），而 `SPEC` 是给**框架**用的那份声明。
+功能级模板根不再单独导出：路径约定固定，需要时用 `SPEC.templates_dir`。
 
 不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。**漏了 `SPEC`
 会被明确报出来**（说清缺什么、约定在哪），而不是让脚本静默消失在列表里。
@@ -397,11 +399,12 @@ FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步�
 
 ## 图片资源怎么放
 
-每个功能有自己的模板根，**优先级高于游戏级**：
+每个功能有自己的模板根，**优先级高于游戏级**。游戏级在 `base_config` 里设；
+功能级由框架按 `name` 推导，业务层不用写：
 
 ```python
 config.vision.templates_dir = "games/<游戏>/templates"                  # 游戏级公共
-config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # 本功能
+config.vision.extra_template_dirs = ("games/<游戏>/<功能>/templates",)  # 框架填
 ```
 
 解析顺序是 **附加根 → 主根**，所以：

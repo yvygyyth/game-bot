@@ -10,7 +10,7 @@
 
 | 想改什么 | 读 |
 |---|---|
-| 脚本叫什么、模板在哪、表单有哪些 | **本文件** |
+| 脚本叫什么、表单有哪些 | **本文件** |
 | 每个状态靠什么认出来（模板 + roi + 阈值） | :mod:`.pages` |
 | 状态和流程节点怎么对上 | :mod:`.bindings` |
 | 有哪些节点、什么条件换节点、循环在哪 | :mod:`.graph` |
@@ -38,8 +38,6 @@ SLUG = "jingji"
 TITLE = "竞技场"
 DESCRIPTION = "刷竞技场：建队 → 匹配 → 选将 → 投降 → 结算，循环 N 局"
 
-TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
-
 #: 这个脚本的**唯一导出**。框架读它，编辑器也看它。
 #:
 #: 字段全必选：漏一个 ``mypy`` 当场报 ``Missing positional argument``，
@@ -49,6 +47,8 @@ TEMPLATES_DIR = "games/mingjiangsha/jingji/templates"
 #: ``base_config`` 是**游戏级**的东西（窗口标题、锁定分辨率）—— 它是"怎么跑"、
 #: 而且与环境相关，所以由游戏级提供，本功能不重复声明。
 #:
+#: 功能级模板根不写：约定就是 ``games/<游戏>/<功能>/templates``，框架按 ``name`` 推导。
+#:
 #: **没有 ``base_tree``**：页面不分"游戏级公共"和"功能级"了，
 #: 状态树整个在 :mod:`.pages` 里（理由见 :mod:`games.mingjiangsha.game`）。
 SPEC = FeatureSpec(
@@ -56,7 +56,6 @@ SPEC = FeatureSpec(
     title=TITLE,
     slug=SLUG,
     description=DESCRIPTION,
-    templates_dir=TEMPLATES_DIR,
     scenario=SCENARIO,
     base_config=_game.base_config,
     form=FORM,
@@ -73,6 +72,5 @@ __all__ = [
     "DESCRIPTION",
     "SLUG",
     "SPEC",
-    "TEMPLATES_DIR",
     "TITLE",
 ]

@@ -25,7 +25,10 @@
 * ``build_config`` —— 每次运行都要**一份新的** ``AppConfig``。收一个配置对象
   会让一次运行改到的东西泄漏到下一次（那个坑以前踩过，所以类型上就要求可调用）。
 
-其余全是声明：模板根、页面、节点、边、引擎选项。
+其余全是声明：页面、节点、边、引擎选项。
+
+功能级模板根不单独声明：约定就是 ``games/<游戏>/<功能>/templates``，
+由 ``name`` 推导，写入 ``vision.extra_template_dirs``（优先于游戏级主根）。
 """
 
 from __future__ import annotations
@@ -49,10 +52,9 @@ class FeatureSpec:
     业务层在 ``games/<游戏>/<功能>/__init__.py`` 里构造一个 ``SPEC`` 导出它。
 
     :param name: ``"<游戏>/<功能>"``，命令行和界面都用它标识。
+        功能级模板根也由它推导：``games/<name>/templates``。
     :param title: 给人看的名字（进日志、进界面下拉框）。
     :param slug: 功能目录名（如 ``"jingji"``），用在 journal 文件名上。
-    :param templates_dir: 这个功能自己的模板根，**相对仓库根**。
-        路径分隔统一用 ``/``。它优先于游戏级的模板根。
     :param scenario: 状态树 + 流程图 + 引擎选项，**全是数据**
         （见 :class:`~gamebot.scenario_spec.ScenarioSpec`）。
     :param base_config: 造一份**游戏级基础配置**（窗口、分辨率、游戏级模板根……）。
@@ -75,12 +77,16 @@ class FeatureSpec:
     name: str
     title: str
     slug: str
-    templates_dir: str
     scenario: ScenarioSpec
     base_config: Callable[[], AppConfig]
     description: str = ""
     form: FormSpec | None = None
     build_config: Callable[[AppConfig], AppConfig] | None = None
+
+    @property
+    def templates_dir(self) -> str:
+        """功能级模板根，**相对仓库根**。约定 ``games/<游戏>/<功能>/templates``。"""
+        return f"games/{self.name}/templates"
 
     def __post_init__(self) -> None:
         """声明自身的检查。**构造这一行就报**，而不是等框架捞不着东西才猜。
@@ -95,8 +101,6 @@ class FeatureSpec:
             raise ConfigError(f"{self.name}: title 不能为空")
         if not self.slug.strip():
             raise ConfigError(f"{self.name}: slug 不能为空")
-        if not self.templates_dir.strip():
-            raise ConfigError(f"{self.name}: templates_dir 不能为空")
         if not isinstance(self.scenario, ScenarioSpec):
             raise ConfigError(
                 f"{self.name}: scenario 要是 ScenarioSpec，收到 {type(self.scenario).__name__}"
@@ -126,7 +130,7 @@ class FeatureSpec:
         中间那步是**框架**填的，不是业务层写的：
 
         * ``name`` ← ``FeatureSpec.name``；
-        * ``vision.extra_template_dirs`` ← ``templates_dir``（功能级模板根，
+        * ``vision.extra_template_dirs`` ← ``games/<name>/templates``（功能级模板根，
           优先级高于游戏级）；
         * ``timing.tick_interval`` ← ``scenario.options.tick_interval``
           —— 引擎节奏只声明**一次**，填在这里是为了让帧 TTL
