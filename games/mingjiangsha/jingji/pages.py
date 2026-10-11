@@ -40,9 +40,6 @@ from .templates import (
     T_SELECT_PICKED,
 )
 
-#: 战斗里等下一个界面出现的超时（秒）。
-WAIT_FIGHT = 8.0
-
 FEATURE_TREE = PageGroup(
     "home",
     name="首页（容器）",

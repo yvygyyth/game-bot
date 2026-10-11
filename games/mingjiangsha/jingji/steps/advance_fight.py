@@ -49,7 +49,6 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import wait_for
 from gamebot.types import ActionResult, Point
 
-from ..pages import WAIT_FIGHT
 from ..templates import T_CLICK_FIGHT_CONFIRM, T_FIGHT_MENU, T_FIGHT_SURRENDER
 
 if TYPE_CHECKING:
@@ -91,7 +90,7 @@ def _wait_then_click(ctx: RunContext, template: str, label: str) -> ActionResult
     别在别的地方再建一份（那就成了第二份实现）。
     """
     query = ImageQuery(template)
-    appeared = wait_for(ctx, query, timeout=WAIT_FIGHT)
+    appeared = wait_for(ctx, query, timeout=8.0)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(
             f"等不到「{label}」出现（上一步可能没生效）", template=template

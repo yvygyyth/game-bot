@@ -48,7 +48,6 @@ from gamebot.execution.builtins import click_image, wait_for
 from gamebot.types import ActionResult
 
 from ..form import ROUNDS_PARAM
-from ..pages import WAIT_FIGHT
 from ..templates import T_FIGHT_DONE, T_FIGHT_NEXT, T_FIGHT_SPACE
 
 if TYPE_CHECKING:
@@ -75,7 +74,7 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
 
     # ---- 2. 等「下一步」出现，点它 ----
     next_query = ImageQuery(T_FIGHT_NEXT)
-    appeared = wait_for(ctx, next_query, timeout=WAIT_FIGHT)
+    appeared = wait_for(ctx, next_query, timeout=8.0)
     if not appeared.ok or appeared.value is None:
         return ActionResult.not_found(
             "等不到「下一步」出现（点空白区没生效？）", template=T_FIGHT_NEXT
