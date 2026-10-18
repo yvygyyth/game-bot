@@ -18,9 +18,11 @@ import re
 
 import pytest
 
+from pathlib import Path
+
 from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.session import BaseSession
-from gamebot.config.schema import AppConfig
+from gamebot.config.schema import RunPaths
 from gamebot.context import RunContext
 from gamebot.state.page import Page, PageTree
 from gamebot.state.tracker import PageTracker
@@ -40,11 +42,16 @@ def doc() -> str:
 
 @pytest.fixture
 def ctx() -> RunContext:
-    config = AppConfig.defaults()
     tree = PageTree()
     tree.add(Page("home"))
     session = BaseSession(build_fake_backends(size=(64, 64)), matcher=FakeMatcher())
-    context = RunContext(session, config, tree=tree, frame_ttl=0.5)
+    context = RunContext(
+        session,
+        name="docs",
+        paths=RunPaths.under(Path(".")),
+        tree=tree,
+        frame_ttl=0.5,
+    )
     yield context
     context.close()
 
@@ -137,9 +144,7 @@ class TestDocExamplesRun:
 
     def test_now_and_paths(self, ctx: RunContext, tmp_path: pathlib.Path) -> None:
         assert ctx.now() > 0
-        ctx.config.paths.root = tmp_path
-        ctx.config.paths.logs = tmp_path / "logs"
-        ctx.config.paths.screenshots = tmp_path / "logs" / "shots"
+        ctx.paths = RunPaths.under(tmp_path)
         assert ctx.screenshot_path("a").name == "a.png"
         assert ctx.journal_path("x").suffix == ".jsonl"
 

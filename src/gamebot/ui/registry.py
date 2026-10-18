@@ -185,9 +185,11 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
 
     roots: tuple[str, ...] = ()
     try:
-        roots = tuple(str(p) for p in entry.spec.build_config().template_roots())
+        from ..bootstrap import project_root
+
+        roots = (str(project_root() / entry.spec.feature.templates_dir),)
     except Exception as exc:
-        problems.append(f"构造配置失败: {type(exc).__name__}: {exc}")
+        problems.append(f"解析模板根失败: {type(exc).__name__}: {exc}")
 
     return ScriptDetails(
         pages=len(scenario.tree),

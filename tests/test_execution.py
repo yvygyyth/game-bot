@@ -293,20 +293,38 @@ class TestBuiltins:
 
 class TestFailureFrames:
     def test_failing_step_saves_a_frame(self, ctx, tmp_path):
-        ctx.config.paths.screenshots = tmp_path / "shots"
+        from gamebot.config.schema import RunPaths
+
+        ctx.paths = RunPaths(
+            root=tmp_path,
+            screenshots=tmp_path / "shots",
+            journals=tmp_path / "journals",
+        )
         executor = Executor(ctx, save_frames_on_error=True)
         outcome = executor.run(lambda c: _miss())
 
         assert outcome.frame_path, "失败的步骤该存一张当帧"
 
     def test_success_does_not_save(self, ctx, tmp_path):
-        ctx.config.paths.screenshots = tmp_path / "shots"
+        from gamebot.config.schema import RunPaths
+
+        ctx.paths = RunPaths(
+            root=tmp_path,
+            screenshots=tmp_path / "shots",
+            journals=tmp_path / "journals",
+        )
         executor = Executor(ctx, save_frames_on_error=True)
         outcome = executor.run(lambda c: _ok())
         assert outcome.frame_path == ""
 
     def test_saving_is_off_by_default(self, ctx, tmp_path):
-        ctx.config.paths.screenshots = tmp_path / "shots"
+        from gamebot.config.schema import RunPaths
+
+        ctx.paths = RunPaths(
+            root=tmp_path,
+            screenshots=tmp_path / "shots",
+            journals=tmp_path / "journals",
+        )
         outcome = Executor(ctx).run(lambda c: _miss())
         assert outcome.frame_path == ""
 
@@ -332,18 +350,16 @@ class TestJingjiStepsUseTheSharedHelpers:
     def _make_ctx(self, tmp_path, matcher):
         from gamebot.atomic.backends.fake import build_fake_backends
         from gamebot.atomic.session import BaseSession
-        from gamebot.config.schema import AppConfig, BackendKind
+        from gamebot.config.schema import RunPaths
         from gamebot.context import RunContext
 
-        config = AppConfig.defaults()
-        config.screen.backend = BackendKind.FAKE
-        config.paths.root = tmp_path
-        config.paths.logs = tmp_path / "logs"
-        config.paths.screenshots = tmp_path / "logs" / "screenshots"
-        config.paths.journals = tmp_path / "logs" / "journals"
-        config.vision.record = False
         session = BaseSession(build_fake_backends(size=self.SIZE), matcher=matcher)
-        return RunContext(session, config, frame_ttl=0.5)
+        return RunContext(
+            session,
+            name="test",
+            paths=RunPaths.under(tmp_path),
+            frame_ttl=0.5,
+        )
 
     def test_create_team_clicks_through_the_shared_helper(self, tmp_path, matcher):
         """``create_team`` 命中就点、并把模板名带进 meta（journal 靠它）。"""
@@ -386,23 +402,18 @@ class TestEnterJingjiHoversBeforeItClicks:
     def _run(self, tmp_path):
         from gamebot.atomic.backends.fake import build_fake_backends
         from gamebot.atomic.session import BaseSession
-        from gamebot.config.schema import AppConfig, BackendKind
+        from gamebot.config.schema import RunPaths
         from gamebot.context import RunContext
-        from games.mingjiangsha.game import CLIENT_SIZE
         from games.mingjiangsha.scripts.jingji.steps import enter_jingji
-
-        config = AppConfig.defaults()
-        config.screen.backend = BackendKind.FAKE
-        config.paths.root = tmp_path
-        config.paths.logs = tmp_path / "logs"
-        config.paths.screenshots = tmp_path / "logs" / "shots"
-        config.vision.record = False
         from tests.conftest import FakeMatcher
 
+        # 与竞技场模板录制时的客户区尺寸一致（2560×1369）
         session = BaseSession(
-            build_fake_backends(size=CLIENT_SIZE), matcher=FakeMatcher()
+            build_fake_backends(size=(2560, 1369)), matcher=FakeMatcher()
         )
-        run_ctx = RunContext(session, config, frame_ttl=0.5)
+        run_ctx = RunContext(
+            session, name="test", paths=RunPaths.under(tmp_path), frame_ttl=0.5
+        )
         try:
             outcome = Executor(run_ctx).run(enter_jingji)
         finally:

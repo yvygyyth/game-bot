@@ -7,13 +7,12 @@
 ```
 games/
 └── <游戏>/                        一级：一个游戏一个目录（容器）
-    ├── __init__.py               游戏级导出
-    ├── game.py                   游戏级定义：窗口、锁定分辨率、基础配置
-    ├── utils/                    游戏级公共工具（跨脚本共用，如 go_back）
-    ├── templates/                游戏级公共模板（多个脚本共用的图）
+    ├── __init__.py               游戏包：导出脚本清单 + 跨脚本纯函数
+    ├── utils/                    跨脚本纯函数（如 go_back）
     └── scripts/                  二级：脚本层（所有可运行脚本都放这里）
+        ├── __init__.py            ★ 按功能名导出各 SPEC
         └── <功能>/                三级：一个脚本功能一个目录
-            ├── __init__.py        ★ SPEC = FeatureSpec(...) —— 这个脚本的声明
+            ├── __init__.py        ★ SPEC = FeatureSpec(...)（含 window_title）
             ├── form.py            动态表单声明（FORM，没人调参数就不用写）
             ├── pages.py           状态树（**一个文件就够**，再复杂也别拆）
             ├── graph.py           流程图（同上）
@@ -89,15 +88,10 @@ ROI，在 `pages.py` 定义、步骤那边 import（别两处各写一份）。
 
 分层的理由：
 
-* **游戏级**放"所有脚本都要用"的东西 —— 窗口标题、分辨率、公共弹窗。
-  改一次全体受益，不用在每个脚本里重复；
+* **游戏包**只导出脚本清单与跨脚本纯函数（如 `go_back`）；窗口标题写在各脚本的 `FeatureSpec` 上；
 * **`scripts/`** 把可运行脚本和游戏级文件隔开，一个游戏有很多脚本时目录不糊；
 * **功能级**放"只跟这个玩法有关"的东西 —— 页面、流程、专用图、专用步骤。
   一个功能改坏了不影响别的。
-
-**游戏级也不必凑齐所有文件。** 要不要建 `pages.py` / `shortcuts.py`，
-取决于这个游戏是不是真有多个脚本要共用同一批页面 —— 不是取决于格式对不对称。
-只有一个脚本的游戏，那些文件就该空着。
 
 ## 唯一需要记住的规则
 
@@ -112,9 +106,9 @@ SPEC = FeatureSpec(
     name="mingjiangsha/qianli",              # key；模板根按 games/<游戏>/scripts/<功能>/templates
     title="千里单骑刷本",                     # 给人看的名字
     slug="qianli",                           # 功能目录名（进 journal 文件名）
+    window_title="名将杀",                   # 找游戏窗口用的标题关键字
     description="自动刷本，连胜就继续",         # 可选
     scenario=SCENARIO,                       # 状态树 + 流程图 + 关联表 + 引擎选项
-    base_config=game.base_config,            # 游戏级基础配置（可调用对象）
     form=FORM,                               # 可选：运行参数表单
 )
 ```
@@ -129,8 +123,8 @@ __all__ = ["jingji", "qianli"]
 
 注册表读的是 `scripts/__all__`，不是扫目录。目录有了但忘了导出，会进 `discovery_errors`。
 
-功能级模板根**不写**：约定就是 `games/<游戏>/scripts/<功能>/templates`，框架按 `name` 填进
-`vision.extra_template_dirs`。
+功能级模板根**不写**：约定就是 `games/<游戏>/scripts/<功能>/templates`，
+框架按 `name` 推导，装配时相对仓库根解析。
 
 `scenario` 是另一个纯数据对象，**三个产物各一个字段**：
 
@@ -242,30 +236,16 @@ def click_skill(ctx) -> ActionResult:
 
 | 写错了什么 | mypy 报什么 |
 |---|---|
-| 漏掉 `slug` | `Missing positional argument "slug"` |
+| 漏掉 `slug` / `window_title` | `Missing positional argument "..."` |
 | 把 `form` 拼成 `from_` | `Unexpected keyword argument "from_" ... did you mean "form"?` |
 | `scenario` 传了 `dict` 而不是 `ScenarioSpec` | `Argument "scenario" ... has incompatible type "dict"; expected "ScenarioSpec"` |
-| `base_config` 传了**配置对象**而不是函数 | 运行期 `ConfigError`（这条类型上看不出来，所以构造期也查一遍） |
 
 以前是散装几个名字（`TITLE` / `build_config` / `build_scenario`），框架靠
-``getattr(module, "build_config", None)`` 去捞 —— 于是"必须有哪些、叫什么"
-这条契约**只存在于框架的字符串里**，编辑器和类型检查都看不见。
+``getattr`` 去捞 —— 于是"必须有哪些、叫什么"只存在于框架字符串里。
+现在导出一个 typed 的 `FeatureSpec`，编辑器当场就能查错。
 
-### 有两处**必须**是函数，不是数据
-
-| 字段 | 为什么是函数 |
-|---|---|
-| `base_config` | 里面含 `PROJECT_ROOT` 这类**环境推导值**（"怎么跑"），而且每次运行要一份新的 |
-| `build_config` | 同上 —— 共享一个 `AppConfig` 会让一次运行改到的东西**泄漏到下一次** |
-
-`build_config` 是可选的：模板根、名字、tick 间隔框架都会从声明里填好。
-留这个口子是为了"这个脚本真要拧某个框架级旋钮"。
-
-### 还需要导出的常量
-
-`SPEC` 之外，`SLUG` / `TITLE` 这类模块级常量**照旧留着** ——
-它们是给别处用的（比如拼路径、写日志），而 `SPEC` 是给**框架**用的那份声明。
-功能级模板根不再单独导出：路径约定固定，需要时用 `SPEC.templates_dir`。
+装配由框架的 ``bootstrap_from_spec`` 完成：窗口标题来自 SPEC（UI/CLI 可覆盖），
+分辨率运行时探测，模板根按约定路径解析。业务层**不再**碰 `AppConfig` / YAML。
 
 不需要维护手写的清单，也不会出现"新加了脚本但忘了登记"。**漏了 `SPEC`
 会被明确报出来**（说清缺什么、约定在哪），而不是让脚本静默消失在列表里。
@@ -415,24 +395,15 @@ FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步�
 
 ## 图片资源怎么放
 
-每个功能有自己的模板根，**优先级高于游戏级**。游戏级在 `base_config` 里设；
-功能级由框架按 `name` 推导，业务层不用写：
+每个功能有自己的模板根，由框架按 `name` 推导：
 
-```python
-config.vision.templates_dir = "games/<游戏>/templates"                  # 游戏级公共
-config.vision.extra_template_dirs = ("games/<游戏>/scripts/<功能>/templates",)  # 框架填
+```text
+games/<游戏>/scripts/<功能>/templates
 ```
 
-解析顺序是 **附加根 → 主根**，所以：
-
-* 功能代码里写 `"battle/skill.png"` → 落到本功能目录；
-* 写 `"common/network_error.png"` → 本功能目录没有，落到游戏级；
-* 同名时会**覆盖**公共模板 —— 某个功能需要不一样的样式时不用把公共的挪走。
-
-**放哪一层按"谁用"定，不是按"看起来属于哪"。** 只有这个玩法用得到的图放
-本功能目录；**多个脚本都要用**的（网络错误弹窗、通用按钮）才放游戏级。
-判断错了不会报错 —— 只是以后加第二个脚本时会发现"这张图怎么找不到了"，
-或者游戏级目录里堆了一堆其实只有一个脚本用的图。
+功能代码里写 `"battle/skill.png"` → 落到本功能目录。
+跨脚本共用的图（若以后有）放到游戏级 `utils` / 公共目录时再约定；
+本轮业务路径只认功能级模板根。
 
 ### 模板怎么分目录（这块来回改过几次，值得单独说）
 

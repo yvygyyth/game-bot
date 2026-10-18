@@ -23,11 +23,10 @@ from gamebot.ui.registry import ScriptEntry
 
 pytest.importorskip("PySide6")
 
-import gamebot.bootstrap as bs
 from gamebot.ui import window as win_mod
 from gamebot.ui.panels import controls as controls_mod
 
-from .test_ui_run import _entry
+from .test_ui_run import _entry, _patch_bootstrap
 
 
 @pytest.fixture
@@ -39,6 +38,7 @@ def ui(qt_app, tmp_path, monkeypatch):
     """
     entry = _entry()
     monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
+    _patch_bootstrap(monkeypatch, tmp_path)
 
     main = win_mod.MainWindow()
     main._target_window_ok = lambda e: True
@@ -429,7 +429,9 @@ class TestNoCheckButton:
         为它维护一套反射 + 声明机制不划算（用户的原话："反正识图失败了，会报错，
         传导上来"）。
         """
-        assert not hasattr(bs, "check_templates")
+        import gamebot.bootstrap as bootstrap
+
+        assert not hasattr(bootstrap, "check_templates")
 
     def test_start_does_not_ask_about_templates(self, qt_app, monkeypatch, ui) -> None:
         """所以「开始」不该因为模板的事被拦下。"""

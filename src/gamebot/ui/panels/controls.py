@@ -470,7 +470,7 @@ class ControlsBar(QWidget):
         entries = [s for s in self._scripts if game in (_ALL_GAMES, "") or s.game == game]
         self.script.blockSignals(True)
         self.script.clear()
-        # 第一项是"不选脚本"：这时预览用配置文件（config/app.yaml）里的设置，
+        # 第一项是"不选脚本"：这时不预装任何业务脚本，
         # 于是可以"先确认能看到窗口、能截到图"，再去写脚本。
         self.script.addItem(_NO_SCRIPT, None)
         for entry in entries:

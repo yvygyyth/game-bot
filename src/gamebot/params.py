@@ -309,7 +309,7 @@ class FormSpec:
 
         :param values: 用户给的值（可能只有一部分，也**允许有表单没声明的 key**）。
             传 ``None`` 就是"全用默认值" —— 那是"用户一个都没改"的正常情况。
-        :return: 一份完整的参数字典，可以直接交给 ``build_context(params=...)``。
+        :return: 一份完整的参数字典，可以直接交给 ``bootstrap_from_spec(params=...)``。
 
         ## 为什么要有这个"凑齐"的动作
 

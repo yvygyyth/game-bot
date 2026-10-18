@@ -577,7 +577,7 @@ src/gamebot/
 ```
 
 UI 放在 `src/gamebot/ui/` 而不是项目根的 `ui/`：它**属于框架**（任何游戏都能用），
-不属于某个具体游戏。业务层只提供 `build_config` / `build_scenario`，
+不属于某个具体游戏。业务层只提供 `FeatureSpec`（经注册表变成 `ScriptSpec`），
 UI 通过注册表拿它们，对具体游戏一无所知。
 
 依赖声明：
@@ -604,7 +604,7 @@ ui = ["PySide6>=6.6"]
 ```bash
 gamebot ui                    # 默认选中第一个脚本
 gamebot ui --script mingjiangsha/jingji  # 预选某个脚本
-gamebot ui --script none      # 不选脚本，只用 config/app.yaml 看画面
+gamebot ui --script none      # 不预选脚本，打开后自己选
 gamebot ui --snapshot a.png   # 不开窗口，渲染一张界面截图（无头自检 / 配图）
 ```
 

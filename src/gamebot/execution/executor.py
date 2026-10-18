@@ -227,19 +227,7 @@ class Executor:
             except Exception:  # pragma: no cover - 抓屏失败不该让脚本挂
                 log.debug("失败帧抓取失败，跳过")
                 return
-        directory = self.ctx.config.paths.resolve(self.ctx.config.paths.screenshots)
-        path = self.journal.attach_frame(
-            outcome,
-            frame,
-            directory=directory,
-            prefix=FAILED_FRAME_PREFIX,
-            tick=int(getattr(self.ctx.pages, "tick", 0)),
-        )
-        if not path:
-            return
-        prune_old(Path(directory), f"{FAILED_FRAME_PREFIX}*.png", self._frame_keep)
-        log.debug("失败帧已存: %s", path)
-        directory = self.ctx.config.paths.resolve(self.ctx.config.paths.screenshots)
+        directory = self.ctx.paths.resolve(self.ctx.paths.screenshots)
         path = self.journal.attach_frame(
             outcome,
             frame,

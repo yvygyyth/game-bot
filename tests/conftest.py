@@ -7,7 +7,7 @@
 * ``FakeMatcher`` / ``FakeReader``  —— 不读图片的视觉替身，返回预设结果
 * ``fake_bundle``                  —— 内存后端（记录所有输入调用）
 * ``session`` / ``frame``          —— 接了假后端的 Session 与一帧画面
-* ``config``                       —— 指向临时目录的配置，不会污染项目
+* ``run_paths``                    —— 指向临时目录的运行路径，不会污染项目
 * ``ctx``                          —— 完整 RunContext，可跑流程层
 
 有了这些，整个框架的不依赖 Windows / adb / 游戏就能被测试。
@@ -21,7 +21,7 @@ import pytest
 from gamebot.atomic.backends.fake import FakeInputBackend, build_fake_backends
 from gamebot.atomic.session import BaseSession
 from gamebot.atomic.vision import MatchResult, TextBox
-from gamebot.config.schema import AppConfig, BackendKind
+from gamebot.config.schema import RunPaths
 from gamebot.context import RunContext
 from gamebot.types import Point, Region
 
@@ -138,22 +138,16 @@ def frame(session):
 
 
 @pytest.fixture
-def config(tmp_path) -> AppConfig:
-    """指向临时目录的配置，避免往项目 logs/ 里写东西。"""
-    cfg = AppConfig.defaults()
-    cfg.name = "test-flow"
-    cfg.screen.backend = BackendKind.FAKE
-    cfg.paths.root = tmp_path
-    cfg.paths.logs = tmp_path / "logs"
-    cfg.paths.screenshots = tmp_path / "logs" / "screenshots"
-    cfg.paths.journals = tmp_path / "logs" / "journals"
-    cfg.paths.templates = tmp_path / "assets" / "templates"
-    return cfg
+def run_paths(tmp_path) -> RunPaths:
+    """指向临时目录的运行路径，避免往项目 logs/ 里写东西。"""
+    paths = RunPaths.under(tmp_path)
+    paths.ensure()
+    return paths
 
 
 @pytest.fixture
-def ctx(session, config) -> RunContext:
-    context = RunContext(session, config, frame_ttl=0.5)
+def ctx(session, run_paths) -> RunContext:
+    context = RunContext(session, name="test-flow", paths=run_paths, frame_ttl=0.5)
     yield context
     context.close()
 

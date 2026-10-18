@@ -20,7 +20,6 @@ import pathlib
 import pytest
 
 from gamebot.atomic.query import ImageQuery
-from gamebot.config.schema import AppConfig
 from gamebot.exceptions import ConfigError, FlowError
 from gamebot.feature import FeatureSpec
 from gamebot.flow import Node, NodeBindings, Transition
@@ -42,13 +41,13 @@ def _spec(**overrides) -> FeatureSpec:
         name="game/feature",
         title="标题",
         slug="feature",
+        window_title="测试窗",
         scenario=ScenarioSpec(
             initial="home",
             tree=PageLeaf("home", queries=(ImageQuery("x.png"),)),
             bindings=NodeBindings.of([("home", "home")]),
             nodes=(Node("home",),),
         ),
-        base_config=AppConfig.defaults,
     )
     kwargs.update(overrides)
     return FeatureSpec(**kwargs)
@@ -70,39 +69,25 @@ class TestShippedScriptsDeclareSpec:
             assert isinstance(spec.feature, FeatureSpec)
 
     def test_every_script_materializes(self):
-        """声明得对还不够 —— 真能组装出配置和流程才算。"""
+        """声明得对还不够 —— 真能组装出流程才算。"""
         for spec in list_scripts():
-            config = spec.build_config()
             scenario = spec.build_scenario()
             scenario.validate()
-            assert config.template_roots(), f"{spec.key} 没有模板根"
-            assert config.name == spec.key, "配置名该等于脚本 key"
             game, feature = spec.key.split("/", 1)
-            assert config.vision.extra_template_dirs == (
-                f"games/{game}/scripts/{feature}/templates",
-            ), "功能级模板根该按 games/<游戏>/scripts/<功能>/templates 推导"
+            assert spec.feature.templates_dir == (
+                f"games/{game}/scripts/{feature}/templates"
+            )
+            assert spec.feature.window_title.strip()
             assert len(scenario.graph.nodes) >= 1
             assert scenario.graph.initial
 
     def test_building_twice_gives_independent_objects(self):
-        """**每次一份新的** —— 共享一个配置对象会让一次运行改到的东西泄漏到下一次。"""
+        """**每次一份新的** —— 共享流程对象会让一次运行改到的东西泄漏到下一次。"""
         spec = get_script("mingjiangsha/jingji")
-        assert spec.build_config() is not spec.build_config()
         first_scenario, second_scenario = spec.build_scenario(), spec.build_scenario()
         assert first_scenario is not second_scenario
         assert first_scenario.tree is not second_scenario.tree
         assert first_scenario.graph is not second_scenario.graph
-
-    def test_tick_interval_has_one_source(self):
-        """引擎节奏只声明一次：``options``。配置里的 tick 是**跟着它填的**。
-
-        两处各写一个值的话（声明 2.0 而配置里 0.4），帧 TTL 会按 0.4 算 ——
-        表现是"帧早就过期了"这种怪事。
-        """
-        spec = get_script("mingjiangsha/jingji")
-        config = spec.build_config()
-        scenario = spec.build_scenario()
-        assert config.timing.tick_interval == scenario.options.tick_interval
 
     def test_get_script_by_key_and_by_slug(self):
         spec = get_script("mingjiangsha/jingji")
@@ -162,7 +147,7 @@ class TestFeatureSpecIsTyped:
         with pytest.raises(ConfigError, match="<游戏>/<功能>"):
             _spec(name="mingjiangsha")
 
-    @pytest.mark.parametrize("field", ["title", "slug"])
+    @pytest.mark.parametrize("field", ["title", "slug", "window_title"])
     def test_blank_text_fields_are_rejected(self, field):
         with pytest.raises(ConfigError, match=field):
             _spec(**{field: "   "})
@@ -174,19 +159,6 @@ class TestFeatureSpecIsTyped:
         with pytest.raises(ConfigError, match="ScenarioSpec"):
             _spec(scenario={"initial": "home"})  # type: ignore[arg-type]
 
-    def test_base_config_must_be_callable_not_a_value(self):
-        """**关键**：传配置对象本身要报。
-
-        每次运行都要一份新的 —— 共享一个 ``AppConfig`` 会让一次运行改到的东西
-        泄漏到下一次。这个错很容易犯（``base_config=some_config`` 看着挺自然）。
-        """
-        with pytest.raises(ConfigError, match="可调用对象"):
-            _spec(base_config=AppConfig.defaults())  # type: ignore[arg-type]
-
-    def test_build_config_must_be_callable_or_none(self):
-        with pytest.raises(ConfigError, match="可调用对象"):
-            _spec(build_config=AppConfig.defaults())  # type: ignore[arg-type]
-
     def test_form_must_be_a_form_spec(self):
         with pytest.raises(ConfigError, match="FormSpec"):
             _spec(form={"a": 1})  # type: ignore[arg-type]
@@ -196,8 +168,8 @@ class TestFeatureSpecIsTyped:
         kwargs = dict(
             name="game/feature",
             title="t",
+            window_title="窗",
             scenario=_spec().scenario,
-            base_config=AppConfig.defaults,
         )
         with pytest.raises(TypeError, match="slug"):
             FeatureSpec(**kwargs)  # type: ignore[arg-type]
@@ -207,8 +179,8 @@ class TestFeatureSpecIsTyped:
             name="game/feature",
             title="t",
             slug="s",
+            window_title="窗",
             scenario=_spec().scenario,
-            base_config=AppConfig.defaults,
         )
         with pytest.raises(TypeError, match="formm"):
             FeatureSpec(**kwargs, **{"formm": FormSpec()})  # type: ignore[arg-type]

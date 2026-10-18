@@ -10,7 +10,7 @@
 教训很直白：**"接线的两头各自都测过了"不等于"这条线通"**。
 信号连接、按钮到槽、跨线程那条路，只有真按一下才算验过。
 
-这里不用真游戏：脚本的 ``build_config`` 返回假后端配置，于是整条路
+这里不用真游戏：用假 ``FeatureSpec`` + 假 Session 装配，于是整条路
 （装配 -> 工作线程 -> tick -> 停止 -> 收摊）都能在无头环境里跑完。
 """
 
@@ -20,10 +20,16 @@ import time
 
 import pytest
 
+from pathlib import Path
+from types import SimpleNamespace
+
 from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
-from gamebot.config.schema import AppConfig, BackendKind
+from gamebot.bootstrap import build_engine
+from gamebot.config.schema import RunPaths
+from gamebot.context import RunContext
+from gamebot.execution.executor import Executor
 from gamebot.flow import NodeBindings
 from gamebot.flow.graph import Graph, Node
 from gamebot.flow.scenario import Scenario
@@ -39,8 +45,6 @@ from .conftest import FakeMatcher, FakeReader
 # --------------------------------------------------------------------------- #
 def _tree() -> PageTree:
     tree = PageTree()
-    # 用 Page 对象，不是字典 —— ``add_many`` 收的是 Page（字典那条路是
-    # flow.loader 的活，状态层不认）。
     tree.add(Page("home", queries=(ImageQuery("home.png", confidence=0.9),)))
     return tree
 
@@ -60,22 +64,8 @@ def _scenario(max_ticks: int = 3, interval: float = 0.01) -> Scenario:
     return scenario
 
 
-def _config() -> AppConfig:
-    config = AppConfig.defaults()
-    config.screen.backend = BackendKind.FAKE
-    config.screen.source_size = (640, 360)
-    config.paths.screenshots = config.paths.root / "logs" / "screenshots"
-    return config
-
-
 class _Spec:
-    """冒充业务层的 ``ScriptSpec``（界面只用到这几个属性/方法）。
-
-    假对象要照着真 ``ScriptSpec`` 的接口面补齐，少一个属性界面就会在选择
-    脚本时炸 —— 而且炸得不明显：``_on_start`` 会提前返回、``_engine_running``
-    一直是 False，于是"等引擎停下来"的用例**没有超时地一直等**（真踩过：
-    跑一次全套用了 8 分钟）。
-    """
+    """冒充业务层的 ``ScriptSpec``（界面只用到这几个属性/方法）。"""
 
     def __init__(
         self,
@@ -83,13 +73,20 @@ class _Spec:
         max_ticks: int = 3,
         interval: float = 0.01,
         form: FormSpec | None = None,
+        window_title: str = "假窗口",
     ) -> None:
         self._max_ticks = max_ticks
         self._interval = interval
         self.form = form or FormSpec()
-
-    def build_config(self) -> AppConfig:
-        return _config()
+        self.feature = SimpleNamespace(
+            name="fake/ui",
+            title="假脚本",
+            slug="ui",
+            window_title=window_title,
+            templates_dir="games/fake/scripts/ui/templates",
+            form=self.form,
+            materialize_scenario=self.build_scenario,
+        )
 
     def build_scenario(self) -> Scenario:
         return _scenario(max_ticks=self._max_ticks, interval=self._interval)
@@ -108,74 +105,74 @@ def _entry(max_ticks: int = 3, interval: float = 0.01, form: FormSpec | None = N
     )
 
 
+def _patch_bootstrap(monkeypatch, tmp_path):
+    """让 UI 装配走假 Session，不碰真窗口。"""
+    from gamebot import bootstrap as bs
+
+    def fake_bootstrap(
+        feature,
+        *,
+        dry_run=False,
+        window_title=None,
+        params=None,
+        journal=None,
+        hooks=None,
+        session=None,
+        recorder=None,
+        record=True,
+    ):
+        matcher = FakeMatcher(matches={"home.png": (Point(1, 1), 0.99)})
+        if recorder is not None:
+            matcher = recorder.wrap_matcher(matcher)
+        reader = FakeReader()
+        if recorder is not None:
+            reader = recorder.wrap_reader(reader)
+        fake = BaseSession(
+            build_fake_backends(size=(640, 360)),
+            matcher=matcher,
+            reader=reader,
+        )
+        scenario = feature.materialize_scenario()
+        ctx = RunContext(
+            fake,
+            name=getattr(feature, "name", "fake/ui"),
+            paths=RunPaths.under(tmp_path),
+            tree=scenario.tree,
+            frame_ttl=0.5,
+            params=params,
+        )
+        ctx.executor = Executor(ctx, journal=journal, dry_run=dry_run)
+        ctx.recorder = recorder
+        return ctx, build_engine(ctx, scenario)
+
+    monkeypatch.setattr(bs, "bootstrap_from_spec", fake_bootstrap)
+    monkeypatch.setattr(bs, "project_root", lambda: Path(tmp_path))
+    # 模板目录检查：给假目录
+    templates = Path(tmp_path) / "games" / "fake" / "scripts" / "ui" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+
+
+def _stub_default_window(monkeypatch, title: str = "假窗口") -> None:
+    """让开跑预检能过：枚举里有 SPEC 的 window_title，避免弹模态框挂死。"""
+    from gamebot.ui.panels import controls as controls_mod
+
+    monkeypatch.setattr(
+        controls_mod,
+        "_list_windows",
+        lambda keyword="": [_FakeWindow(title)],
+    )
+
+
 @pytest.fixture
 def ui(qt_app, tmp_path, monkeypatch):
-    """造一个真实的主窗口，但里面的脚本是假的、后端是假的。
-
-    ``Session`` 走内存后端：``build_context`` 默认会用 ``build_session_from_config``
-    去建真后端（Windows 会去找真窗口），所以这里把 Session 换掉。
-    """
-    from gamebot import bootstrap as bs
+    """造一个真实的主窗口，但里面的脚本是假的、后端是假的。"""
     from gamebot.ui import window as win_mod
 
     entry = _entry()
     monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
     monkeypatch.setattr(win_mod, "load_details", win_mod.load_details)
-
-    real_build = bs.build_session_from_config
-
-    def fake_session(config, *, recorder=None):
-        matcher = recorder.wrap_matcher(FakeMatcher(matches={"home.png": (Point(1, 1), 0.99)}))
-        return BaseSession(
-            build_fake_backends(size=(640, 360)),
-            matcher=matcher,
-            reader=recorder.wrap_reader(FakeReader()) if recorder else FakeReader(),
-        )
-
-    monkeypatch.setattr(bs, "build_session_from_config", fake_session)
-    # （以前这里还要替掉 ``check_templates`` —— 「开始」会在缺模板时拒绝启动。
-    # 那个预检已经删掉了：它要靠"哪一步用哪张图"的声明，而步骤现在是普通函数、
-    # 没有那个属性。缺图的报错由识图本身给出，带模板路径。）
-
-    main = win_mod.MainWindow()
-    main.resize(900, 700)
-    main.show()
-    qt_app.processEvents()
-    try:
-        yield main, entry, real_build
-    finally:
-        main.close()
-        qt_app.processEvents()
-
-
-@pytest.fixture
-def ui_long(qt_app, tmp_path, monkeypatch):
-    """和 ``ui`` 一样，但脚本是"跑不完"的。
-
-    为什么必须单独一个：要验"停止真的停得住"，场景就**不能自己跑完** ——
-    否则"最后停了"可能是 ``max_ticks`` 干的，测试变假绿（这正是原来那条用例
-    的问题：它设 ``max_ticks=3``，几十毫秒自己就完了，断言却只写"最终会停"）。
-    这里 ``max_ticks=5000``、轮间隔 20ms，正常情况下它绝不会在测试时限内跑完，
-    所以"停了"只可能是被我们停的。
-    """
-    from gamebot import bootstrap as bs
-    from gamebot.ui import window as win_mod
-
-    entry = _entry(max_ticks=5000, interval=0.02)
-    monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
-    monkeypatch.setattr(win_mod, "load_details", win_mod.load_details)
-
-    def fake_session(config, *, recorder=None):
-        matcher = FakeMatcher(matches={"home.png": (Point(1, 1), 0.99)})
-        if recorder is not None:
-            matcher = recorder.wrap_matcher(matcher)
-        return BaseSession(
-            build_fake_backends(size=(640, 360)),
-            matcher=matcher,
-            reader=recorder.wrap_reader(FakeReader()) if recorder else FakeReader(),
-        )
-
-    monkeypatch.setattr(bs, "build_session_from_config", fake_session)
+    _patch_bootstrap(monkeypatch, tmp_path)
+    _stub_default_window(monkeypatch)
 
     main = win_mod.MainWindow()
     main.resize(900, 700)
@@ -184,7 +181,28 @@ def ui_long(qt_app, tmp_path, monkeypatch):
     try:
         yield main, entry, None
     finally:
-        # 关窗自己会请求停止；这里兜一层，别让用例失败时留个还在转的线程
+        main.close()
+        qt_app.processEvents()
+
+
+@pytest.fixture
+def ui_long(qt_app, tmp_path, monkeypatch):
+    """和 ``ui`` 一样，但脚本是"跑不完"的。"""
+    from gamebot.ui import window as win_mod
+
+    entry = _entry(max_ticks=5000, interval=0.02)
+    monkeypatch.setattr(win_mod, "load_scripts", lambda: ([entry], ""))
+    monkeypatch.setattr(win_mod, "load_details", win_mod.load_details)
+    _patch_bootstrap(monkeypatch, tmp_path)
+    _stub_default_window(monkeypatch)
+
+    main = win_mod.MainWindow()
+    main.resize(900, 700)
+    main.show()
+    qt_app.processEvents()
+    try:
+        yield main, entry, None
+    finally:
         if main._engine_running:
             main._request_engine_stop()
             _wait_until(qt_app, lambda: not main._engine_running)
@@ -371,24 +389,16 @@ class TestTargetWindowPreflight:
 
         assert main._engine_running is False, "窗口不在就不该启动引擎"
 
-    def test_no_selection_falls_back_to_config_title(
+    def test_no_selection_falls_back_to_spec_title(
         self, qt_app, ui, monkeypatch
     ) -> None:
-        """没选软件时，按**配置里**的 window_title 检查（那才是后端会用的）。"""
+        """没选软件时，按 SPEC 的 window_title 检查（那才是后端会用的）。"""
         main, entry, _ = ui
         self._stub_windows(monkeypatch, ["在的窗口"])
         main.controls.software.setCurrentText("")
-        monkeypatch.setattr(
-            entry.spec, "build_config", lambda: _config_with_title("在的窗口")
-        )
+        entry.spec.feature.window_title = "在的窗口"
 
         assert main._target_window_ok(entry) is True
-
-
-def _config_with_title(title: str) -> AppConfig:
-    config = _config()
-    config.screen.window_title = title
-    return config
 
 
 # --------------------------------------------------------------------------- #

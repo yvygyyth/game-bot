@@ -1,47 +1,41 @@
 """业务层 —— 具体游戏的脚本。
 
-和 ``src/gamebot/`` 的区别：**框架不认识任何具体游戏，业务层只认一个游戏。**
+和 ``src/gamebot/`` 的区别：**框架不认识任何具体游戏，业务层只认游戏与脚本。**
 
 ```
 games/
 ├── __init__.py            业务层入口（注册表）
-├── _spec.py               脚本注册表：自动发现"有哪些脚本"
-├── __main__.py            python -m games list / check / describe
-└── <游戏>/                 一级分类：一个游戏一个目录
-    ├── game.py            游戏级定义：窗口、分辨率、公共页面、公共模板根
-    ├── pages.py           游戏级公共页面（首页、断线弹窗……）
-    ├── shortcuts.py       游戏级快捷方法（回主界面、关弹窗……）
-    ├── templates/         游戏级公共模板
-    └── <功能>/             二级分类：一个脚本功能一个目录
-        ├── __init__.py    ★ 必须暴露 build_config() / build_scenario()
-        ├── pages.py       该功能的状态对象（页面树节点）
-        ├── graph.py       该功能的流程对象（节点 + 边）
-        ├── steps.py       该功能专用步骤
-        ├── shortcuts.py   该功能专用快捷方法
-        └── templates/     该功能的图片资源
+├── _spec.py               脚本注册表：读各游戏 scripts/__all__
+├── __main__.py            python -m games list / check / describe / run
+└── <游戏>/
+    ├── __init__.py        游戏包：导出脚本清单 + 跨脚本纯函数
+    ├── utils/             跨脚本纯函数（如 go_back）
+    └── scripts/
+        ├── __init__.py    ★ 按功能名导出各 SPEC
+        └── <功能>/
+            ├── __init__.py    ★ SPEC = FeatureSpec(...)（含 window_title）
+            ├── pages.py / graph.py / steps/ / templates/
+            └── ...
 ```
-
-## 为什么一级按游戏、二级按功能
-
-* **游戏级**放"这个游戏所有脚本都要用"的东西：窗口标题、锁定分辨率、
-  公共页面（首页、断线重连）、公共模板、公共快捷方法。
-  改一次全体受益，不需要在每个脚本里重复。
-* **功能级**放"只跟这个玩法有关"的东西：页面、流程、专用图、专用步骤。
-  一个功能改坏了不会影响别的功能。
 
 ## 唯一需要记住的规则
 
-功能包的 ``__init__.py`` 暴露两个函数，注册表就能自动发现它：
+功能包导出一个 ``SPEC``，再在 ``scripts/__init__.py`` 里按功能名转出去：
 
 ```python
-def build_config() -> AppConfig: ...     # 这个脚本怎么跑（窗口、分辨率、模板根）
-def build_scenario() -> Scenario: ...    # 这个脚本做什么（页面树 + 流程图 + 参数）
+# games/<游戏>/scripts/<功能>/__init__.py
+SPEC = FeatureSpec(
+    name="<游戏>/<功能>",
+    title="给人看的名字",
+    slug="<功能>",
+    window_title="找窗用的标题",
+    scenario=SCENARIO,
+    form=FORM,  # 可选
+)
 ```
 
-（可选再给 ``TITLE`` / ``DESCRIPTION`` 字符串，``python -m games list`` 会显示。）
-
-加了这两个函数，runner / GUI / CI 就能统一列出、校验、运行所有脚本，
-不需要维护一张手写的清单 —— 也不会出现"新加了脚本但忘了登记"。
+注册表、CLI、UI 都只认这份声明；装配走 ``bootstrap_from_spec``，
+不再经过 ``AppConfig`` / YAML。
 """
 
 from __future__ import annotations

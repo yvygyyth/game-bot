@@ -16,7 +16,10 @@ from __future__ import annotations
 from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery
 from gamebot.atomic.session import BaseSession
-from gamebot.bootstrap import build_context, build_engine
+from gamebot.bootstrap import build_engine
+from gamebot.config.schema import RunPaths
+from gamebot.context import RunContext
+from gamebot.execution.executor import Executor
 from gamebot.flow import NodeBindings
 from gamebot.flow.engine import DEAD_END_STALL_ROUNDS, StopReason
 from gamebot.flow.graph import Graph, Node
@@ -79,19 +82,25 @@ def _build(
     scenario.options.dead_end_rounds = dead_end_rounds
     scenario.validate()
 
-    from gamebot.config.schema import AppConfig, BackendKind
+    from pathlib import Path
 
-    config = AppConfig.defaults()
-    config.screen.backend = BackendKind.FAKE
-    config.vision.record = False
     session = BaseSession(
         build_fake_backends(size=(640, 360)),
         matcher=FakeMatcher(matches={"leaf.png": (Point(1, 1), 0.99)}),
         reader=FakeReader(),
     )
-    ctx = build_context(config, scenario=scenario, session=session,
-                        scenario_options=scenario.options)
-    engine = build_engine(config, ctx, scenario)
+    ctx = RunContext(
+        session,
+        name="deadend",
+        paths=RunPaths.under(Path(".")),
+        tree=scenario.tree,
+        frame_ttl=0.5,
+    )
+    ctx.executor = Executor(
+        ctx,
+        save_frames_on_error=bool(scenario.options.save_frames_on_error),
+    )
+    engine = build_engine(ctx, scenario)
     return ctx, engine
 
 

@@ -30,18 +30,17 @@ from __future__ import annotations
 
 from gamebot.feature import FeatureSpec
 
-from ... import game as _game
 from .form import FORM
 from .graph import SCENARIO
 
 #: 这个脚本的**唯一导出**。``scripts/__init__.py`` 再按功能名转出去。
 SPEC = FeatureSpec(
-    name=f"{_game.SLUG}/jingji",
+    name="mingjiangsha/jingji",
     title="竞技场",
     slug="jingji",
+    window_title="名将杀",
     description="刷竞技场：建队 → 匹配 → 选将 → 投降 → 结算，循环 N 局",
     scenario=SCENARIO,
-    base_config=_game.base_config,
     form=FORM,
 )
 

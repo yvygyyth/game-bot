@@ -75,7 +75,7 @@ class TestDoctorCommandIsWired:
         for needed in (
             "check_integrity",       # 权限级别（UIPI）
             "GetForegroundWindow",   # 窗口在不在前台
-            "template_roots",        # 模板读不读得到
+            "templates_dir",         # 模板读不读得到
             "capture",               # 抓屏通不通
         ):
             assert needed in source, f"doctor 没有检查 {needed}"

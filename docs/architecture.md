@@ -79,9 +79,9 @@ while True:
 
 横切关注点（不属于任何一层）：
 
-- `config/`   —— YAML -> 有类型的 `AppConfig`
+- `config/`   —— `RunPaths` / `BackendKind`（路径与后端种类）
 - `context.py`—— `RunContext`，三层共享的唯一对象
-- `bootstrap.py` —— 装配与启动前的检查
+- `bootstrap.py` —— 从 `FeatureSpec` 装配 Session / Context / Engine
 - `vision/`   —— `Matcher` / `TextReader` 的具体实现（opencv / OCR）
 - `utils/`    —— 日志、计时
 

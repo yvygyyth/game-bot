@@ -7,13 +7,13 @@ PyInstaller 要一个**脚本**当入口，而这个脚本要在 ``src`` 不在 
 
 ## 为什么要锚定项目根（`chdir`）
 
-配置里的路径（``config/app.yaml``、``games/``、``logs/``、模板）都是
-**相对项目根**的 —— 见 :class:`gamebot.config.schema.PathsConfig`。
+运行期路径（``games/``、``logs/``、功能模板根）都是**相对项目根**的 ——
+见 :class:`gamebot.config.schema.RunPaths` 与 ``bootstrap.project_root``。
 而**双击 exe 时当前工作目录是 exe 所在目录**，不是项目根：
 
 * 源码运行时没问题（你总在项目目录里敲命令）；
 * 双击 ``dist\\gamebot\\gamebot.exe`` 时工作目录是 ``dist\\gamebot\\`` ——
-  于是找不到 ``config/``，出来一个"配置文件不存在"。
+  于是找不到 ``games/``，脚本列表会空。
 
 所以启动时先找出项目根并 ``chdir`` 过去。找不到就**不动**（宁可报原本的错，
 也不要瞎猜一个目录）。

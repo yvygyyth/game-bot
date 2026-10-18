@@ -25,7 +25,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from .config.schema import AppConfig
+from .config.schema import RunPaths
 from .state.page import PageMatch, PageTree
 from .state.store import Blackboard
 from .state.tracker import PageTracker
@@ -46,7 +46,8 @@ class RunContext:
     """一次运行的全部共享状态。
 
     :param session: L1 截图层实例。
-    :param config: 应用配置。
+    :param name: 脚本 key（``"<游戏>/<功能>"``）。
+    :param paths: 截图 / journal 等运行期目录。
     :param tree: 状态树。跟踪器需要它来查 ``min_stable_frames`` / ``timeout``。
     :param frame_ttl: 帧的新鲜度上限（秒）。超过就自动重截。
 
@@ -58,8 +59,9 @@ class RunContext:
     def __init__(
         self,
         session: Session,
-        config: AppConfig,
         *,
+        name: str,
+        paths: RunPaths,
         tree: PageTree | None = None,
         frame_ttl: float = 1.0,
         executor: Executor | None = None,
@@ -69,7 +71,8 @@ class RunContext:
         params: Mapping[str, Any] | None = None,
     ) -> None:
         self.session = session
-        self.config = config
+        self.name = name
+        self.paths = paths
         self.frame_ttl = frame_ttl
         self.executor = executor
         self.pages = pages or PageTracker(tree)
@@ -260,17 +263,17 @@ class RunContext:
         框架自己存失败帧走的是执行器的 ``_save_failure_frame``
         （带 ``fail_`` 前缀 + 有上限），不要改用这个。
         """
-        directory = self.config.paths.resolve(self.config.paths.screenshots)
+        directory = self.paths.resolve(self.paths.screenshots)
         directory.mkdir(parents=True, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
         return directory / f"{safe}{suffix}"
 
     def journal_path(self, name: str | None = None) -> Path:
         """生成 journal 文件路径。"""
-        directory = self.config.paths.resolve(self.config.paths.journals)
+        directory = self.paths.resolve(self.paths.journals)
         directory.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        return directory / f"{name or self.config.name}-{stamp}.jsonl"
+        return directory / f"{name or self.name}-{stamp}.jsonl"
 
     # ------------------------------------------------------------------ #
     # 生命周期

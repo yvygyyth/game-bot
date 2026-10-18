@@ -29,6 +29,7 @@ uv run python -m games doctor mingjiangsha/jingji
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from . import get_script
@@ -43,16 +44,16 @@ def _section(title: str) -> None:
 
 def cmd_doctor(args: Any) -> int:
     """把"跑之前该知道的环境事实"一次打完。"""
-    from gamebot.bootstrap import build_session_from_config
+    from gamebot.bootstrap import build_matcher, build_reader, project_root
+    from gamebot.atomic.session import build_session
     from gamebot.utils.integrity import check_integrity, level_of_pid, level_of_window
 
     spec = get_script(args.script)
-    config = spec.build_config()
-    if args.window:
-        config.screen.window_title = args.window
+    title = (args.window or spec.feature.window_title).strip()
+    templates = project_root() / spec.feature.templates_dir
 
     print(f"脚本: {spec.key} —— {spec.title}")
-    print(f"目标窗口: {config.screen.window_title!r}")
+    print(f"目标窗口: {title!r}")
 
     problems: list[str] = []
 
@@ -74,7 +75,6 @@ def cmd_doctor(args: Any) -> int:
     mine = level_of_pid(os.getpid())
     print(f"  本进程: {mine.name if mine else '读不到'}")
 
-    title = config.screen.window_title
     if title:
         import win32gui
 
@@ -125,28 +125,33 @@ def cmd_doctor(args: Any) -> int:
 
     # ---- 4. 识图/模板能不能真的读到 ----
     _section("模板")
+    if not templates.is_dir():
+        print(f"  ✗ 模板目录不存在: {templates}")
+        problems.append("模板目录不存在")
+        return _report(problems)
+
     try:
-        session = build_session_from_config(config)
+        matcher = build_matcher(templates)
+        session = build_session(
+            "windows",
+            matcher=matcher,
+            reader=build_reader(),
+            window_title=title,
+            client_area_only=True,
+            coordinate_space="source",
+            logic_size=None,
+        )
     except Exception as exc:
         print(f"  ✗ 装不起 Session: {type(exc).__name__}: {exc}")
         problems.append("装不起 Session")
         return _report(problems)
     try:
-        from pathlib import Path
-
-        roots = list(config.template_roots())
 
         def resolves(name: str) -> bool:
-            """这个模板名在某个模板根下真的存在吗。
-
-            规则和 ``OpenCvMatcher`` 一致：**相对路径按模板名在各根下找**。
-            所以这里也逐根找一遍 —— 用 matcher 的私有接口会把
-            "能不能找到"这件事绑到某个具体实现上。
-            """
             candidate = Path(name)
             if candidate.is_absolute():
                 return candidate.is_file()
-            return any((root / name).is_file() for root in roots)
+            return (templates / name).is_file()
 
         missing: list[str] = []
         for page in scenario.tree.walk():
@@ -164,9 +169,8 @@ def cmd_doctor(args: Any) -> int:
                 print(f"      …还有 {len(missing) - 10} 个")
             problems.append(f"{len(missing)} 个模板读不到")
         else:
-            print(f"  ✓ 状态树引用的模板都能读到（在 {len(roots)} 个模板根里找的）")
+            print(f"  ✓ 状态树引用的模板都能读到（{templates}）")
 
-        # 抓一张真实的帧，确认抓屏这条路是通的
         frame = session.capture()
         arr = frame.to_numpy()
         print(f"  ✓ 抓屏正常: {arr.shape[1]}x{arr.shape[0]}")

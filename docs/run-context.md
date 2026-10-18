@@ -34,7 +34,8 @@ def my_step(ctx: RunContext) -> ActionResult:
 | 成员 | 类型 | 是什么 | 什么时候用 |
 |---|---|---|---|
 | `ctx.session` | `Session` | L1 截图层 + 输入通道的**唯一句柄** | 调原子层动作时传它：`actions.click_source_point(ctx.session, p)` |
-| `ctx.config` | `AppConfig` | 应用配置（窗口、分辨率、阈值、路径、后端） | 读阈值/路径；**别改它**（跑起来之后是共享的） |
+| `ctx.name` | `str` | 脚本 key（`"<游戏>/<功能>"`） | 日志 / journal 文件名 |
+| `ctx.paths` | `RunPaths` | 运行期目录（仓库根、截图、journal） | 拼路径；**别改它** |
 | `ctx.blackboard` | `Blackboard` | **跑出来的**键值存储 | 步骤之间传数据（"这次读到的体力"） |
 | `ctx.pages` | `PageTracker` | 状态跟踪器（连续几帧、换过几次） | 排查用；见下面的"跟踪器" |
 | `ctx.executor` | `Executor \| None` | 步骤执行器 | 一般不用碰（引擎自己调） |

@@ -181,11 +181,15 @@ class TestEndToEnd:
 
     def _run_with(self, values):
         """用一份表单值跑一次引擎，返回步骤读到的参数。"""
+        from pathlib import Path
+
         from gamebot.atomic.backends.fake import build_fake_backends
         from gamebot.atomic.query import ImageQuery
         from gamebot.atomic.session import BaseSession
-        from gamebot.bootstrap import build_context, build_engine
-        from gamebot.config.schema import AppConfig, BackendKind
+        from gamebot.bootstrap import build_engine
+        from gamebot.config.schema import RunPaths
+        from gamebot.context import RunContext
+        from gamebot.execution.executor import Executor
         from gamebot.flow import NodeBindings
         from gamebot.flow.graph import Graph, Node
         from gamebot.flow.scenario import Scenario
@@ -205,27 +209,31 @@ class TestEndToEnd:
         graph = Graph(initial="home")
         graph.add_node(Node("home", steps=[step]))
         scenario = Scenario(
-        name="form",
-        tree=tree,
-        graph=graph,
-        bindings=NodeBindings.of([("home", "home")]),
-    )
+            name="form",
+            tree=tree,
+            graph=graph,
+            bindings=NodeBindings.of([("home", "home")]),
+        )
         scenario.options.tick_interval = 0.001
         scenario.options.max_ticks = 2
         scenario.validate()
 
-        config = AppConfig.defaults()
-        config.screen.backend = BackendKind.FAKE
-        config.vision.record = False
         session = BaseSession(
             build_fake_backends(size=(640, 360)),
             matcher=FakeMatcher(matches={"home.png": (Point(1, 1), 0.99)}),
             reader=FakeReader(),
         )
-        # 这一步就是界面/命令行做的事：把表单值凑齐成一份完整参数
         params = SAMPLE.fill(values)
-        ctx = build_context(config, scenario=scenario, session=session, params=params)
-        engine = build_engine(config, ctx, scenario)
+        ctx = RunContext(
+            session,
+            name="form",
+            paths=RunPaths.under(Path(".")),
+            tree=scenario.tree,
+            frame_ttl=0.5,
+            params=params,
+        )
+        ctx.executor = Executor(ctx)
+        engine = build_engine(ctx, scenario)
         try:
             engine.run()
         finally:

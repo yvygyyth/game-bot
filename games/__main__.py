@@ -80,9 +80,10 @@ def cmd_describe(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    """校验定义 + 检查模板文件。**这是写脚本时最该反复跑的一条。**"""
+    """校验定义 + 检查模板目录。**这是写脚本时最该反复跑的一条。**"""
+    from gamebot.bootstrap import project_root
+
     spec = get_script(args.script)
-    config = spec.build_config()
     scenario = spec.build_scenario()
 
     scenario.validate()
@@ -91,25 +92,17 @@ def cmd_check(args: argparse.Namespace) -> int:
         f"  {len(scenario.tree)} 个状态 / {len(scenario.graph)} 个节点 / "
         f"{len(scenario.graph.edges)} 条边"
     )
+    print(f"✓ 窗口标题: {spec.feature.window_title!r}")
 
-    problems = config.validate()
-    if problems:
-        print("✗ 配置有问题:")
-        for problem in problems:
-            print(f"    - {problem}")
+    templates = project_root() / spec.feature.templates_dir
+    exists = "存在" if templates.is_dir() else "目录不存在"
+    label = (
+        templates.relative_to(_ROOT) if templates.is_relative_to(_ROOT) else templates
+    )
+    print(f"  模板根: {label}（{exists}）")
+    if not templates.is_dir():
+        print("✗ 模板目录不存在")
         return 1
-    print(f"✓ 配置校验通过: 窗口={config.screen.window_title!r} @ {config.screen.source_size}")
-
-    roots = config.template_roots()
-    print("  模板根（按搜索优先级）:")
-    for index, root in enumerate(roots):
-        exists = "存在" if root.is_dir() else "目录不存在"
-        label = root.relative_to(_ROOT) if root.is_relative_to(_ROOT) else root
-        print(f"    {index + 1}. {label}（{exists}）")
-
-    # **不再检查"模板齐不齐"** —— 那要靠"哪一步用哪张图"的声明，
-    # 而步骤现在是普通函数、没有那个属性。缺图的报错由识图本身给出
-    # （带模板路径），重复出现在日志里同样看得见。
     return 0
 
 
@@ -154,9 +147,7 @@ def _coerce_param(raw: str) -> Any:
 def cmd_run(args: argparse.Namespace) -> int:
     """**真的跑起来**：装配 -> 跑流程 -> 打报告。
 
-    和 ``gamebot run`` 的区别：那个跑的是 ``config/app.yaml`` 里那个"文档级"
-    示例流程；这个跑**业务层脚本**（``games/<游戏>/scripts/<功能>`` 的 ``build_config``
-    + ``build_scenario``）—— 也就是真正认识某个游戏的那份定义。
+    跑业务层脚本（``games/<游戏>/scripts/<功能>`` 的 ``FeatureSpec``）。
 
     跑完一定要看报告里的三样东西：
 
@@ -166,7 +157,7 @@ def cmd_run(args: argparse.Namespace) -> int:
       重点不是"有没有"，而是 ``to_node`` 是不是你预期的那个节点；
     * ``steps`` 里的失败项：哪一步没成、重试了几次。journal 文件里有逐条记录。
     """
-    from gamebot.bootstrap import build_context, build_engine
+    from gamebot.bootstrap import bootstrap_from_spec, project_root
     from gamebot.exceptions import ConfigError
     from gamebot.execution.journal import JsonlJournal
     from gamebot.flow.engine import StopReason
@@ -179,60 +170,46 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     # 运行参数走**和界面同一个入口**：``FORM.fill()``。
-    #
-    # 界面那边是"表单值 → fill()"，这里是"--param → fill()"，两条路共用同一份
-    # 声明做校验/转换。各写一份的话迟早出现"界面拦得住的、命令行拦不住"
-    # （或者反过来），而那种不一致很难查 —— 用户会以为是自己参数写错了。
-    #
-    # 顺带把**声明的默认值**也补齐：命令行只给一两个参数时，步骤读其它参数
-    # 仍然拿得到值，不必再写一遍默认值。
     try:
         params = spec.form.fill(given)
     except ConfigError as exc:
         print(f"✗ 参数不对: {exc}", file=sys.stderr)
         return 2
 
-    config = spec.build_config()
-    if args.dry_run:
-        config.dry_run = True
-
     scenario = spec.build_scenario()
     if args.max_ticks is not None:
         scenario.options.max_ticks = args.max_ticks
-
-    # 装配期就把能查的错查掉：配置 + 定义。
     scenario.validate()
-    config.paths.ensure()
 
-    setup_logging(config.logging.level)
+    setup_logging("INFO")
 
-    journal: Any = JsonlJournal(
-        config.paths.resolve(config.paths.journals) / f"{spec.slug}.jsonl"
-    )
+    journals = project_root() / "logs" / "journals"
+    journals.mkdir(parents=True, exist_ok=True)
+    journal: Any = JsonlJournal(journals / f"{spec.slug}.jsonl")
 
     print(f"跑 {spec.key}（{spec.title}）")
-    print(f"  窗口   {config.screen.window_title!r} @ {config.screen.source_size or '自动探测'}")
+    print(f"  窗口   {spec.feature.window_title!r} @ 自动探测")
     print(f"  起点   {scenario.graph.initial}")
-    print(f"  模式   {'空跑（只识别，不操作）' if config.dry_run else '真跑（会操作游戏）'}")
+    print(f"  模式   {'空跑（只识别，不操作）' if args.dry_run else '真跑（会操作游戏）'}")
     ticks = scenario.options.max_ticks or "不限"
     print(f"  预算   {ticks} 轮")
     if params:
         shown = "  ".join(f"{k}={v}" for k, v in params.items())
         print(f"  参数   {shown}")
-    if config.dry_run:
+    if args.dry_run:
         print("  （空跑时动作步骤不真的下发，但仍然走完整的决策与记账）")
     print()
 
     ctx = None
     try:
-        ctx = build_context(
-            config,
-            scenario=scenario,
-            journal=journal,
-            scenario_options=scenario.options,
+        ctx, engine = bootstrap_from_spec(
+            spec.feature,
+            dry_run=bool(args.dry_run),
             params=params,
+            journal=journal,
         )
-        engine = build_engine(config, ctx, scenario)
+        if args.max_ticks is not None:
+            engine.scenario.options.max_ticks = args.max_ticks
         report = engine.run()
     except KeyboardInterrupt:
         print("\n… 被 Ctrl+C 中断")

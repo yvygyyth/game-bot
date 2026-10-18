@@ -18,11 +18,9 @@
     │   L0 types        ActionResult / Point / Region          │
     └─────────────────────────────────────────────────────────┘
 
-快速上手::
+快速上手（业务脚本）::
 
-    from gamebot.bootstrap import run_flow
-    report = run_flow("config/app.yaml")
-    print(report.summary())
+    python -m games run mingjiangsha/jingji --dry-run --max-ticks 3
 
 只做识图（不进流程）::
 

@@ -342,16 +342,14 @@ class TestTrackerQueue:
 # --------------------------------------------------------------------------- #
 def _engine_fixture(*, delay: float, matches: dict):
     """造一个最小可跑的引擎：4 个状态、4 个节点、一条直线。"""
-    from gamebot.config.schema import AppConfig, BackendKind
+    from pathlib import Path
+
+    from gamebot.config.schema import RunPaths
     from gamebot.context import RunContext
     from gamebot.flow.bindings import NodeBindings
     from gamebot.flow.engine import FlowEngine
     from gamebot.flow.graph import Edge, Graph, Node
     from gamebot.flow.scenario import EngineOptions, Scenario
-
-    config = AppConfig.defaults()
-    config.screen.backend = BackendKind.FAKE
-    config.vision.record = False
 
     tree = _tree()
     # 节点必须**从 initial 都走得到**，否则装配期校验报死代码
@@ -372,7 +370,13 @@ def _engine_fixture(*, delay: float, matches: dict):
     )
     scenario.validate()
 
-    ctx = RunContext(_session(matches), config, tree=tree, frame_ttl=0.0)
+    ctx = RunContext(
+        _session(matches),
+        name="recover-delay",
+        paths=RunPaths.under(Path(".")),
+        tree=tree,
+        frame_ttl=0.0,
+    )
     engine = FlowEngine(scenario, ctx)
     engine.RECOVER_DELAY = delay
     return ctx, engine

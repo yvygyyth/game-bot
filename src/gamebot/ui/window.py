@@ -298,12 +298,10 @@ class MainWindow(QMainWindow):
         # 否则每次开始运行都会新建一个记录器，界面上那栏会莫名其妙清空。
         # 构造它只是建目录 + 计数器，不碰游戏窗口。
         try:
-            from ..bootstrap import build_recorder
+            from ..bootstrap import build_recorder, project_root
+            from ..config.schema import RunPaths
 
-            config_for_recorder = entry.spec.build_config() if entry.spec else None
-            self._recorder = (
-                build_recorder(config_for_recorder) if config_for_recorder else None
-            )
+            self._recorder = build_recorder(RunPaths.under(project_root()))
         except Exception as exc:
             log.warning("造识别记录器失败（识图日志将不可用）: %s", exc)
             self._recorder = None
@@ -386,12 +384,12 @@ class MainWindow(QMainWindow):
         from .panels.controls import _list_windows
 
         chosen = self.controls.window_title
-        config_title = ""
+        spec_title = ""
         with contextlib.suppress(Exception):
-            config_title = entry.spec.build_config().screen.window_title
-        wanted = chosen or config_title
+            spec_title = entry.spec.feature.window_title
+        wanted = chosen or spec_title
         if not wanted:
-            # 既没选、配置里也没有 —— 交给后端按整屏抓，不是这里能判断的
+            # 既没选、SPEC 也没有 —— 交给后端按整屏抓，不是这里能判断的
             return True
 
         windows = _list_windows()
@@ -408,7 +406,7 @@ class MainWindow(QMainWindow):
             )
             return False
 
-        source = "上面选的软件" if chosen else "配置文件里的 window_title"
+        source = "上面选的软件" if chosen else "脚本声明的 window_title"
         if self._ask_re_detect(wanted, source):
             self.controls.refresh_windows()
         return False
@@ -457,27 +455,13 @@ class MainWindow(QMainWindow):
         if not self._target_window_ok(entry):
             return
 
-        from ..bootstrap import build_context, build_engine
+        from ..bootstrap import bootstrap_from_spec, project_root
+        from ..execution.journal import JsonlJournal
 
-        try:
-            config = entry.spec.build_config()
-            config.screen.window_title = self.controls.window_title or config.screen.window_title
-            scenario = entry.spec.build_scenario()
-            scenario.validate()
-        except Exception as exc:
-            self._info_box("装不起来", f"{type(exc).__name__}: {exc}")
-            log.exception("装配失败")
-            return
-
-        self._warn_about_integrity(config.screen.window_title)
+        window_title = self.controls.window_title or entry.spec.feature.window_title
+        self._warn_about_integrity(window_title)
 
         # 表单值在这里**读一次**（数据单向：表单是唯一的改值处）。
-        # fill() 会把"用户没动过的字段"补上声明里的默认值，所以步骤那边
-        # ctx.param(...) 一定拿得到值，不必再写一遍默认值 —— 默认值只有
-        # FORM 一处出处，两处迟早不一致。
-        #
-        # 校验失败理论上不该发生（控件层已经卡住范围了）。真失败也只弹框：
-        # 那说明声明和控件的行为对不上，是要修的 bug，不该静默拿个错值往下跑。
         try:
             params = entry.spec.form.fill(self.params.values())
         except Exception as exc:
@@ -487,23 +471,21 @@ class MainWindow(QMainWindow):
         if params:
             log.info("运行参数: %s", params)
 
-        config.paths.ensure()
         node_id = getattr(self.controls.current_node, "node_id", "") or ""
-        from ..execution.journal import JsonlJournal
-
-        journal = JsonlJournal(
-            config.paths.resolve(config.paths.journals) / f"{entry.slug}.jsonl"
-        )
+        journals = project_root() / "logs" / "journals"
+        journals.mkdir(parents=True, exist_ok=True)
+        journal = JsonlJournal(journals / f"{entry.slug}.jsonl")
         try:
-            ctx = build_context(
-                config,
-                scenario=scenario,
+            ctx, engine = bootstrap_from_spec(
+                entry.spec.feature,
+                window_title=window_title,
+                params=params,
                 journal=journal,
                 recorder=self._recorder,
-                scenario_options=scenario.options,
-                params=params,
+                record=self._recorder is None,
             )
-            engine = build_engine(config, ctx, scenario)
+            scenario = engine.scenario
+            scenario.validate()
         except Exception as exc:
             journal.close()
             self._info_box("装不起来", f"{type(exc).__name__}: {exc}")

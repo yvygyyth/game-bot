@@ -24,7 +24,6 @@ from gamebot.feature import FeatureSpec
 from gamebot.params import FormSpec
 
 if TYPE_CHECKING:
-    from gamebot.config.schema import AppConfig
     from gamebot.flow.scenario import Scenario
 
 __all__ = [
@@ -65,14 +64,10 @@ class ScriptSpec:
 
     它是从业务层的 :class:`gamebot.feature.FeatureSpec` **算出来**的：
     补上"在哪棵目录树下"（``key`` / ``game`` / ``slug`` / ``module``），
-    并把"造配置 / 造流程"暴露成两个**无参**方法（调用方不必知道参数）。
+    并把"造流程"暴露成无参方法（调用方不必知道参数）。
 
-    ``build_config()`` / ``build_scenario()`` **每次给一份新的** —— 这一点
-    以前是"每个功能自己写一个函数"来保证的，现在由 ``FeatureSpec`` 的
-    ``materialize_*`` 保证（它内部就是新建对象）。
-
-    名字保留成 ``build_*`` 是因为调用方到处都是（CLI / 界面 / 注册表自己），
-    改成 ``materialize_*`` 只是换了个说法，不值当动那么多地方。
+    ``build_scenario()`` **每次给一份新的** —— 由 ``FeatureSpec.materialize_scenario``
+    保证（它内部就是新建对象）。
 
     :param key: ``"<游戏>/<功能>"``，命令行和 GUI 都用它标识。
     :param module: 完整模块路径，便于定位代码。
@@ -92,10 +87,6 @@ class ScriptSpec:
 
     从 ``feature.form`` 取；在这里放一份是为了调用方（界面）少绕一层。
     """
-
-    def build_config(self) -> AppConfig:
-        """造一份**新的**配置。每次调用都是新的 —— 别缓存成共享对象。"""
-        return self.feature.materialize_config()
 
     def build_scenario(self) -> Scenario:
         """造一份**新的**流程（含页面树与流程图）。"""
