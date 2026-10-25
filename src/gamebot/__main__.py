@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import TYPE_CHECKING
 
 from . import __version__
 from .exceptions import GameBotError
 from .types import Region
 from .utils.logging import get_logger, setup_logging
+
+if TYPE_CHECKING:
+    from .atomic.session import Session
 
 log = get_logger("cli")
 
@@ -64,7 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _session(*, window: str = ""):
+def _session(*, window: str = "") -> Session:
+    """给 ``capture`` / ``grab`` 用的最小 session（不需要真实模板）。"""
     from pathlib import Path
 
     from .atomic.session import build_session

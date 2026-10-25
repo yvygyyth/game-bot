@@ -90,10 +90,71 @@ def build_matcher(
     return recorder.wrap_matcher(matcher) if recorder is not None else matcher
 
 
-def build_reader(*, recorder: Any = None) -> TextReader:
-    """OCR 默认关闭（找图撑绝大多数脚本）。"""
-    reader: TextReader = UnavailableTextReader("OCR 未启用")
-    log.info("未启用 OCR，find_text / read_text 将返回 not_found")
+def _module_available(name: str) -> bool:
+    """这个包**装没装**（不导入，只看能不能找到）。"""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):  # pragma: no cover - 极端环境
+        return False
+
+
+def choose_ocr_engine(is_available: Callable[[str], bool] | None = None) -> str | None:
+    """挑一个能用的 OCR 引擎。都没有返回 ``None``。
+
+    顺序是 **RapidOCR -> Tesseract**：前者是纯 pip 包（模型自带），
+    ``uv sync --extra ocr-rapid`` 之后就能用；后者还要单独装 exe，
+    能用前一个时不该折腾它。
+
+    :param is_available: "这个包在不在"的探测函数。测试注入用 —— 免得
+        用例的结果取决于跑测试那台机器装了什么。
+    """
+    probe = is_available or _module_available
+    for engine, module in (("rapid", "rapidocr_onnxruntime"), ("tesseract", "pytesseract")):
+        if probe(module):
+            return engine
+    return None
+
+
+def build_reader(*, recorder: Any = None, engine: str = "auto") -> TextReader:
+    """造 OCR 实现。``engine``：``"auto"``（默认）/ ``"rapid"`` / ``"tesseract"`` / ``"none"``。
+
+    ## 为什么要"自动选"
+
+    早先这里**永远**返回 ``UnavailableTextReader``，于是不管装没装 OCR，
+    ``find_text`` / ``read_text`` / ``read_number`` 全是 ``not_found`` ——
+    `vision/ocr.py` 里那两个实现写了却**从没被接上**，属于"代码在、路不通"。
+    装依赖是用户明确的动作（``--extra ocr-rapid``），装了就说明想用。
+
+    没装时照旧退化，并且在日志里说清"为什么没有文字识别"——
+    否则 ``find_text`` 返回 ``not_found`` 看起来和"画面上真没有那行字"一模一样。
+    """
+    chosen = engine
+    if engine == "auto":
+        chosen = choose_ocr_engine() or "none"
+
+    reader: TextReader
+    if chosen == "rapid":
+        from .vision.ocr import RapidOcrReader
+
+        reader = RapidOcrReader()
+        log.info("OCR 已启用: RapidOCR")
+    elif chosen == "tesseract":
+        from .vision.ocr import TesseractReader
+
+        reader = TesseractReader()
+        log.info("OCR 已启用: Tesseract")
+    else:
+        if engine not in ("auto", "none"):
+            log.warning(
+                "未知的 OCR 引擎 %r（可选 auto/rapid/tesseract/none），按未启用处理",
+                engine,
+            )
+        reader = UnavailableTextReader(
+            "OCR 未启用（没装 rapidocr-onnxruntime / pytesseract）"
+        )
+        log.info("未启用 OCR，find_text / read_text 将返回 not_found")
     return recorder.wrap_reader(reader) if recorder is not None else reader
 
 
@@ -213,6 +274,8 @@ def bootstrap_from_spec(
     events: EventBus | None = None,
     record: bool = True,
     record_events: bool = True,
+    ocr: str = "auto",
+    root: Path | None = None,
 ) -> tuple[RunContext, FlowEngine]:
     """从脚本声明装配 ``(RunContext, FlowEngine)``。
 
@@ -221,9 +284,13 @@ def bootstrap_from_spec(
     :param recorder: 外部传入的识别记录器（界面长期持有那份）；不传则按 ``record`` 自造。
     :param events: 外部传入的事件总线（界面要订阅）；不传就造一个（默认落盘）。
     :param record_events: 自造总线时要不要落 ``logs/events/``；界面可用它只订阅不落盘。
+    :param ocr: OCR 引擎，``auto`` / ``rapid`` / ``tesseract`` / ``none``
+        （见 :func:`build_reader`）。
+    :param root: 仓库根。不传就按 ``games`` 包的位置推 —— **测试会传临时目录**
+        （否则跑一次装配就往项目的 ``logs/`` / ``data/`` 里写东西）。
     """
-    root = project_root()
-    paths = RunPaths.under(root)
+    base = root if root is not None else project_root()
+    paths = RunPaths.under(base)
     paths.ensure()
 
     title = (window_title if window_title is not None else feature.window_title).strip()
@@ -249,7 +316,7 @@ def bootstrap_from_spec(
     if recorder is None and record:
         recorder = build_recorder(paths)
     matcher = build_matcher(templates, recorder=recorder)
-    reader = build_reader(recorder=recorder)
+    reader = build_reader(recorder=recorder, engine=ocr)
 
     if session is None:
         session = build_session(

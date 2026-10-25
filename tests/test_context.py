@@ -19,7 +19,38 @@ from gamebot.atomic.backends.fake import FakeInputBackend, build_fake_backends
 from gamebot.atomic.session import BaseSession
 from gamebot.context import RunContext
 from gamebot.exceptions import Cancelled
+from gamebot.state.blackboard import Blackboard
+from gamebot.state.store import StoreManager
 from gamebot.types import Point, Region
+
+
+class TestInjectedCollaboratorsAreKept:
+    """装配层传进来的对象**必须原样保留** —— 不能被"空就是假"悄悄换掉。
+
+    回归：这几个类都定义了 ``__len__``，于是空实例是 falsy。
+    ``self.stores = stores or StoreManager(...)`` 会把它换成新实例，
+    而 bootstrap 传进来的那个**带着 on_change 回调**（事件流靠它）。
+    表现是"仓库照常落盘，但一条 store_changed 都没有" —— 静默失效。
+    """
+
+    def test_empty_store_manager_is_kept(self, session: BaseSession, run_paths) -> None:
+        manager = StoreManager(None, game="g", on_change=lambda change: None)
+        ctx = RunContext(session, name="g/f", paths=run_paths, stores=manager)
+        try:
+            assert ctx.stores is manager
+            assert ctx.stores.on_change is not None
+        finally:
+            ctx.close()
+
+    def test_empty_blackboard_is_kept(self, session: BaseSession, run_paths) -> None:
+        board = Blackboard()
+        ctx = RunContext(session, name="g/f", paths=run_paths, blackboard=board)
+        try:
+            assert ctx.blackboard is board
+            ctx.blackboard.set("x", 1)
+            assert board.get("x") == 1, "写进注入的黑板了吗？"
+        finally:
+            ctx.close()
 
 
 class TestStopSignal:

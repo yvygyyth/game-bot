@@ -79,13 +79,23 @@ class RunContext:
         self.paths = paths
         self.frame_ttl = frame_ttl
         self.executor = executor
-        self.pages = pages or PageTracker(tree)
-        self.blackboard = blackboard or Blackboard()
+        # ⚠️ 下面三处**必须**写 `x if x is not None else ...`，不能写 `x or ...`。
+        # 这三个对象都定义了 `__len__`，于是"空的那个"是 **falsy** ——
+        # 用 `or` 的话，装配层传进来的空实例会被**静默丢弃**、换成默认新实例。
+        # 实际踩过：bootstrap 传进来的是"带 on_change 回调的 StoreManager"，
+        # 而它是空的（还没取过仓库），于是被换成没有回调的新管理器 ——
+        # 仓库照常落盘，事件流里却一条 store_changed 都没有。
+        self.pages = pages if pages is not None else PageTracker(tree)
+        self.blackboard = blackboard if blackboard is not None else Blackboard()
         #: 状态仓库管理器（跨运行的记忆）。默认按仓库根下的 ``data/stores`` 落盘 ——
         #: 装配层可以换一个（比如测试给临时目录、界面用长期持有的那个）。
-        self.stores = stores or StoreManager(
-            Path(paths.root) / "data" / "stores",
-            game=name.split("/", 1)[0],
+        self.stores = (
+            stores
+            if stores is not None
+            else StoreManager(
+                Path(paths.root) / "data" / "stores",
+                game=name.split("/", 1)[0],
+            )
         )
         self.events: EventBus | None = events
         """事件总线。装配期由 ``bootstrap`` 挂上；自己 new 上下文时是 ``None``。"""
