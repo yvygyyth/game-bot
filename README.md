@@ -1,4 +1,4 @@
-﻿# game-bot
+# game-bot
 
 传统识图游戏脚本框架。不依赖任何 AI/模型，就是**截图 → 找图 → 判断 → 点击**。
 
@@ -16,7 +16,9 @@
 > 状态层（`locate` 快路径 / `recover` 慢路径）、流程层（`tick` 的重定位语义）、
 > 执行层（`Executor.run` + 10 个 `Step.run()`）、YAML 加载与 journal 落盘都已实现；
 > 业务层已有 `mingjiangsha/jingji`（名将杀 · 竞技场）跑通识别；
-> 还差的只有**结构化事件流、UI 阶段 2 接线、OCR 实测，以及一轮真机端到端**。
+> 结构化事件流（`events.py`）与跨运行的**状态仓库**（`store/`，落在 `data/stores/`）
+> 已实现 —— 见 [docs/store.md](docs/store.md)；
+> 还差的只有**UI 阶段 2 接线、OCR 实测，以及一轮真机端到端**。
 > 详见下方[进度](#进度)与[下一步](#下一步)。
 
 ---
@@ -130,17 +132,23 @@ game-bot/
 │   ├── atomic-inventory.md      #   50 个原子方法的清单与语义
 │   ├── run-context.md           #   ★ RunContext 上挂着什么（写步骤时读这份）
 │   ├── state-and-flow.md        #   ★ 状态树与流程图怎么结合（关联表 / 两条定位路径）
+│   ├── store.md                 #   ★ 状态仓库：跨运行的记忆（背包 / 累计局数）
 │   └── ui.md                    #   ★ 本地控制台 UI 的设计（布局 / 线程 / 分阶段）
 ├── games/                       # ★ 业务层：具体游戏的脚本（见 games/README.md）
 │   └── mingjiangsha/            #   名将杀：游戏级定义 + 各功能脚本
 │       ├── templates/           #     游戏级公共模板
-│       └── jingji/              #     竞技场：pages / graph / steps / templates / utils
-├── logs/                        # 运行产物（不入版本管理）
+│       └── scripts/jingji/      #     竞技场：pages / graph / steps / store / templates
+├── data/stores/<游戏>/          # ★ 跨运行的记忆（不入版本管理，别删）
+├── logs/                        # 运行产物：截图 / journal / events（不入版本管理）
 ├── src/gamebot/
 │   ├── types.py                 # ★ L0 类型层（完整实现）
 │   ├── exceptions.py
+│   ├── events.py                # ★ 结构化事件流（tick / 换页 / 换节点 / 步骤 / 仓库）
+│   ├── feature.py               # ★ 业务层声明 FeatureSpec（一个脚本一个 SPEC）
+│   ├── params.py                #   运行参数表单（FormSpec / ParamField）
+│   ├── scenario_spec.py         #   状态树 + 流程图 + 关联表的**纯数据**声明
 │   ├── context.py               # RunContext：三层共享的唯一对象
-│   ├── bootstrap.py             # 装配：配置 -> 对象图 -> 引擎
+│   ├── bootstrap.py             # 装配：SPEC -> 事件流 / 仓库 / 对象图 -> 引擎
 │   ├── __main__.py              # CLI
 │   ├── atomic/                  # ★ 原子化方法层
 │   │   ├── session.py           #   L1 截图 + 坐标换算 + 输入通道
@@ -158,12 +166,14 @@ game-bot/
 │   ├── state/                   # ★ 状态层：我在哪个状态
 │   │   ├── page.py              #   状态树 Page / PageTree / PageMatch + 定位两条路径
 │   │   ├── tracker.py           #   PageTracker / PageState / PageChange（跨帧）
-│   │   └── store.py             #   Blackboard（业务共享数据）
+│   │   ├── blackboard.py        #   Blackboard：**这次运行**的共享数据（开跑清空）
+│   │   └── store.py             #   ★ Store：**跨运行**的记忆（一个仓库一个 JSON）
 │   ├── flow/                    # ★ 流程层：做什么、何时换
 │   │   ├── scenario.py          #   Scenario（状态树+流程图+参数）/ EngineOptions
 │   │   ├── graph.py             #   Node / Edge / Graph / GraphCursor
 │   │   ├── binding.py           #   ★ 关联表 StateBinding：两层唯一的桥
-│   │   ├── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）
+│   │   ├── bindings.py          #   关联表的声明容器 NodeBindings
+│   │   ├── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）+ 发事件
 │   │   └── loader.py            #   YAML -> Scenario
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
 │   ├── config/                  # 配置模型与加载
@@ -461,9 +471,11 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 | 执行层 | ✅ 完整 | 策略对象/步骤构造（`step_from_dict`）/结果记录/`Executor.run`/10 个 Step 的 `run()`/journal JSONL 落盘全部实现 |
 | 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
 | 业务层 | 🟡 部分 | ★ 游戏 → scripts → 功能，注册表自动发现，`check`/`describe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
-| 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥、journal JSONL 已实现；每次运行独立日志、结构化事件流待实现 |
+| 状态仓库 | ✅ 完整 | ★ 跨运行的记忆：一个脚本可用多个仓库，`games/…/store/` 一个仓库一个文件，落 `data/stores/<游戏>/<id>.json`；原子写、坏文件留证据不挡开跑；见 [docs/store.md](docs/store.md) |
+| 事件流 | ✅ 完整 | ★ `events.py`：`run_started` / `tick` / `page_changed` / `node_changed` / `step_started` / `step_finished` / `recovery` / `store_changed` / `run_finished`，落 `logs/events/<功能>.jsonl`；监听器出错不影响流程 |
+| 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥、journal JSONL、事件流已实现；每次运行独立日志待实现 |
 | UI | ✅ 阶段 2 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、开始/停止真的能跑、运行状态面板（含每次重定位）、实时画面（跑起来时复用引擎那一帧）、日志大框、检查。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
-| 测试 | ✅ 536 个用例 | 框架的结构契约与单元测试 |
+| 测试 | ✅ 892 个用例 | 框架的结构契约与单元测试（含 16 个跳过：依赖 UI/OCR 的可选环境） |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
@@ -478,14 +490,17 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 
 ### 下一步
 
-原子层已封板，业务层、状态层/流程层/执行层的实现也齐了。按依赖顺序还剩：
+原子层已封板，业务层、状态层/流程层/执行层的实现也齐了，事件流与状态仓库也已落地。
+按依赖顺序还剩：
 
-1. **`events.py`（结构化事件流）+ 每次运行独立日志** —— UI 阶段 2 与 journal 的数据源
-2. **UI 阶段 2 接线** —— 开始/停止、状态面板（预览要改成复用引擎那一帧），
-   顺手把窗口里那几句"尚未实现"的 tooltip 改成事实
-3. **OCR 实测** —— 装 `--extra ocr-rapid` 后跑一遍 `find_text`
-4. **真机端到端** —— 现在只验到识别；拿 `mingjiangsha/jingji` 真跑一轮，
-   看 `RunReport` 的轨迹（含 `recoveries`）是不是符合预期
+1. **UI 接事件流** —— 状态面板改成订阅 `EventBus`（现在还在用回调），
+   加一页「记忆」按仓库分组显示 `ctx.stores`；顺手把窗口里那几句
+   "尚未实现"的 tooltip 改成事实
+2. **OCR 实测** —— 装 `--extra ocr-rapid` 后跑一遍 `find_text`
+3. **真机端到端** —— 现在只验到识别；拿 `mingjiangsha/jingji` 真跑一轮，
+   看 `RunReport` 的轨迹（含 `recoveries`）和 `logs/events/jingji.jsonl` 是不是符合预期
+4. **拆大文件** —— `state/page.py`（69KB）、`flow/engine.py`（51KB）、
+   `flow/graph.py`（33KB）按概念拆开；纯搬迁，靠测试兜底
 
 ## 开发约定
 
@@ -500,6 +515,11 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
   等工作线程自己退出后再关。
 - **不要绕过 `ctx.frame()` 直接截图**。同一 tick 内的步骤必须看同一张图。
 - **坐标一律源分辨率**，逻辑分辨率只在写脚本时用，由 `CoordinateMapper` 换算。
+- **先问"下次开还该记得吗"**：该 → `ctx.store(...)`（声明放 `store/` 目录，
+  落 `data/stores/`）；不该 → `ctx.blackboard`（开跑清空）；是用户填进来的 →
+  `ctx.param(...)`（表单校验）。三者混用是这里最容易犯的错。
+- **仓库的 `get` 拿到的是副本**。改复合值要用 `set` / `patch` / `append`，
+  不要指望"就地改一下就存下来了"。
 - **新增 Query / Step 类型必须登记注册表**，否则 YAML 里写不出来。
 - **状态树里父节点一律 `kind: group`（分类节点），只有末梢状态节点写 `queries`** ——
   分类节点自己不记录信息、不参与匹配；给它写 `queries` 或让它空着，校验都会报出来。

@@ -1,4 +1,4 @@
-﻿# ---- Python ----
+# ---- Python ----
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -21,6 +21,12 @@ logs/**
 screenshots/
 artifacts/
 *.log
+
+# ---- 跨运行的记忆（状态仓库）----
+# 这是**本机跑出来的数据**：背包、累计局数、体力。别入库 —— 每台机器的进度不同，
+# 混进版本库后"git pull 把我的背包覆盖了"。
+data/**
+!data/.gitkeep
 
 # ---- 临时目录（不要入库）----
 # 测试/调试脚本喜欢用 ``tempfile.mkdtemp(dir=".")`` 在工作区里造临时目录，

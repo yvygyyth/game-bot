@@ -113,10 +113,13 @@ uv run mypy src games        # 类型
 框架自带的 CLI（调框架、看窗口、抓图）：
 
 ```powershell
-uv run python -m gamebot info         # 打印生效配置
 uv run python -m gamebot windows      # 列出可见窗口（标题 + 客户区矩形）
 uv run python -m gamebot capture -o a.png   # 截全屏
+uv run python -m gamebot grab --region 1,2,3,4 -o region.png   # 只截一块（调 ROI）
 ```
+
+> 早先的 `gamebot info` / `check` / `run` 已经**迁到业务入口** `python -m games`，
+> 旧名字还会留着，但只会打印一句"请改用 games"并退出 2。
 
 ---
 

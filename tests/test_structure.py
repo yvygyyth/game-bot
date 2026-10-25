@@ -223,7 +223,12 @@ def _resolve_import(path: Path, node: ast.ImportFrom) -> str | None:
 
 
 def _imported_gamebot_modules(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    # 用 utf-8-sig 而不是 utf-8：Python 解释器自己会吞掉 BOM，所以带 BOM 的源码
+    # 能正常 import；但 ast.parse 不吃，会抛
+    # ``SyntaxError: invalid non-printable character U+FEFF``。
+    # 检查器不该因为被检查对象的一个字节而崩掉 —— BOM 本身由
+    # tests/test_source_hygiene.py 明确报出来。
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):

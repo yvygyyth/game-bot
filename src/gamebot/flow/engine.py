@@ -45,7 +45,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ..events import Event, EventKind
 from ..exceptions import Cancelled, FlowError
+from ..execution.executor import ExecutorHooks
+from ..execution.step import step_name
 from ..state.page import UNKNOWN_PAGE, PageId, PageLeaf
 from ..state.tracker import PageChange, PageTracker
 from ..utils.logging import get_logger
@@ -59,6 +62,7 @@ if TYPE_CHECKING:
 
     from ..atomic.frame import Frame
     from ..context import RunContext
+    from ..events import EventBus
     from ..execution.executor import Executor, StepOutcome
     from ..execution.step import StepFunc
 
@@ -274,6 +278,7 @@ class FlowEngine:
         tracker: PageTracker | None = None,
         start_node: NodeId = "",
         params: Mapping[str, Any] | None = None,
+        events: EventBus | None = None,
     ) -> None:
         """
         :param start_node: 从哪个节点开始跑；留空 = ``graph.initial``。
@@ -325,6 +330,22 @@ class FlowEngine:
         和上下文里那份的关系：装配期可能已经往 ``ctx`` 放过参数（比如 CLI 传的），
         这份是"装配之后再补"的。两边**合并**，引擎这边优先。
         """
+        self.events = events if events is not None else getattr(ctx, "events", None)
+        """事件总线。``None`` 表示不发事件（老用法、单元测试）。"""
+        if self.events is not None and self.executor is not None:
+            # 步骤级的开始/结束由**引擎**挂到执行器上，而不是装配层 ——
+            # 这样"事件从哪来"只有一个地方（引擎），测试里 new 一个引擎
+            # 也能拿到完整的事件流，不用把 bootstrap 搬进测试。
+            self.executor.add_hooks(
+                ExecutorHooks(
+                    before_step=self._on_step_started,
+                    after_step=self._on_step_finished,
+                )
+            )
+        # 上一次发事件时"看到的"页面/节点。只在**变了**的时候发 *_changed，
+        # 否则一轮一条、"每轮都一样"的事件会把事件流淹成日志。
+        self._last_page: PageId = UNKNOWN_PAGE
+        self._last_node: NodeId = self.start_node
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -393,6 +414,14 @@ class FlowEngine:
         # "第一次"和"第二次"行为不同，而且极难查。
         self.ctx.reset()
 
+        # 2.5) **报告也是"这次运行的"**，不是引擎的。
+        #
+        # 不换新的后果很隐蔽：第二遍一进循环就发现 ``report.ticks`` 已经
+        # 到过 ``max_ticks`` 了，于是**一步都不跑**、直接报成 MAX_TICKS ——
+        # 而 MAX_TICKS 是"正常停止"，报告里看不出"其实什么都没干"。
+        # （早先那个"跑两遍步数一样"的用例没抓到它：两遍都是 0 步，相等。）
+        self.report = RunReport(scenario=self.scenario.name)
+
         # 3) 合入运行参数（入参）。**合并**而不是覆盖：装配期可能已经往 ctx 放过
         # （CLI 传的），引擎这份优先。顺序在 reset **之后** —— 参数不是运行期状态，
         # reset 不会碰它，但放后面更保险（不依赖"reset 不动参数"这个约定）。
@@ -406,11 +435,20 @@ class FlowEngine:
         self.report.initial_page = self.tracker.current_id
         # 从配置的起始节点开始（不是 graph.initial）—— 起点是运行参数的一部分
         self.cursor.reset(to=self.start_node)
+        self._last_page = self.tracker.current_id
+        self._last_node = self.cursor.current
         log.info(
             "脚本 %r 启动: 起始节点 %s, 初始页面 %s",
             self.scenario.name,
             self.start_node,
             self.tracker.current_id,
+        )
+        self._emit(
+            EventKind.RUN_STARTED,
+            scenario=self.scenario.name,
+            start_node=self.start_node,
+            initial_page=self.tracker.current_id,
+            max_ticks=options.max_ticks,
         )
 
         try:
@@ -428,6 +466,10 @@ class FlowEngine:
                 self.report.ticks += 1
                 self.tracker.advance_tick()
                 outcome = self.tick()
+                self._emit_tick(outcome)
+                # 记忆的落盘放在"这一轮已经结束"这一刻：一轮里的几次写入合成一次写盘，
+                # 又保证每轮结束时盘上至少是"上一轮为止"的事实。
+                self.ctx.stores.flush()
                 if on_tick is not None:
                     on_tick(self, outcome)
                 if self.running:
@@ -452,6 +494,17 @@ class FlowEngine:
         self.report.blackboard = self.ctx.blackboard.as_dict()
         if self.executor is not None:
             self.report.outcomes = list(self.executor.outcomes)
+        self._emit(
+            EventKind.RUN_FINISHED,
+            stop_reason=self.report.stop_reason.value,
+            stop_message=self.report.stop_message,
+            ticks=self.report.ticks,
+            steps=self.report.step_count,
+            duration=round(self.report.duration, 3),
+            initial_page=self.report.initial_page,
+            final_page=self.report.final_page,
+            final_node=self.report.final_node,
+        )
         log.info(self.report.summary())
         return self.report
 
@@ -756,6 +809,49 @@ class FlowEngine:
         self._note_decision(self.cursor.evaluate(self.ctx, now=now))
         self.cursor.step(self.ctx, now=now)
 
+    def _emit(self, kind: EventKind, **data: Any) -> None:
+        """发一条事件。没挂总线时是空操作 —— 调用点不用到处判空。"""
+        if self.events is None:
+            return
+        self.events.emit(Event(kind, at=self.ctx.now(), tick=self.report.ticks, data=data))
+
+    def _on_step_started(self, _ctx: RunContext, step: Any) -> None:
+        """执行器的前钩子 -> ``step_started``。"""
+        self._emit(EventKind.STEP_STARTED, step=step_name(step))
+
+    def _on_step_finished(self, _ctx: RunContext, outcome: StepOutcome) -> None:
+        """执行器的后钩子 -> ``step_finished``。"""
+        self._emit(
+            EventKind.STEP_FINISHED,
+            step=outcome.step,
+            status=outcome.status,
+            message=outcome.message,
+            elapsed=round(outcome.elapsed, 3),
+        )
+
+    def _emit_tick(self, outcome: StepOutcome | None) -> None:
+        """一轮结束：发 ``tick``，再看页面/节点有没有**变**。
+
+        ``tick`` 每轮一条（它是心跳，界面靠它刷新"第几轮"）；
+        ``page_changed`` / ``node_changed`` 只在真的变了才发 —— 否则事件流里
+        99% 都是"还在同一页"，真正的那次跳转反而找不出来。
+        """
+        if self.events is None:
+            return
+        page = self.tracker.current_id
+        node = self.cursor.current
+        payload: dict[str, Any] = {"page": page, "node": node}
+        if outcome is not None:
+            payload["step"] = outcome.step
+            payload["status"] = outcome.status
+        self._emit(EventKind.TICK, **payload)
+        if page != self._last_page:
+            self._emit(EventKind.PAGE_CHANGED, from_page=self._last_page, to_page=page)
+            self._last_page = page
+        if node != self._last_node:
+            self._emit(EventKind.NODE_CHANGED, from_node=self._last_node, to_node=node)
+            self._last_node = node
+
     def _note_recovery(
         self,
         from_node: NodeId,
@@ -780,6 +876,14 @@ class FlowEngine:
             attempts=[a.to_dict() for a in getattr(match, "attempts", [])],
         )
         self.report.recoveries.append(record)
+        self._emit(
+            EventKind.RECOVERY,
+            from_node=from_node,
+            expected=expected,
+            actual=actual,
+            to_node=to_node,
+            attempts=len(record.attempts),
+        )
 
     def _tick_interval(self) -> float:
         """本轮结束后的等待时长。
@@ -984,10 +1088,12 @@ class FlowEngine:
 
         停之前**先记一条 warning**：这是"流程走完了"和"脚本卡住了"的分界，
         两者的画面一模一样（都是步骤一直 not_found），必须靠日志说清是哪种。
-        """
-        if self.executor is not None:
-            self.executor.outcomes.append(outcome)
 
+        **统计只在这里做，不再往 ``executor.outcomes`` 里塞一遍** ——
+        执行器在 ``_record`` 里已经记过每一条了。早先两处各塞一次，于是
+        ``report.step_count`` / ``failed_steps`` 全翻倍（"跑了 2 步报 4 步"），
+        而报告里其他数字都是对的，看起来像统计口径不同，其实是重复追加。
+        """
         if not self._note_stall(outcome):
             return
 

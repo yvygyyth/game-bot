@@ -14,7 +14,9 @@
   和组织结构，定位时直接下探它的子节点。
 * ``tracker.py`` —— **跟踪层**。把单帧结果维护成"当前状态 + 连续几帧 + 从何时起"，
   以及状态变更历史。跨帧才能回答的问题都在这里。
-* ``store.py`` —— **共享黑板**。脚本自己存东西的地方，框架不解释内容。
+* ``blackboard.py`` —— **共享黑板**。脚本在**这一次运行**里存东西的地方，开跑清空。
+* ``store.py`` —— **状态仓库**。脚本**跨运行**的记忆（背包、体力、累计局数），
+  一个仓库一个 JSON 落盘。和黑板的唯一区别就是寿命：仓库活过这次运行。
 
 定位有两条路径，别混用：快路径 :meth:`~gamebot.state.page.PageTree.locate`
 （正常一轮，只探流程层预期的那一页，``expected=``）和慢路径
@@ -43,6 +45,7 @@
 
 from __future__ import annotations
 
+from .blackboard import Blackboard
 from .page import (
     UNKNOWN_PAGE,
     Page,
@@ -55,7 +58,7 @@ from .page import (
     PageNode,
     PageTree,
 )
-from .store import Blackboard
+from .store import Store, StoreChange, StoreManager, StoreSpec, define_store
 from .tracker import PageChange, PageState, PageTracker
 
 __all__ = [
@@ -73,4 +76,9 @@ __all__ = [
     "PageState",
     "PageTracker",
     "PageTree",
+    "Store",
+    "StoreChange",
+    "StoreManager",
+    "StoreSpec",
+    "define_store",
 ]

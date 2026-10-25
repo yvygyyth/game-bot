@@ -163,6 +163,8 @@ class TestRunStateReset:
             ctx.close()
 
     def test_counter_does_not_leak_between_runs(self):
+        """黑板每一遍都从零开始 —— 否则"第一遍"和"第二遍"行为不同。"""
+
         def bump(ctx):
             ctx.blackboard.bump("rounds")
             return ActionResult.success()
@@ -172,10 +174,13 @@ class TestRunStateReset:
         engine = build_engine(ctx, scenario)
         try:
             engine.run()
-            assert ctx.blackboard.get("rounds", 0) > 0, "第一次运行应该写下计数"
+            assert ctx.blackboard.get("rounds", 0) == 3, "第一次运行应该写下计数"
 
+            # 第二遍只跑一轮：这样"清没清"看得清楚 ——
+            # 清干净了是 1，带着上一遍的 3 就是 4。
+            scenario.options.max_ticks = 1
             engine.run()
-            assert ctx.blackboard.get("rounds", 0) < 2, (
+            assert ctx.blackboard.get("rounds", 0) == 1, (
                 f"第二次运行看到 rounds={ctx.blackboard.get('rounds')} —— "
                 "黑板带着上一遍的数据"
             )
@@ -194,6 +199,32 @@ class TestRunStateReset:
                 f"第二遍报了 {second.step_count} 步、第一遍 {first.step_count} 步"
                 " —— 执行器的 outcomes 没清"
             )
+        finally:
+            ctx.close()
+
+    def test_second_run_actually_runs(self):
+        """第二遍必须**真跑**，不能因为报告没重置就"超过轮数"空转。
+
+        回归：``RunReport`` 只在 ``__init__`` 里造一次，``report.ticks`` 跨运行
+        累加。于是同一个引擎跑第二遍时，循环第一句"ticks 到预算了"立刻成立，
+        一步都不跑、报成 MAX_TICKS（那还是"正常停止"）。
+        上一条用例两边都是 0 步，所以没抓到它。
+        """
+        ran: list[int] = []
+
+        def step(ctx):
+            ran.append(1)
+            return ActionResult.success()
+
+        scenario = _scenario(step, max_ticks=2)
+        ctx = _ctx(scenario)
+        engine = build_engine(ctx, scenario)
+        try:
+            engine.run()
+            assert len(ran) == 2, "第一遍应该跑两轮"
+            engine.run()
+            assert len(ran) == 4, "第二遍一步都没跑 —— 报告没重置"
+            assert engine.report.ticks == 2
         finally:
             ctx.close()
 

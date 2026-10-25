@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import pathlib
 import re
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.session import BaseSession

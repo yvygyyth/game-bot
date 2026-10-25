@@ -17,11 +17,10 @@
 from __future__ import annotations
 
 import time
-
-import pytest
-
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from gamebot.atomic.backends.fake import build_fake_backends
 from gamebot.atomic.query import ImageQuery

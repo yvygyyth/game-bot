@@ -65,13 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _session(*, window: str = ""):
+    from pathlib import Path
+
     from .atomic.session import build_session
     from .atomic.vision import UnavailableTextReader
     from .vision.opencv_matcher import OpenCvMatcher
 
     # capture/grab 不需要真实模板；给个空目录占位
-    from pathlib import Path
-
     empty = Path("logs/_empty_templates")
     empty.mkdir(parents=True, exist_ok=True)
     matcher = OpenCvMatcher(templates_dir=empty, preload=False)

@@ -44,8 +44,8 @@ def _section(title: str) -> None:
 
 def cmd_doctor(args: Any) -> int:
     """把"跑之前该知道的环境事实"一次打完。"""
-    from gamebot.bootstrap import build_matcher, build_reader, project_root
     from gamebot.atomic.session import build_session
+    from gamebot.bootstrap import build_matcher, build_reader, project_root
     from gamebot.utils.integrity import check_integrity, level_of_pid, level_of_window
 
     spec = get_script(args.script)

@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 from gamebot.atomic import actions
 from gamebot.types import ActionResult, Point
 
+from ..store import RUNS
+
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
@@ -54,6 +56,12 @@ def enter_jingji(ctx: RunContext) -> ActionResult[Any]:
         return clicked
 
     ctx.invalidate_frame()
+    # 累计局数来自**状态仓库**（跨运行，见 ..store.runs）—— 这里只读不写：
+    # 数字归 finish_round 管（一局真的打完才 +1），这里读它是为了让日志和
+    # 步骤记录里能看到"这个号一共刷了多少"，而不用翻 data/stores 下的文件。
+    done = ctx.store(RUNS).get("done", 0)
     return ActionResult.success(
-        JINGJI_ENTRY, action="click", message="点了首页的竞技入口（熊猫头）"
+        JINGJI_ENTRY,
+        action="click",
+        message=f"点了首页的竞技入口（熊猫头）；累计已刷 {done} 局",
     )

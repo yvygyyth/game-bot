@@ -6,12 +6,17 @@
 
 1. 解析仓库根与模板目录、建日志目录；
 2. 造 Matcher（OpenCV）与 Session（Windows 找窗）；
-3. 物化 Scenario、造 Context 与 Engine。
+3. 接事件流（总线 + JSONL）与状态仓库（跨运行的记忆）；
+4. 物化 Scenario、造 Context 与 Engine。
+
+**装配期也是唯一"把三样东西接起来"的地方**：仓库的变更回调 -> ``store_changed``
+事件，执行器的前后钩子 -> ``step_started`` / ``step_finished`` 事件。
+状态层和流程层各自都**不认识**事件这个概念，接线只在这里做。
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,10 +24,12 @@ from .atomic.session import Session, build_session
 from .atomic.vision import Matcher, TextReader, UnavailableTextReader
 from .config.schema import RunPaths
 from .context import RunContext
+from .events import Event, EventBus, EventKind, JsonlEventWriter
 from .execution.executor import Executor, ExecutorHooks
 from .execution.journal import Journal, NullJournal
 from .flow.engine import FlowEngine
 from .flow.scenario import Scenario
+from .state.store import StoreChange, StoreManager
 from .utils.integrity import check_integrity
 from .utils.logging import get_logger
 from .vision.recorder import RecognitionRecorder
@@ -35,9 +42,11 @@ log = get_logger("bootstrap")
 __all__ = [
     "bootstrap_from_spec",
     "build_engine",
+    "build_event_bus",
     "build_matcher",
     "build_reader",
     "build_recorder",
+    "build_store_manager",
     "project_root",
 ]
 
@@ -104,14 +113,91 @@ def build_recorder(
     return recorder
 
 
-def build_engine(ctx: RunContext, scenario: Scenario) -> FlowEngine:
-    """装配流程引擎。"""
+def build_event_bus(
+    paths: RunPaths,
+    *,
+    slug: str = "run",
+    record: bool = True,
+) -> EventBus:
+    """造事件总线。``record=True`` 时顺手把事件落进 ``logs/events/<slug>.jsonl``。
+
+    为什么默认落盘：事件流最大的用处是**事后复盘**（"它那一晚到底是几点开始
+    不对的"）。只在内存里留 200 条的话，界面一关就没了，而一次真机跑要几十分钟。
+    """
+    bus = EventBus()
+    if record:
+        writer = JsonlEventWriter(paths.resolve(Path("logs") / "events" / f"{slug}.jsonl"))
+        bus.subscribe(writer)
+        log.info("事件流: %s", writer.path)
+    return bus
+
+
+def build_store_manager(
+    paths: RunPaths,
+    *,
+    game: str,
+    on_change: Callable[[StoreChange], None] | None = None,
+) -> StoreManager:
+    """造状态仓库管理器。落盘根固定为 ``<仓库根>/data/stores``。
+
+    放 ``data/`` 而不是 ``logs/``：``logs/`` 是**运行产物**（会清、会按次分目录），
+    而记忆是"下次开还要用的东西"。
+    """
+    manager = StoreManager(
+        paths.resolve(Path("data") / "stores"),
+        game=game,
+        on_change=on_change,
+    )
+    log.info("状态仓库: %s", manager.root)
+    return manager
+
+
+def make_store_change_emitter(
+    bus: EventBus,
+    ctx_getter: Callable[[], Any],
+) -> Callable[[StoreChange], None]:
+    """把仓库的变更回调接到事件流上（``store_changed``）。
+
+    单独一个函数是为了**能被直接测**：这里接错一个属性名，表现是
+    "仓库确实在变、但事件流里一条 ``store_changed`` 都没有" ——
+    静默缺失，比报错难查得多。
+
+    :param ctx_getter: 取当前上下文的函数。装配期上下文还没造好，所以传个
+        "取的时候再说"的闭包，而不是直接传 ctx。
+    """
+
+    def emit_change(change: StoreChange) -> None:
+        ctx = ctx_getter()
+        if ctx is None:  # pragma: no cover - 开跑前不会写仓库
+            return
+        bus.emit(
+            Event(
+                EventKind.STORE_CHANGED,
+                at=ctx.now(),
+                tick=ctx.pages.tick,
+                data=change.to_dict(),
+            )
+        )
+
+    return emit_change
+
+
+def build_engine(
+    ctx: RunContext,
+    scenario: Scenario,
+    *,
+    events: EventBus | None = None,
+) -> FlowEngine:
+    """装配流程引擎。
+
+    :param events: 事件总线；不传就用 ``ctx.events``（装配期挂在上下文字上那份）。
+    """
     executor = ctx.executor
     if executor is not None:
         executor.save_frames_on_error = bool(
             getattr(scenario.options, "save_frames_on_error", False)
         )
-    return FlowEngine(scenario, ctx, executor=executor)
+    return FlowEngine(scenario, ctx, executor=executor, events=events)
 
 
 def bootstrap_from_spec(
@@ -124,13 +210,17 @@ def bootstrap_from_spec(
     hooks: ExecutorHooks | None = None,
     session: Session | None = None,
     recorder: RecognitionRecorder | None = None,
+    events: EventBus | None = None,
     record: bool = True,
+    record_events: bool = True,
 ) -> tuple[RunContext, FlowEngine]:
     """从脚本声明装配 ``(RunContext, FlowEngine)``。
 
     :param window_title: 覆盖 ``FeatureSpec.window_title``（UI 选窗时用）。
     :param dry_run: 空跑：只识别、不操作。
     :param recorder: 外部传入的识别记录器（界面长期持有那份）；不传则按 ``record`` 自造。
+    :param events: 外部传入的事件总线（界面要订阅）；不传就造一个（默认落盘）。
+    :param record_events: 自造总线时要不要落 ``logs/events/``；界面可用它只订阅不落盘。
     """
     root = project_root()
     paths = RunPaths.under(root)
@@ -142,6 +232,19 @@ def bootstrap_from_spec(
         from .exceptions import ConfigError
 
         raise ConfigError(f"{feature.name}: 模板目录不存在: {templates}")
+
+    bus = events if events is not None else build_event_bus(
+        paths, slug=feature.slug, record=record_events
+    )
+
+    # 仓库的回调需要 ctx（拿 tick / 时钟），但 ctx 又要收下这个 manager ——
+    # 用一个小盒子打破这个循环。写入只发生在开跑之后，那时 ctx 一定已经在了。
+    holder: dict[str, Any] = {}
+    stores = build_store_manager(
+        paths,
+        game=feature.name.split("/", 1)[0],
+        on_change=make_store_change_emitter(bus, lambda: holder.get("ctx")),
+    )
 
     if recorder is None and record:
         recorder = build_recorder(paths)
@@ -178,7 +281,14 @@ def bootstrap_from_spec(
         tree=scenario.tree,
         frame_ttl=max(0.2, tick * 2),
         params=params,
+        stores=stores,
+        events=bus,
     )
+    holder["ctx"] = ctx
+
+    # 注意：**步骤级事件不在这里接线** —— 由引擎挂在执行器上（见
+    # ``FlowEngine.__init__`` 里的 ``add_hooks``）。这样测试里 new 一个引擎
+    # 也能拿到完整事件流，而"事件从哪来"也只有引擎一处。
     ctx.executor = Executor(
         ctx,
         hooks=hooks,
@@ -188,7 +298,7 @@ def bootstrap_from_spec(
     )
     ctx.recorder = recorder
 
-    engine = build_engine(ctx, scenario)
+    engine = build_engine(ctx, scenario, events=bus)
     log.info(
         "装配完成: %r, %d 状态 / %d 节点 / %d 边",
         scenario.name,

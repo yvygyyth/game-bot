@@ -98,16 +98,24 @@ class StepOutcome:
 
 @dataclass(slots=True)
 class ExecutorHooks:
-    """执行器回调点。默认全空，方便只关心其中几个的场景。"""
+    """执行器回调点。默认全空，方便只关心其中几个的场景。
+
+    ``before_step`` 在**步骤函数调用之前**触发 —— 它和 ``after_step`` 一起
+    构成"一步的开始/结束"这一对，事件流就是靠这对前后夹住一步的
+    （见 :mod:`gamebot.events` 的 ``step_started`` / ``step_finished``）。
+
+    早先它是在步骤跑完之后才调的（名字和实际不符）—— 于是"开始"事件其实
+    带的是"已经结束"的事实，任何想记录"这一步什么时候开始"的消费者都拿不到。
+    """
 
     before_step: Any = None
-    """``(ctx, step) -> None``"""
+    """``(ctx, step) -> None``，**调用步骤之前**。"""
 
     after_step: Any = None
-    """``(ctx, outcome) -> None``"""
+    """``(ctx, outcome) -> None``，步骤返回之后（失败也会调）。"""
 
     on_failure: Any = None
-    """``(ctx, step, outcome) -> None``"""
+    """``(ctx, step, outcome) -> None``，只在失败时。"""
 
 
 class Executor:
@@ -142,6 +150,19 @@ class Executor:
         # 空跑：设在 **session** 上 —— 原子动作层拿得到 session，拿不到 ctx
         ctx.session.dry_run = dry_run
 
+    def add_hooks(self, extra: ExecutorHooks) -> None:
+        """把另一组钩子**串在现有钩子后面**（不是替换）。
+
+        为什么需要它：事件流要在"每一步前后"插一对回调，而业务/测试可能已经
+        传了自己的钩子。两份都得跑 —— 早先的做法是"谁后设置谁覆盖"，
+        于是加了事件流之后，用户自己的钩子就静默失效了。
+        """
+        self.hooks = ExecutorHooks(
+            before_step=_chain(self.hooks.before_step, extra.before_step),
+            after_step=_chain(self.hooks.after_step, extra.after_step),
+            on_failure=_chain(self.hooks.on_failure, extra.on_failure),
+        )
+
     # ------------------------------------------------------------------ #
     def run(self, step: StepFunc) -> StepOutcome:
         """跑一个步骤，返回它的记录。
@@ -155,6 +176,10 @@ class Executor:
         """
         watch = Stopwatch()
         started = watch.elapsed
+        # "开始"必须在**调用步骤之前**报出去：步骤里可能点按钮、等画面，
+        # 等它返回时"开始"这件事早就过去了（事件流要靠前后夹住一步）。
+        if self.hooks.before_step:
+            self.hooks.before_step(self.ctx, step)
         result = step(self.ctx)
         result = result.with_elapsed(watch.elapsed - started)
 
@@ -191,8 +216,6 @@ class Executor:
         self._save_failure_frame(outcome)
         self.journal.record_outcome(outcome, tick=getattr(self.ctx.pages, "tick", 0))
         self.outcomes.append(outcome)
-        if self.hooks.before_step:
-            self.hooks.before_step(self.ctx, step)
         if self.hooks.after_step:
             self.hooks.after_step(self.ctx, outcome)
         if not outcome.ok and self.hooks.on_failure:
@@ -274,6 +297,19 @@ _ACTION_KEYS = (
     "score",
     "rect",
 )
+
+
+def _chain(*callbacks: Any) -> Any:
+    """把几个回调串成一个；全空时返回 ``None``（执行器那边就是"没钩子"）。"""
+    active = [callback for callback in callbacks if callback]
+    if not active:
+        return None
+
+    def _call(*args: Any) -> None:
+        for callback in active:
+            callback(*args)
+
+    return _call
 
 
 def _action_of(result: ActionResult[Any]) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-﻿"""业务层命令行。
+"""业务层命令行。
 
     python -m games list                  列出所有脚本
     python -m games describe <脚本>       打印状态树 + 流程图（不连游戏）

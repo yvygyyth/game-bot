@@ -36,7 +36,9 @@ def my_step(ctx: RunContext) -> ActionResult:
 | `ctx.session` | `Session` | L1 截图层 + 输入通道的**唯一句柄** | 调原子层动作时传它：`actions.click_source_point(ctx.session, p)` |
 | `ctx.name` | `str` | 脚本 key（`"<游戏>/<功能>"`） | 日志 / journal 文件名 |
 | `ctx.paths` | `RunPaths` | 运行期目录（仓库根、截图、journal） | 拼路径；**别改它** |
-| `ctx.blackboard` | `Blackboard` | **跑出来的**键值存储 | 步骤之间传数据（"这次读到的体力"） |
+| `ctx.blackboard` | `Blackboard` | **这一局跑出来的**键值存储 | 步骤之间传数据（"这次读到的体力"） |
+| `ctx.stores` | `StoreManager` | 状态仓库管理器（**跨运行**的记忆） | 一般用 `ctx.store(SPEC)`，别直接碰它 |
+| `ctx.events` | `EventBus \| None` | 事件总线 | 界面/测试订阅用；步骤里基本不用 |
 | `ctx.pages` | `PageTracker` | 状态跟踪器（连续几帧、换过几次） | 排查用；见下面的"跟踪器" |
 | `ctx.executor` | `Executor \| None` | 步骤执行器 | 一般不用碰（引擎自己调） |
 | `ctx.recorder` | `Any \| None` | 识图记录器 | **可能是 `None`**（没开记录时），用之前判空 |
@@ -65,15 +67,17 @@ def my_step(ctx: RunContext) -> ActionResult:
 | `ctx.params` | 全部参数的只读视图（`Mapping`） |
 | `ctx.set_params(values)` | 覆盖参数。**装配期/开跑前**调；跑起来再改没意义 |
 
-**参数 vs 黑板**（最容易混的一对）：
+**参数 vs 黑板 vs 仓库**（最容易混的三样东西，按**寿命**分）：
 
-|  | 参数 | 黑板 |
-|---|---|---|
-| 什么时候有值 | **点开始之前**就定了 | 跑的过程中写出来 |
-| 会变吗 | 不变 | 一直在变 |
-| `reset()` | **不动它** | 清空 |
-| 谁写 | 外面（表单 / `--param` / 测试） | 步骤自己 |
-| 判断方法 | "用户还没点开始时它就有值了吗？" —— 有就是参数 | |
+|  | 参数 | 黑板 | 仓库 |
+|---|---|---|---|
+| 什么时候有值 | **点开始之前**就定了 | 跑的过程中写出来 | 上次跑的时候写进去的 |
+| 会变吗 | 不变 | 一直在变 | 步骤改它才变 |
+| 关掉再开 | 还得重新填 | **没了** | **还在** |
+| `reset()` | **不动它** | 清空 | **不动它** |
+| 谁写 | 外面（表单 / `--param` / 测试） | 步骤自己 | 步骤自己 |
+| 判断方法 | "用户还没点开始时它就有值了吗？" —— 有就是参数 | | |
+| 判断方法 | "下次开还该记得吗？" —— 该就是仓库 | | |
 
 ```python
 def click_with_param(ctx):
@@ -83,6 +87,35 @@ def click_with_param(ctx):
 
 ⚠️ **步骤里不要再写一遍默认值。** `FORM.fill()` 保证每个声明过的字段都有值，
 默认值只有 `FORM` 一处出处 —— 两处迟早不一致。
+
+---
+
+### 状态仓库（**跨运行**的记忆）
+
+| 方法 | 说明 |
+|---|---|
+| `ctx.store(SPEC)` | 按声明取一个仓库。同一个 id 每次拿到的是同一个对象 |
+| `store.get(key, default=None)` | 读。没有就用声明里的默认值，再没有才用 `default` |
+| `store.set(key, value)` | 写。值必须能存进 JSON |
+| `store.bump(key, delta=1, start=0)` | 计数器 +1，返回新值（累计局数最常用） |
+| `store.update({...}, **kw)` | 一次写多个 |
+| `store.patch(key, {...})` | 给一个 dict 字段合并几项 |
+| `store.append(key, item)` | 给一个 list 字段追加一项 |
+| `store.drop(key)` / `store.reset()` | 删一个 key / 整仓回默认值 |
+| `store.as_dict()` | 当前全部内容（副本），界面和排查用 |
+
+```python
+from ..store import RUNS          # 声明在 games/<游戏>/scripts/<功能>/store/runs.py
+from games.mingjiangsha.store import BAG   # 游戏级的仓库，多个脚本共用
+
+def finish_round(ctx):
+    lifetime = ctx.store(RUNS).bump("done")   # 关掉再开接着数
+    bag = ctx.store(BAG)
+    bag.patch("items", {"soul": bag.get("items", {}).get("soul", 0) + 12})
+```
+
+⚠️ **`get` 拿到的是副本。** `items = bag.get("items"); items["x"] = 1` 不会生效 ——
+要写回去（`set` / `patch` / `append`）。这么设计是为了不出现"改成功了但没存下来"。
 
 ---
 

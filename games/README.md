@@ -1,4 +1,4 @@
-﻿# 业务层：怎么写一个脚本
+# 业务层：怎么写一个脚本
 
 `src/gamebot/` 是**框架**，它不认识任何具体游戏。这里才是认识游戏的地方。
 
@@ -9,6 +9,9 @@ games/
 └── <游戏>/                        一级：一个游戏一个目录（容器）
     ├── __init__.py               游戏包：导出脚本清单 + 跨脚本纯函数
     ├── utils/                    跨脚本纯函数（如 go_back）
+    ├── store/                    ★ 游戏级状态仓库（多个脚本共用的记忆）
+    │   ├── __init__.py           只做转发
+    │   └── bag.py                一个仓库一个文件（背包）
     └── scripts/                  二级：脚本层（所有可运行脚本都放这里）
         ├── __init__.py            ★ 按功能名导出各 SPEC
         └── <功能>/                三级：一个脚本功能一个目录
@@ -18,6 +21,9 @@ games/
             ├── graph.py           流程图（同上）
             ├── bindings.py        关联表（状态末梢 ↔ 流程节点的 id 映射）
             ├── steps/             ★ 一个步骤一个文件
+            ├── store/             ★ 功能级状态仓库（只有这个脚本用的记忆）
+            │   ├── __init__.py    只做转发
+            │   └── runs.py        一个仓库一个文件（累计局数）
             ├── utils/             边条件等小工具（不属于步骤、也不属于图数据）
             ├── shortcuts.py       这个功能专用的快捷方法
             ├── templates/         图片资源 + 路径索引
@@ -384,6 +390,54 @@ FORM 声明 → 用户填 → 点开始 → FORM.fill() → ctx.params → 步�
 * 表单里**没有**的参数（测试注入的假后端、只在代码里传的配置）照样走
   `ctx.params`，命令行 `--param` 也允许传 —— 那些不受表单约束。
 
+## 状态仓库（跨运行的记忆）
+
+脚本经常会遇到"下次开还该记得"的东西：背包、体力、累计刷了多少局。
+它们不能塞黑板（一开跑就清空），也不该写死在代码里。
+
+**放 `store/` 目录，一个仓库一个文件**（和 `steps/` 同一套组织方式）：
+
+```python
+# games/mingjiangsha/scripts/jingji/store/runs.py
+from gamebot.state.store import define_store
+
+RUNS = define_store(
+    "jingji.runs",                                  # id：全局唯一 + 落盘文件名
+    title="累计局数",
+    defaults={"done": 0, "last_finished_at": ""},    # 第一次开的样子
+    help="跨运行累计；关掉界面再开也不会归零",
+)
+```
+
+```python
+# games/mingjiangsha/scripts/jingji/store/__init__.py —— 只做转发
+from .runs import RUNS
+
+__all__ = ["RUNS"]
+```
+
+步骤里：
+
+```python
+from ..store import RUNS
+
+def finish_round(ctx):
+    lifetime = ctx.store(RUNS).bump("done")
+```
+
+三条规矩：
+
+1. **放哪一级**：第二个脚本会不会原样用它？会 → `games/<游戏>/store/`；
+   不会 → `games/<游戏>/scripts/<功能>/store/`（默认放功能级）。
+2. **id 带功能前缀**：功能级写 `"jingji.runs"`（同一游戏的两个脚本都会有 `runs`，
+   不隔开会互相覆盖），游戏级写 `"bag"`。落盘在
+   `data/stores/<游戏>/<id>.json`。
+3. **文件名 = id 的最后一段**：`runs.py` ↔ `"jingji.runs"`，改名两边一起改。
+
+仓库**不做 schema 校验**（key 随便写，拼错不报错）—— 它只负责记住。
+要校验的东西放运行参数（`form.py`）。完整说明见
+[docs/store.md](../docs/store.md)。
+
 ## 参考实现
 
 [`mingjiangsha/jingji`](mingjiangsha/scripts/jingji/README.md)（名将杀 · 竞技场）是一份
@@ -498,7 +552,8 @@ games/mingjiangsha/scripts/jingji/templates/
 ## 加一个游戏 / 加一个功能
 
 **加一个功能**：在 `games/<游戏>/scripts/` 下建一个新目录，复制 `mingjiangsha/scripts/jingji/` 的骨架
-（`__init__.py` + `pages.py` + `graph.py` + `bindings.py` + `steps/` + `templates/` + 按需 `utils/` / `form.py`）。
+（`__init__.py` + `pages.py` + `graph.py` + `bindings.py` + `steps/` + `templates/` + 按需
+`utils/` / `form.py` / `store/`）。
 
 **加一个游戏**：按上面的布局建 `games/<游戏>/`，改三样 ——
 `SLUG` / `WINDOW_TITLE` / `SOURCE_SIZE`，然后是页面、模板、流程。

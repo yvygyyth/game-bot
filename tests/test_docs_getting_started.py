@@ -136,10 +136,12 @@ class TestDocumentedGamesCommandsAreValid:
     def test_the_gamebot_subcommands_appear_in_real_commands(self):
         """文档里给出的 ``gamebot`` 命令必须真的是**命令行**，不是正文提及。
 
-        这里**不要求把每个子命令都列出来** —— 文档有意只给日常用得上的三条
-        （``info`` / ``windows`` / ``capture``），其余（``check`` / ``run`` /
-        ``ui`` / ``grab``）在 `gamebot --help` 里看。要求"全列"会逼着文档
-        堆命令，那是反效果。
+        这里**不要求把每个子命令都列出来** —— 文档有意只给日常用得上的这几条
+        （``ui`` / ``windows`` / ``capture`` / ``grab``），要全量就在
+        `gamebot --help` 里看。要求"全列"会逼着文档堆命令，那是反效果。
+
+        ``info`` / ``check`` / ``run`` **不在这个元组里** —— 它们已经迁到
+        ``python -m games``，框架这边只剩一个"请改用 games"的报错。
         """
         commands = " ".join(
             line.strip()
@@ -147,7 +149,7 @@ class TestDocumentedGamesCommandsAreValid:
             if "gamebot " in line and not line.strip().startswith(("#", "|"))
         )
         assert commands, "文档里一条 gamebot 命令都没有"
-        for sub in ("ui", "info", "windows", "capture"):
+        for sub in ("ui", "windows", "capture", "grab"):
             assert f"gamebot {sub}" in commands, f"文档里没有一条 `gamebot {sub}` 命令"
 
     def test_no_documented_subcommand_is_invented(self):
@@ -192,16 +194,31 @@ class TestDocumentedFlagsExist:
         [
             (["ui", "--snapshot", "x.png"], "snapshot"),
             (["ui", "--script", "k"], "script"),
-            (["ui", "-c", "c.yaml"], "config"),
+            (["windows", "-k", "名将杀"], "keyword"),
             (["capture", "-o", "a.png"], "out"),
+            (["capture", "--window", "w"], "window"),
             (["grab", "--region", "1,2,3,4"], "region"),
-            (["info", "--json"], "json"),
-            (["run", "--dry-run"], "dry_run"),
-            (["run", "--window", "w"], "window"),
-            (["run", "--no-journal"], "no_journal"),
+            # ``grab`` 的 ``-o`` 不单独测：``--region`` 是必选参数，
+            # 没有它的 argv 会被 argparse 直接拒绝（测的是"缺必选参数"，
+            # 不是"``-o`` 存不存在"）。``-o`` 由上面 ``capture`` 那条覆盖。
         ],
     )
     def test_gamebot_flags(self, argv, key):
+        """``gamebot`` 现在只剩**框架调试辅助**（窗口 / 抓图 / 界面）。
+
+        ## 为什么这个列表短了
+
+        早先这里还断言 ``info --json``、``run --dry-run``、``run --window``、
+        ``run --no-journal``、``ui -c`` —— 它们随"业务入口独立成
+        ``python -m games``"一起搬走了（见 ``gamebot/__main__.py`` 的 ``cmd_moved``）。
+        那几条断言从此测的是**已经不存在的东西**，而且一直红着。
+
+        现在分工明确，别再混回来：
+
+        * **框架 CLI**（本测试）：只列窗口、抓图、开界面 —— 这些是"调框架"；
+        * **业务 CLI**（``test_games_flags``）：``run`` / ``check`` / ``describe``
+          的参数，包括 ``--dry-run`` / ``--max-ticks`` / ``--param``。
+        """
         from gamebot.__main__ import build_parser
 
         args = build_parser().parse_args(argv)

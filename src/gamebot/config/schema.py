@@ -1,4 +1,4 @@
-﻿"""运行期小对象 —— 路径与后端种类。
+"""运行期小对象 —— 路径与后端种类。
 
 业务脚本不再经过 ``AppConfig``：装配从 :class:`~gamebot.feature.FeatureSpec`
 直接进 :func:`~gamebot.bootstrap.bootstrap_from_spec`。

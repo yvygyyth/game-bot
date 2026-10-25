@@ -28,8 +28,12 @@
 它是**一局真正结束**的那一刻 —— 打完这一局，循环次数才该加一。
 放在别处（比如"点了开始匹配"就加）会让"中途失败、重定位、再来一次"重复计数。
 
-计数器写在**黑板**（``ctx.blackboard``）里，不是运行参数：
-黑板是"跑出来的状态"，参数是"进去之前定好的输入"。循环次数是跑出来的。
+计数写进**两个地方**，寿命不同：
+
+* **黑板**（``ctx.blackboard``）—— 这次刷了几局，和表单的 ``jingji.rounds`` 比。
+  黑板是"跑出来的状态"，参数是"进去之前定好的输入"；
+* **仓库**（``ctx.store(RUNS)``）—— 历史上总共刷了几局，**关掉界面再开接着数**。
+  它落在 ``data/stores/mingjiangsha/jingji.runs.json``，见 :mod:`..store.runs`。
 
 ## 「确认」为什么复用状态锚点
 
@@ -40,6 +44,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
@@ -48,6 +53,7 @@ from gamebot.execution.builtins import click_image, wait_for
 from gamebot.types import ActionResult
 
 from ..form import ROUNDS_PARAM
+from ..store import RUNS
 from ..templates import T_FIGHT_DONE, T_FIGHT_NEXT, T_FIGHT_SPACE
 
 if TYPE_CHECKING:
@@ -94,10 +100,22 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     # ---- 4. 记一局 ----
     # 放在最后：前三步任何一个失败都会提前返回，那一局就不算完成 ——
     # 于是"计数"和"真的打完一局"永远一致（中途失败重定位不会重复计数）。
+    #
+    # 记**两处**，寿命不同（见 gamebot.state.store 的模块 docstring）：
+    #   * 黑板 ``fight.rounds`` —— 这次刷了几局，跟表单的 jingji.rounds 比；
+    #   * 仓库 ``jingji.runs``  —— 历史上总共刷了几局，关掉界面再开接着数。
     rounds = int(ctx.blackboard.get(ROUNDS_KEY, 0)) + 1
     ctx.blackboard.set(ROUNDS_KEY, rounds)
+    runs = ctx.store(RUNS)
+    lifetime = runs.bump("done")
+    runs.set("last_finished_at", time.strftime("%Y-%m-%d %H:%M:%S"))
     target = int(ctx.param(ROUNDS_PARAM, 0) or 0)
-    return confirmed.with_meta(rounds=rounds, target=target, done=rounds >= target)
+    return confirmed.with_meta(
+        rounds=rounds,
+        target=target,
+        done=rounds >= target,
+        lifetime=lifetime,
+    )
 
 
 def noop(ctx: RunContext) -> ActionResult[Any]:

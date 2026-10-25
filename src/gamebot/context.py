@@ -26,8 +26,9 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from .config.schema import RunPaths
+from .state.blackboard import Blackboard
 from .state.page import PageMatch, PageTree
-from .state.store import Blackboard
+from .state.store import Store, StoreManager, StoreSpec
 from .state.tracker import PageTracker
 from .types import ActionResult, Region
 from .utils.logging import get_logger
@@ -35,6 +36,7 @@ from .utils.logging import get_logger
 if TYPE_CHECKING:
     from .atomic.frame import Frame
     from .atomic.session import Session
+    from .events import EventBus
     from .execution.executor import Executor
 
 log = get_logger("context")
@@ -67,6 +69,8 @@ class RunContext:
         executor: Executor | None = None,
         pages: PageTracker | None = None,
         blackboard: Blackboard | None = None,
+        stores: StoreManager | None = None,
+        events: EventBus | None = None,
         clock: Any = None,
         params: Mapping[str, Any] | None = None,
     ) -> None:
@@ -77,6 +81,14 @@ class RunContext:
         self.executor = executor
         self.pages = pages or PageTracker(tree)
         self.blackboard = blackboard or Blackboard()
+        #: 状态仓库管理器（跨运行的记忆）。默认按仓库根下的 ``data/stores`` 落盘 ——
+        #: 装配层可以换一个（比如测试给临时目录、界面用长期持有的那个）。
+        self.stores = stores or StoreManager(
+            Path(paths.root) / "data" / "stores",
+            game=name.split("/", 1)[0],
+        )
+        self.events: EventBus | None = events
+        """事件总线。装配期由 ``bootstrap`` 挂上；自己 new 上下文时是 ``None``。"""
         self.recorder: Any = None
         """识别记录器（``vision/recorder.py``）。装配期由 ``bootstrap`` 挂上。
 
@@ -122,6 +134,28 @@ class RunContext:
     def set_params(self, values: Mapping[str, Any] | None) -> None:
         """覆盖运行参数。**装配期/开跑前**调；跑的过程中改它没有意义。"""
         self._params = dict(values or {})
+
+    # ------------------------------------------------------------------ #
+    # 状态仓库（跨运行的记忆）
+    # ------------------------------------------------------------------ #
+    def store(self, spec: StoreSpec) -> Store:
+        """取一个**状态仓库**（跨运行、会落盘）。
+
+        业务层这样写::
+
+            from ..store import RUNS
+
+            done = ctx.store(RUNS).bump("done")   # 累计局数 +1，下次开还在
+
+        三种"存东西的地方"按**寿命**分（见 :mod:`gamebot.state.store`）：
+
+        * ``ctx.param(...)`` —— 这次运行的**输入**，只读；
+        * ``ctx.blackboard`` —— 这次运行**跑出来的**，开跑时清空；
+        * ``ctx.store(...)`` —— **下次开还该记得的**，落盘。
+
+        同一个仓库在同一次运行里多次取到的是**同一个对象**（按 id 复用）。
+        """
+        return self.stores.store(spec)
 
     # ------------------------------------------------------------------ #
     # 时间
@@ -287,6 +321,9 @@ class RunContext:
         具体清什么：跟踪器的当前状态与变更历史、黑板（步骤之间传的数据）、
         中止标志、缓存的帧、抓帧计数、**执行器攒下的步骤结果**。
 
+        **不碰状态仓库**（``ctx.store``）—— 它是跨运行的记忆，本来就要活过
+        这一次运行。清它等于"每跑一遍背包就归零"，那正是这个仓库要解决的问题。
+
         由 ``FlowEngine.run()`` 在开跑时调一次 —— 同一个引擎跑第二遍时，
         黑板不该带着上一遍的数据（那会让"第一次跑"和"第二次跑"行为不同，
         而且极难查）。
@@ -303,6 +340,9 @@ class RunContext:
             self.executor.outcomes.clear()
 
     def close(self) -> None:
+        # 记忆先落盘再关 session：session 关了之后抓帧/输入都会报错，
+        # 但仓库落盘不受影响 —— 顺序只是为了让"最后一步"尽量是它。
+        self.stores.flush()
         if self.executor is not None:
             self.executor.close()
         self.session.close()
