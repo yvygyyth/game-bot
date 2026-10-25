@@ -95,25 +95,32 @@ def cmd_check(args: argparse.Namespace) -> int:
     )
     print(f"✓ 窗口标题: {spec.feature.window_title!r}")
 
-    templates = project_root() / spec.feature.templates_dir
-    exists = "存在" if templates.is_dir() else "目录不存在"
-    label = (
-        templates.relative_to(_ROOT) if templates.is_relative_to(_ROOT) else templates
-    )
-    print(f"  模板根: {label}（{exists}）")
+    root = project_root()
+    templates = root / spec.feature.templates_dir
+    game_templates = root / spec.feature.game_templates_dir
+
+    def _label(path) -> str:
+        return str(path.relative_to(_ROOT)) if path.is_relative_to(_ROOT) else str(path)
+
+    print(f"  模板根: {_label(templates)}（{'存在' if templates.is_dir() else '目录不存在'}）")
     if not templates.is_dir():
         print("✗ 模板目录不存在")
         return 1
+    if game_templates.is_dir():
+        print(f"  游戏级: {_label(game_templates)}（兜底，跨脚本共用）")
 
     # ---- 逐张对账 ----
-    # 声明来源两处：状态树的 queries（锚点）+ templates/__init__.py 的 T_* 常量
-    # （步骤里用的图都从那儿来）。步骤函数体里的字面量查不到 —— 这正是
-    # "图路径一律走 T_* 常量"那条约定换来的东西：这里能真的查全。
+    # 声明来源三处：
+    #   1. 状态树的 queries（锚点）；
+    #   2. 功能级 templates/__init__.py 的 T_* 常量（步骤里用的图都从这儿来）；
+    #   3. 游戏级 templates/__init__.py 的 T_* 常量（公共按钮/弹窗）。
+    # 步骤函数体里的字面量查不到 —— 这正是"图路径一律走 T_* 常量"换来的好处。
     declared = declared_from_tree(scenario.tree)
     declared.update(
         declared_from_module(f"games.{spec.game}.scripts.{spec.slug}.templates")
     )
-    missing, unused = audit(templates, declared)
+    declared.update(declared_from_module(f"games.{spec.game}.templates"))
+    missing, unused = audit((templates, game_templates), declared)
 
     if missing:
         print(f"✗ 缺 {len(missing)} 张模板（跑到那一步会在装配/识别时炸）:")
@@ -121,16 +128,26 @@ def cmd_check(args: argparse.Namespace) -> int:
             print(f"    {path:<40} <- {declared[path]}")
         return 1
 
-    print(f"✓ 模板齐全：声明 {len(declared)} 张，磁盘上都有")
-    if unused:
-        print(
-            f"· 另有 {len(unused)} 张图没被任何声明引用"
-            f"（步骤里的字面量，或改版后的旧图）:"
-        )
-        for path in unused[:8]:
+    print(f"✓ 模板齐全：声明 {len(declared)} 张，两个模板根里都有")
+
+    # 未声明的图分两处报：功能级的多半是改版后的旧图（该删）；
+    # 游戏级的多半是**按钮家族图**（一个文件夹一种按钮，按约定使用，留着是对的）。
+    _, unused = audit((templates, game_templates), declared)
+    _, feature_unused = audit((templates,), declared)
+    feature_set = set(feature_unused)
+    game_unused = [path for path in unused if path not in feature_set]
+
+    if feature_unused:
+        print(f"· 功能级有 {len(feature_unused)} 张图没被任何声明引用（旧图？或步骤里的字面量）:")
+        for path in feature_unused[:8]:
             print(f"    {path}")
-        if len(unused) > 8:
-            print(f"    …… 还有 {len(unused) - 8} 张")
+        if len(feature_unused) > 8:
+            print(f"    …… 还有 {len(feature_unused) - 8} 张")
+    if game_unused:
+        print(
+            f"· 游戏级另有 {len(game_unused)} 张没被 T_* 声明"
+            f"（按钮家族按文件夹约定使用，不算错）"
+        )
     return 0
 
 

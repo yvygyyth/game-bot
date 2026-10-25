@@ -52,13 +52,13 @@ _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 class OpenCvMatcher:
     """基于 ``cv2.matchTemplate`` 的模板匹配器（实现 ``Matcher`` 协议）。
 
-    :param templates_dir: 模板根目录。相对模板名都从这里解析。
-    :param grayscale: 实例级默认。为 False 时强制彩色匹配（同形状不同颜色时用）。
-    :param use_pyramid: 实例级默认，是否多尺度。单次调用可以覆盖。
     :param templates_dir: 主模板根。相对模板名都从这里解析。
     :param extra_dirs: **附加模板根，优先于主根搜索**。顺序即优先级，靠前的先搜。
         用途：每个脚本功能把自己的图片放在自己目录里
         （``games/<游戏>/scripts/<功能>/templates/``），并且可以覆盖游戏级公共模板。
+    :param fallback_dirs: **兜底模板根，在主根之后搜索**。优先级最低，只在前面的根
+        都找不到时才用。用途：游戏级公共模板（``games/<游戏>/templates/``）——
+        业务层写的名字仍然相对**功能级**根，公共图则自然回落到游戏级。
     :param scales: 金字塔缩放系数。把 1.0 放最前面，最常见的情况先算。
     :param preload: 启动时预加载整个模板目录。会明显缩短第一次查询的延迟。
     """
@@ -68,16 +68,18 @@ class OpenCvMatcher:
         templates_dir: Any,
         *,
         extra_dirs: tuple[Any, ...] = (),
+        fallback_dirs: tuple[Any, ...] = (),
         grayscale: bool = True,
         use_pyramid: bool = True,
         scales: tuple[float, ...] = (1.0, 0.9, 1.1, 0.8, 1.25),
         preload: bool = True,
     ) -> None:
         self.templates_dir = Path(templates_dir)
-        #: 搜索顺序：附加根（更具体）在前，主根垫底
+        #: 搜索顺序：附加根（更具体）> 主根 > 兜底根（游戏级公共）
         self.roots: tuple[Path, ...] = (
             *(Path(d) for d in extra_dirs),
             self.templates_dir,
+            *(Path(d) for d in fallback_dirs),
         )
         self.grayscale = grayscale
         self.use_pyramid = use_pyramid
@@ -128,8 +130,8 @@ class OpenCvMatcher:
     def _resolve_path(self, template: str) -> Path:
         """把模板名解析成实际文件路径。
 
-        按 ``roots`` 顺序找第一个存在的；都不存在时返回主根下的路径 ——
-        报错信息里给个合理的猜测，比返回 None 好排查。
+        按 ``roots`` 顺序找第一个存在的；都不存在时返回**主根**下的路径 ——
+        报错信息里要指向"业务层写模板名的那一层"，给个合理的猜测比返回 None 好排查。
         """
         path = Path(template)
         if path.is_absolute():
@@ -138,7 +140,7 @@ class OpenCvMatcher:
             candidate = root / path
             if candidate.is_file():
                 return candidate
-        return self.roots[-1] / path
+        return self.templates_dir / path
 
     def _cache_key(self, template: str) -> str:
         # 文件系统不区分大小写，缓存键也统一，避免同一个文件被缓存两次

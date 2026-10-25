@@ -61,6 +61,17 @@ class FeatureSpec:
         game, feature = self.name.split("/", 1)
         return f"games/{game}/scripts/{feature}/templates"
 
+    @property
+    def game_templates_dir(self) -> str:
+        """游戏级公共模板根，**相对仓库根**。约定 ``games/<游戏>/templates``。
+
+        放"多个脚本都要用"的图：按钮花纹、通用弹窗、公共图标。
+        查找顺序是**功能级优先、游戏级兜底**（功能级可以覆盖同名图）——
+        见 :func:`gamebot.bootstrap.build_matcher` 的 ``fallback_dirs``。
+        """
+        game = self.name.split("/", 1)[0]
+        return f"games/{game}/templates"
+
     def __post_init__(self) -> None:
         """声明自身的检查。**构造这一行就报**，而不是等框架捞不着东西才猜。"""
         if not self.name or "/" not in self.name:

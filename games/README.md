@@ -452,12 +452,29 @@ def finish_round(ctx):
 每个功能有自己的模板根，由框架按 `name` 推导：
 
 ```text
-games/<游戏>/scripts/<功能>/templates
+games/<游戏>/scripts/<功能>/templates      ← 先找（功能专属）
+games/<游戏>/templates/                    ← 再找（跨脚本共用，兜底）
 ```
 
-功能代码里写 `"battle/skill.png"` → 落到本功能目录。
-跨脚本共用的图（若以后有）放到游戏级 `utils` / 公共目录时再约定；
-本轮业务路径只认功能级模板根。
+功能代码里写 `"battle/skill.png"` → 先找功能目录，没有就落到游戏级。
+**功能级可以放同名图覆盖游戏级**（查找顺序见 `bootstrap.build_matcher` 的
+`fallback_dirs`）。两处都用 `templates/__init__.py` 的 `T_*` 常量登记路径 ——
+`games check` 两个根都会查。
+
+游戏级的典型内容：**按钮家族、通用弹窗、公共图标**。名将杀已经整理成四类按钮：
+
+```python
+from games.mingjiangsha.templates import BUTTON_SHADOW_CANCEL, BUTTON_SHADOW_CONFIRM
+from games.mingjiangsha.utils import click_button
+
+click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 金色确认：创建队伍/添加伙伴/确定 都算
+click_button(ctx, BUTTON_SHADOW_CANCEL)    # 取消
+```
+
+**一个文件夹 = 一种按钮**：同一家族里的各种文字版本都放进去，调用时只说"点哪种
+按钮"。加一个文字版本 = 丢一张图进文件夹，**不用改代码**；加一种新按钮 = 新建
+文件夹。阈值、裁图约定和真机实测分数见
+[`mingjiangsha/templates/README.md`](mingjiangsha/templates/README.md)。
 
 ### 模板怎么分目录（这块来回改过几次，值得单独说）
 

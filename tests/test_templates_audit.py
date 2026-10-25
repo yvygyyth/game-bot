@@ -98,6 +98,32 @@ class TestAudit:
         missing, unused = audit(tmp_path, {})
         assert (missing, unused) == ([], [])
 
+    def test_a_declared_file_may_live_in_any_root(self, tmp_path: Path) -> None:
+        """功能级没有、游戏级有 —— 算存在（和运行期的兜底根一致）。"""
+        feature, game = tmp_path / "feature", tmp_path / "game"
+        (feature / "home").mkdir(parents=True)
+        (game / "buttons").mkdir(parents=True)
+        (game / "buttons" / "edge.png").write_bytes(b"x")
+
+        missing, unused = audit(
+            (feature, game),
+            {"buttons/edge.png": "game.templates.T_BUTTON_EDGE"},
+        )
+
+        assert missing == []
+        assert unused == []
+
+    def test_unused_files_are_the_union_of_both_roots(self, tmp_path: Path) -> None:
+        feature, game = tmp_path / "feature", tmp_path / "game"
+        (feature / "home").mkdir(parents=True)
+        (game / "buttons").mkdir(parents=True)
+        (feature / "home" / "a.png").write_bytes(b"x")
+        (game / "buttons" / "edge.png").write_bytes(b"x")
+
+        _, unused = audit((feature, game), {"home/a.png": "feature.templates.T_A"})
+
+        assert unused == ["buttons/edge.png"]
+
 
 class TestJingjiIsClean:
     def test_the_real_script_has_no_missing_templates(self) -> None:
@@ -110,6 +136,23 @@ class TestJingjiIsClean:
         declared.update(
             declared_from_module("games.mingjiangsha.scripts.jingji.templates")
         )
-        templates = project_root() / spec.feature.templates_dir
-        missing, _ = audit(templates, declared)
+        declared.update(declared_from_module("games.mingjiangsha.templates"))
+        root = project_root()
+        missing, _ = audit(
+            (
+                root / spec.feature.templates_dir,
+                root / spec.feature.game_templates_dir,
+            ),
+            declared,
+        )
         assert missing == [], f"声明的模板在磁盘上找不到: {missing}"
+
+    def test_the_button_families_are_where_the_util_expects(self) -> None:
+        """`click_button` 按"家族文件夹"找图 —— 目录必须真的在游戏级模板根下。"""
+        from gamebot.bootstrap import project_root
+        from games.mingjiangsha.templates import BUTTON_FOLDERS
+
+        game_root = project_root() / "games" / "mingjiangsha" / "templates"
+        for folder in BUTTON_FOLDERS:
+            assert (game_root / folder).is_dir(), f"家族目录不存在: {folder}"
+            assert list((game_root / folder).glob("*.png")), f"家族 {folder} 里没有图"

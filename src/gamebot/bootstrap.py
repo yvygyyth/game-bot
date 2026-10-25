@@ -64,26 +64,33 @@ def project_root() -> Path:
 def build_matcher(
     templates_dir: Path,
     *,
+    fallback_dirs: tuple[Path, ...] = (),
     recorder: Any = None,
     grayscale: bool = True,
     use_pyramid: bool = True,
 ) -> Matcher:
     """造模板匹配实现（OpenCV ``matchTemplate``）。
 
-    ``preload=True``：启动时把模板目录整个读进内存。路径写错时启动就炸。
+    ``preload=True``：启动时把**所有模板根**整个读进内存。路径写错时启动就炸。
+
+    :param templates_dir: 主根（功能级）。业务层写的模板名相对它。
+    :param fallback_dirs: 兜底根（游戏级公共模板）。主根找不到时才回落 ——
+        这样"功能级写自己的图、公共图放游戏级"能共存，且功能级可以覆盖同名图。
     """
     from .vision.opencv_matcher import OpenCvMatcher
 
     matcher = OpenCvMatcher(
         templates_dir=templates_dir,
+        fallback_dirs=fallback_dirs,
         grayscale=grayscale,
         use_pyramid=use_pyramid,
         preload=True,
     )
     log.info(
-        "模板匹配就绪: %d 个模板, 根=%s, 灰度=%s, 多尺度=%s",
+        "模板匹配就绪: %d 个模板, 根=%s, 兜底=%s, 灰度=%s, 多尺度=%s",
         len(matcher.cached_templates),
         templates_dir,
+        ", ".join(str(d) for d in fallback_dirs) or "（无）",
         matcher.grayscale,
         matcher.use_pyramid,
     )
@@ -315,7 +322,13 @@ def bootstrap_from_spec(
 
     if recorder is None and record:
         recorder = build_recorder(paths)
-    matcher = build_matcher(templates, recorder=recorder)
+    # 游戏级公共模板（跨脚本共用）：功能级找不到时回落。
+    game_templates = paths.resolve(feature.game_templates_dir)
+    matcher = build_matcher(
+        templates,
+        fallback_dirs=(game_templates,) if game_templates.is_dir() else (),
+        recorder=recorder,
+    )
     reader = build_reader(recorder=recorder, engine=ocr)
 
     if session is None:

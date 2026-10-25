@@ -15,12 +15,17 @@
 ## 声明从哪来
 
 1. **状态树的 queries**（`ImageQuery.template`）—— 状态锚点；
-2. **`templates/__init__.py` 里的 `T_*` 常量** —— 这是路径的权威出处，
-   步骤里写的图基本都从这儿来。
+2. **`templates/__init__.py` 里的 `T_*` 常量** —— 功能级 + 游戏级两份
+   （游戏级在 `games/<游戏>/templates/`，跨脚本共用）。
 
 步骤函数体里的字面量**查不到**（那是运行期才走到的字符串），所以第二种来源
 才那么重要：**图路径一律走 `T_*` 常量，别在调用点裸写字符串**（games/README.md
 里那条约定，这里就是它换来的好处）。
+
+## 两个模板根
+
+模板可以放在两处：**功能级优先、游戏级兜底**（和运行期 `build_matcher` 一致）。
+所以"存在性"要**两个根都看**：功能级没有、游戏级有，算存在。
 
 ## 跳过什么
 
@@ -31,7 +36,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -103,16 +108,27 @@ def _is_skipped(template: str) -> bool:
 
 
 def audit(
-    templates_dir: Path,
+    templates_dirs: Path | Sequence[Path],
     declared: Mapping[str, str],
 ) -> tuple[list[str], list[str]]:
     """对一遍。
 
+    :param templates_dirs: 一个或几个模板根（功能级 + 游戏级）。声明**任一根**里有
+        就算存在（和运行期的查找顺序一致）。
     :return: ``(缺的, 没被声明的)``，两个都排好序。
         第一个是**硬错**（跑起来必炸），第二个只是提示。
     """
+    roots = (
+        (templates_dirs,)
+        if isinstance(templates_dirs, (str, Path))
+        else tuple(Path(root) for root in templates_dirs)
+    )
     checked = {path: source for path, source in declared.items() if not _is_skipped(path)}
-    missing = sorted(path for path in checked if not (templates_dir / path).is_file())
-    on_disk = _iter_templates(templates_dir)
+    missing = sorted(
+        path for path in checked if not any((root / path).is_file() for root in roots)
+    )
+    on_disk: set[str] = set()
+    for root in roots:
+        on_disk |= _iter_templates(root)
     unused = sorted(on_disk - set(declared))
     return missing, unused
