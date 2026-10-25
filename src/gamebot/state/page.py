@@ -619,54 +619,9 @@ class PageTree:
             )
 
     def add_many(self, pages: Iterable[tuple[PageNode, PageId | None]]) -> None:
-        """批量加。**按父先子后的顺序**给（loader 解析嵌套结构时天然满足）。"""
+        """批量加。**按父先子后的顺序**给（遍历嵌套结构时天然满足）。"""
         for page, parent in pages:
             self.add(page, parent)
-
-    @classmethod
-    def from_nested(cls, data: Mapping[str, Any]) -> PageTree:
-        """从嵌套字典建树（YAML 配置用）。
-
-        期望结构（``id`` 由嵌套位置自动推导成路径形式）::
-
-            states:
-              home:                              # id = "home"
-                name: 首页
-                kind: group                      # 父节点是纯分类，不写 queries
-                children:
-                  lobby:                         # id = "home/lobby"
-                    queries:
-                      - {type: ImageQuery, template: home/logo.png}
-                  jingji:
-                    queries: [...]
-                    children:
-                      battle:                    # id = "home/jingji/battle"
-                        roi: [600, 400, 680, 500]   # 相对父节点
-
-              # 全局叠加层：不属于任何父节点
-              network_error:
-                kind: overlay
-                priority: 100
-                queries:
-                  - {type: ImageQuery, template: common/network_error.png}
-
-        ``queries`` 里的字典由 ``query_from_dict`` 还原成 Query 对象
-        （在 ``gamebot.atomic.query`` 里）。
-
-        ## 为什么这个方法留在状态层是桩
-
-        配置驱动的解析入口是 ``gamebot.flow.loader.parse_pages``。
-        树是由**上面那层**（流程层的 loader）按配置搭出来的，状态层只提供
-        :meth:`add` / :meth:`add_many` 这些原语 —— 这样状态层不需要知道
-        "配置长什么样"，也就不会为了解析配置去 import 流程层
-        （``tests/test_structure.py`` 的 AST 检查盯着这条依赖方向）。
-
-        所以这里**显式地不实现**，而不是留个 ``pass`` 让人以为它坏了。
-        """
-        raise NotImplementedError(
-            "配置驱动的状态树解析在 gamebot.flow.loader.parse_pages；"
-            "状态层只提供 add/add_many 这些原语（见类 docstring）"
-        )
 
     # ------------------------------------------------------------------ #
     # 查询结构

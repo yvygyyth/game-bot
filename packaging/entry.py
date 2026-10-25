@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 #: 项目根的标志：这几个同时在，基本可以确定
-_MARKERS = ("pyproject.toml", "config", "games")
+_MARKERS = ("pyproject.toml", "games")
 
 
 def _find_project_root(start: Path) -> Path | None:

@@ -32,8 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .exceptions import ConfigError
-from .flow.bindings import NodeBindings
 from .flow.graph import Graph, Node
+from .flow.node_bindings import NodeBindings
 from .flow.scenario import EngineOptions, Scenario
 from .state.page import PageGroup, PageNode, PageTree
 
@@ -82,7 +82,7 @@ class ScenarioSpec:
     """**关联表** —— 状态末梢 ↔ 流程节点的 id 双向映射。
 
     独立字段，不藏在 `Node` 里：它表达"状态树和流程图怎么对上"，
-    既不属于树也不属于图。见 :mod:gamebot.flow.bindings。
+    既不属于树也不属于图。见 :mod:gamebot.flow.node_bindings。
     """
     nodes: tuple[Node, ...] = ()
     options: EngineOptions = field(default_factory=EngineOptions)

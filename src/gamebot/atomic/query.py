@@ -2,8 +2,8 @@
 
 为什么要从 Frame 上再抽一层：
 
-* **可序列化**：Query 是纯数据，能写进 YAML / JSON，配置驱动流程（见
-  ``config/flows/*.yaml``），改策略不用改代码。
+* **可序列化**：Query 是纯数据，能写进 JSON / YAML（日志、测试、将来的配置驱动），
+  改策略不用改代码。
 * **可组合**：``AndQuery`` / ``OrQuery`` / ``NotQuery`` 能表达"同时看到 A 和 B"
   这种真实需求，不必在业务代码里写一串 if。
 * **可复用**：同一个 Query 对象能在状态识别、流程守卫、步骤前置条件里反复用。
@@ -348,18 +348,18 @@ _REGISTRY: dict[str, type] = {
 
 
 def query_registry() -> dict[str, type]:
-    """可用的查询类型名 -> 类。配置反序列化（``flow.loader``）靠它。
+    """可用的查询类型名 -> 类。**从 dict 还原查询**（:func:`query_from_dict`）靠它。
 
     新增一种 Query 时，除了写类，还要在 ``_REGISTRY`` 里登记一行 ——
-    否则 YAML 里就写不出来，只能写 Python。
+    否则从数据还原的入口认不出它，只能写 Python 代码。
     """
     return dict(_REGISTRY)
 
 
 def query_from_dict(data: Any) -> Query:
-    """把配置里的字典还原成 Query 对象。
+    """把数据里的字典还原成 Query 对象（日志回放、测试、将来若做配置驱动）。
 
-    支持的形式（YAML 里两种写法都行）::
+    支持的形式（字典和简写都行）::
 
         {type: ImageQuery, template: a.png, confidence: 0.9}
         ImageQuery(template=a.png)
@@ -368,9 +368,9 @@ def query_from_dict(data: Any) -> Query:
         **拼错一个键就报错，不静默忽略** —— 静默忽略的表现是
         "这个条件永远成立或永远不成立"，属于最难查的一类配置 bug。
 
-    放在**原子层**（而不是 ``flow.loader``）是有原因的：查询注册表本来就在
-    这里，而且 `PageTree` 的使用者（业务层手写状态树时）也要用它 ——
-    状态层不许 import 流程层（``tests/test_structure.py`` 用 AST 盯着）。
+    放在**原子层**是有原因的：查询注册表本来就在这里，而且 `PageTree` 的使用者
+    （业务层手写状态树时）也可能要从数据构造查询 —— 状态层不许 import 流程层
+    （``tests/test_structure.py`` 用 AST 盯着）。
     """
     if isinstance(data, str):
         # 简写：直接给模板名，等价于 ImageQuery(template=...)。

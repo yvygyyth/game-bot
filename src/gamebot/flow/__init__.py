@@ -2,7 +2,7 @@
 
 四个组成，各管一件事：
 
-* ``scenario.py`` —— **蓝图**：状态树 + 流程图 + 运行参数，一起校验一起加载。
+* ``scenario.py`` —— **蓝图**：状态树 + 流程图 + 运行参数，一起校验。
   :meth:`~gamebot.flow.scenario.Scenario.validate` 会把"有状态但没有任何节点
   认领"直接判成 ``ConfigError``（重定位到它就无处可去）；
 * ``graph.py``    —— **流程图**：``Node``（做什么）/ ``Edge``（何时换）/
@@ -22,7 +22,7 @@
 * **两者互不认识**：流程层不许出现 ``if ctx.page.id == "..."`` 这种判断，
   状态层不许知道"节点 / 边 / 去哪"。
 
-唯一把它们放在一起的代码是 :mod:`gamebot.flow.binding`，而它只是启动期
+唯一把它们放在一起的代码是 :mod:`gamebot.flow.state_binding`，而它只是启动期
 算出来的纯数据。三件事都靠它：
 
 1. 重定位之后去哪个节点（状态 → 节点）；
@@ -34,8 +34,6 @@
 
 from __future__ import annotations
 
-from .binding import StateBinding
-from .bindings import Binding, NodeBindings
 from .engine import FlowEngine, RunReport, StopReason
 from .graph import (
     Decision,
@@ -49,8 +47,9 @@ from .graph import (
     NodeId,
     Transition,
 )
-from .loader import load_scenario, parse_scenario
+from .node_bindings import Binding, NodeBindings
 from .scenario import EngineOptions, Scenario, UnknownPolicy
+from .state_binding import StateBinding
 
 __all__ = [
     "Binding",
@@ -72,6 +71,4 @@ __all__ = [
     "StopReason",
     "Transition",
     "UnknownPolicy",
-    "load_scenario",
-    "parse_scenario",
 ]

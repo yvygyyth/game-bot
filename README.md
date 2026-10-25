@@ -9,9 +9,7 @@
 > **新会话 / 新协作者先读 [AGENTS.md](AGENTS.md)** —— 它是入口文件：
 > 命令、该读哪几份文档、现在卡在哪、以及几条容易违反的规矩。
 >
-> 当前状态：**框架里已经没有"忘了实现"的桩了**。唯一一个**显式**的桩是
-> `PageTree.from_nested`（理由写在它的 docstring 里，见下），"看图"到"动手"
-> 整条链的代码都在。
+> 当前状态：**框架里已经没有"忘了实现"的桩了**，"看图"到"动手"整条链的代码都在。
 > 原子层 L0~L5 + 视觉 + 平台后端全部实现并在真机验证过；
 > 状态层（`locate` 快路径 / `recover` 慢路径）、流程层（`tick` 的重定位语义）、
 > 执行层（`Executor.run` + 10 个 `Step.run()`）、YAML 加载与 journal 落盘都已实现；
@@ -122,10 +120,6 @@ uv run python -m games doctor mingjiangsha/jingji
 
 ```
 game-bot/
-├── config/                      # 框架级配置样板（app.yaml / regions.yaml）
-│   ├── app.yaml                 #   主配置：后端 / 视觉 / 节奏 / 路径
-│   ├── regions.yaml             #   命名区域：把坐标从代码里挪出来
-│   └── flows/example_flow.yaml   #   脚本定义样板（状态树 + 流程图）
 ├── assets/templates/            # 框架自带模板目录（业务层的图在自己的目录里）
 ├── docs/
 │   ├── architecture.md          #   分层理由、关键设计决策、一次 tick 的数据流
@@ -171,8 +165,8 @@ game-bot/
 │   ├── flow/                    # ★ 流程层：做什么、何时换
 │   │   ├── scenario.py          #   Scenario（状态树+流程图+参数）/ EngineOptions
 │   │   ├── graph.py             #   Node / Edge / Graph / GraphCursor
-│   │   ├── binding.py           #   ★ 关联表 StateBinding：两层唯一的桥
-│   │   ├── bindings.py          #   关联表的声明容器 NodeBindings
+│   │   ├── state_binding.py     #   ★ 关联表 StateBinding：两层唯一的桥（运行期查表）
+│   │   ├── node_bindings.py     #   关联表的声明容器 NodeBindings（装配期校验）
 │   │   ├── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）+ 发事件
 │   │   └── loader.py            #   YAML -> Scenario
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
@@ -234,20 +228,17 @@ cd game-bot
 uv sync --extra windows --extra ui    # 装依赖（第一次）
 
 # 先确认能看到窗口、能截到图 —— 这一步能省掉后面 80% 的瞎猜
-uv run gamebot windows
-uv run gamebot capture -o logs/screenshots/first.png
+uv run python -m gamebot windows
+uv run python -m gamebot capture -o logs/screenshots/first.png
 
-# 把窗口标题填进 config/app.yaml 的 screen.window_title，然后
-uv run gamebot check              # 校验配置 + 流程 + 模板文件
-uv run gamebot run --dry-run      # 空跑：只识别状态，不操作游戏
-uv run gamebot run                # 真跑
+# 然后检查、空跑、真跑（拿唯一那个真脚本举例）
+uv run python -m games check mingjiangsha/jingji            # 定义 + 逐张对模板文件
+uv run python -m games run   mingjiangsha/jingji --dry-run  # 空跑：只识别，不动手
+uv run python -m games run   mingjiangsha/jingji            # 真跑（要管理员，见上）
 ```
 
-> `gamebot check` 查的是 `config/app.yaml` 里那份**示例流程**，它引用的 10 张
-> 模板图**没有入库**（`assets/templates/` 只有一个 `.gitkeep`）。所以它报
-> "缺失 10 个模板文件"、退出码 1 是**预期的** —— 那是让人照着抄格式的样例，
-> 不是能直接跑的东西。要查一个真脚本用
-> `uv run python -m games check <脚本>`。
+> `games check` 会**逐张**对账：状态树和 `T_*` 常量里声明的图，磁盘上有没有。
+> 缺了就非零退出并指出"哪一页要它" —— 这是写脚本时最该反复跑的一条。
 
 ### 写脚本（业务层）
 
@@ -280,8 +271,8 @@ uv run python -m games run mingjiangsha/jingji --param rounds=3           # 传�
 
 ```bash
 uv sync --extra ui         # 界面依赖（PySide6，约 150MB，可选）
-gamebot ui                 # 打开本地控制台
-gamebot ui --script none   # 不选脚本，只用 config/app.yaml 看画面
+uv run python -m gamebot ui                 # 打开本地控制台
+uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
 ```
 
 现在的界面能 **按三步选完就把脚本跑起来**：
@@ -357,12 +348,19 @@ result = find_any_of(frame, [
 ], short_circuit=True)
 ```
 
-跑流程并拿到报告：
+跑流程并拿到报告（和 CLI / 界面走**同一条**装配路径）：
 
 ```python
-from gamebot.bootstrap import run_scenario
+from gamebot.bootstrap import bootstrap_from_spec
+from games import get_script
 
-report = run_scenario("config/app.yaml")
+spec = get_script("mingjiangsha/jingji")
+ctx, engine = bootstrap_from_spec(spec.feature)
+try:
+    report = engine.run()
+finally:
+    ctx.close()
+
 print(report.summary())          # 脚本/停止原因/轮数/耗时/状态与节点轨迹
 print(report.to_dict())          # 可直接 JSON 化落盘
 ```
@@ -442,11 +440,9 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 ### 需要知道的几件事
 
 * **哪些 extra 要装**：PC 游戏要 `--extra windows`，界面要 `--extra ui`；
-  不读文字就不用装 OCR 那两个（`--extra ocr-rapid` / `--extra ocr-tesseract`），
-  没装时 `find_text` / `read_text` 返回 `not_found`，**不影响其他功能**。
-* **`uv run gamebot check` 会退出 1**，这是**预期的**：它查的是
-  `config/app.yaml` 里那份示例流程，而示例引用的 10 张模板图没入库。
-  查真脚本用 `uv run python -m games check <脚本>`。
+  不读文字就不用装 OCR 那两个（`--extra ocr-rapid` / `--extra ocr-tesseract`）。
+  **装了就会自动启用**（`bootstrap` 按已装的包选 RapidOCR / Tesseract）；
+  都没装时 `find_text` / `read_text` 返回 `not_found`，日志里会说清原因。
 * **没有构建步骤、没有热重载**：改完存盘，下一条命令就是新代码。
   唯一例外是**已经开着的界面** —— Python 只在启动时加载模块，所以改完
   界面代码要**关掉重开**（曾经以为是 bug：界面上还留着已经删掉的按钮）。
@@ -460,16 +456,16 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 | L0 类型层 | ✅ 完整 | `ActionResult` / `Point` / `Region`，含全部便捷方法 |
 | L1 Session | ✅ 完整 | 截图编排、坐标换算、生命周期、平台分发 |
 | L2 Frame | ✅ 完整 | 12 个查询方法全部实现，含帧内缓存与子帧坐标换算 |
-| L3 Query | ✅ 完整 | 11 个描述符 + 注册表；`query_from_dict` 已实现（在 `atomic/query.py`，由流程层 loader 调用） |
+| L3 Query | ✅ 完整 | 11 个描述符 + 注册表；`query_from_dict` 把数据还原成 Query（回放/测试用） |
 | L4 组合子 | ✅ 完整 | 5 个帧内 + 5 个跨帧，统一 error 透传语义 |
 | L5 动作 | ✅ 完整 | 14 个动作（含 `click_source_point`），逻辑坐标自动换算，`click_image` 找不到不点 |
-| 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现已写但未装依赖验证 |
+| 视觉算法 | ✅ OpenCV 完整 | `OpenCvMatcher`：模板缓存/多尺度/NMS/NaN 兜底；OCR 两个实现**已接上装配**（装了包就自动启用），真机实测待做 |
 | 平台后端 | ✅ 完整 | windows（mss + pydirectinput/pyautogui）、android（adb） |
 | fake 后端 | ✅ 完整 | 内存实现，记录所有输入调用 —— 测试与空跑用 |
 | 状态层 | ✅ 完整 | ★ 状态树（`Page`/`PageTree`/`PageMatch`）、分类节点（`PageKind.GROUP`）、ROI 继承、两条定位路径（`locate` 快 / `recover` 慢）、跟踪层、校验全部实现 |
-| 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位、YAML 加载全部实现 |
-| 执行层 | ✅ 完整 | 策略对象/步骤构造（`step_from_dict`）/结果记录/`Executor.run`/10 个 Step 的 `run()`/journal JSONL 落盘全部实现 |
-| 配置层 | ✅ 完整 | `merge_dataclass` / YAML 加载 / 区域表 / 校验 |
+| 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位全部实现 |
+| 执行层 | ✅ 完整 | 步骤是函数 / 结果记录 / `Executor.run` / journal JSONL 落盘全部实现（重试策略已按"上层重定位"模型删掉） |
+| 装配 | ✅ 完整 | `bootstrap_from_spec` 是**唯一**装配入口：SPEC → 事件流 / 仓库 / Matcher / Session / Context / Executor / Engine；有集成测试整条走一遍 |
 | 业务层 | 🟡 部分 | ★ 游戏 → scripts → 功能，注册表自动发现，`check`/`describe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
 | 状态仓库 | ✅ 完整 | ★ 跨运行的记忆：一个脚本可用多个仓库，`games/…/store/` 一个仓库一个文件，落 `data/stores/<游戏>/<id>.json`；原子写、坏文件留证据不挡开跑；见 [docs/store.md](docs/store.md) |
 | 事件流 | ✅ 完整 | ★ `events.py`：`run_started` / `tick` / `page_changed` / `node_changed` / `step_started` / `step_finished` / `recovery` / `store_changed` / `run_finished`，落 `logs/events/<功能>.jsonl`；监听器出错不影响流程 |
@@ -480,13 +476,13 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
 > **整条链现在都通了**：状态层两条定位路径、流程层的重定位语义、执行层的
-> `Executor.run` 与 10 个 `Step.run()`、YAML 加载、journal 落盘都已实现，
-> 并且在 fake 后端上端到端跑通过（`verify_new_model.py` + `tests/test_flow.py`）。
+> `Executor.run`、journal / 事件流落盘都已实现，并且在 fake 后端上端到端跑通过
+> （`tests/test_bootstrap_integration.py` 走的就是真实的装配入口）。
 > 真机上验过的仍然只有识别与输入这条链 —— 端到端一轮真机运行还没做过。
 >
-> **唯一剩下的显式桩是 `PageTree.from_nested`**：配置怎么解析故意留在流程层的
-> `flow.loader.parse_pages` —— 状态层不许 import 流程层，所以它自己不能解析配置。
-> 桩里写了这条理由，不是忘了实现。
+> **显式的桩已经没有了**：原来那个 `PageTree.from_nested` 随"YAML 装配路径"
+> （`flow/loader.py` + `config/`）一起删了 —— 那条路没有任何调用方，
+> 现在装配只有 `bootstrap_from_spec` 一条。
 
 ### 下一步
 

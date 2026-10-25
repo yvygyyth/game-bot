@@ -184,7 +184,7 @@ int / float / 布尔 —— 否则步骤里拿到的是字符串，`range("5")` 
 和 ROI 继承也是树独有的。
 
 **树管空间、图管时间**，唯一的接口是 `Node.page`（以及同状态多节点时用来
-挑主节点的 `Node.priority`），查表在 `flow/binding.py` 的关联表里。三件事
+挑主节点的 `Node.priority`），查表在 `flow/state_binding.py` 的关联表里。三件事
 都走它：动前校验、重定位去向、动后预期。
 
 实测状态和节点声明不符时，引擎**不会硬着头皮执行**，但也**不是原地干等**：
@@ -200,12 +200,17 @@ Windows（mss + pydirectinput）和 Android（adb）的差异被压到
 坐标换算（逻辑分辨率 <-> 源分辨率）由 `CoordinateMapper` 做一次，
 不散到后端里。
 
-### 9. 配置驱动流程
+### 9. 声明是 Python 数据，不是 YAML
 
-状态、节点、转移、运行参数都能写进 YAML（`config/flows/*.yaml`）。
-改流程不用改 Python，改完 `gamebot check` 就能验证。
+状态、节点、转移、运行参数写成**带类型的 Python 对象**（`ScenarioSpec` /
+`FeatureSpec`），由框架组装；装配入口只有 `bootstrap_from_spec` 一条。
 
-新增一种 Query / Step 时，在注册表里登记一行即可参与配置化。
+早先还有一条"把同一份东西写进 YAML、由 `flow/loader.py` 解析"的路。
+那条路**没有任何调用方**（CLI 和界面都走 FeatureSpec），却带着 `config/` 目录、
+一个显式桩（`PageTree.from_nested`）和配套文档 —— 属于"代码在、路不通"。
+它连同 `config/` 一起删了：**只留一条装配路径**，少一套要维护、要解释的东西。
+
+新增一种 Query 时仍要在注册表里登记（`query_from_dict` 靠它把数据还原成对象）。
 
 ### 10. 每步都记账（journal 已实现）
 
@@ -340,13 +345,11 @@ gamebot check                   # 模板文件齐不齐、配置有没有拼错
 
 见根目录 README 的进度表。一句话总结：
 
-> **四层都实现了。** `grep -rn NotImplementedError src/` 还能搜到几处，但除了
-> 一个之外全是**抽象方法的占位**（`Session` 的截图方法与两个属性、`Step.run`），
-> 以及 CLI 里的异常处理。真正的桩只剩 `PageTree.from_nested` ——
-> 配置解析故意留在流程层的 `flow/loader.py`：状态层不许 import 流程层，
-> 所以它自己不能解析配置（那条依赖方向由 `tests/test_structure.py` 的 AST 检查盯着）。
-> 还差的是 `events.py`（结构化事件流）、UI 阶段 2 接线、OCR 实测，
-> 以及一轮真机端到端验证。
+> **四层都实现了。** `grep -rn NotImplementedError src/` 还能搜到几处，但全是
+> **抽象方法的占位**（`Session` 的截图方法与两个属性等）以及 CLI 里的异常处理。
+> 显式的桩已经没有了 —— 原来那个 `PageTree.from_nested` 随 YAML 装配路径一起删掉。
+> 事件流（`events.py`）与跨运行的状态仓库（`state/store.py`）也已落地。
+> 还差的是 UI 接事件流、OCR 实测，以及一轮真机端到端验证。
 
 这是刻意的顺序：先把**接口**和**分层**钉死，再填实现。
 接口一旦定了，实现可以一点点长，而且每长一块都有测试兜着。

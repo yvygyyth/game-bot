@@ -155,12 +155,13 @@ uv run python packaging/build_exe.py
 game-bot/
 ├── dev.ps1          ← 需要管理员时用它（自动提权）
 ├── packaging/       ← 打包脚本（可选）
-├── config/          ← 框架配置样板
 ├── src/gamebot/     ← 框架代码
 ├── games/           ← 脚本和模板
+├── data/stores/     ← 跨运行的记忆（背包 / 累计局数，别删）
 ├── logs/
 │   ├── ui.log          界面日志
 │   ├── screenshots/    抓屏 + 带框的识图记录
-│   └── journals/       每轮运行记录
+│   ├── journals/       每轮运行记录（一步一行）
+│   └── events/         运行期事件流（换页 / 换节点 / 步骤 / 仓库写入）
 └── docs/            ← 文档
 ```

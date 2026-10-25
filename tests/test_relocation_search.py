@@ -346,9 +346,9 @@ def _engine_fixture(*, delay: float, matches: dict):
 
     from gamebot.config.schema import RunPaths
     from gamebot.context import RunContext
-    from gamebot.flow.bindings import NodeBindings
     from gamebot.flow.engine import FlowEngine
     from gamebot.flow.graph import Edge, Graph, Node
+    from gamebot.flow.node_bindings import NodeBindings
     from gamebot.flow.scenario import EngineOptions, Scenario
 
     tree = _tree()

@@ -1,4 +1,4 @@
-"""关联表的**运行期查表** —— 薄薄一层，数据全在 :mod:gamebot.flow.bindings。
+"""关联表的**运行期查表** —— 薄薄一层，数据全在 :mod:gamebot.flow.node_bindings。
 
 ## 为什么这里没有校验了
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..state.page import PageId
-from .bindings import NodeBindings
+from .node_bindings import NodeBindings
 
 if TYPE_CHECKING:
     from .graph import Graph

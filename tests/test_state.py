@@ -341,10 +341,6 @@ class TestPageTreeValidate:
         with pytest.raises(StateError, match="id 不能为空"):
             Page("")
 
-    def test_from_nested_is_a_stub(self) -> None:
-        with pytest.raises(NotImplementedError):
-            PageTree.from_nested({})
-
     def test_child_roi_outside_parent_raises_at_add(self) -> None:
         """roi 是**整棵子树**的搜索范围，伸出父页面框外就等于在别处瞎找。
 

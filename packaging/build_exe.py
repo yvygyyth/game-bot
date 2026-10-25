@@ -97,7 +97,7 @@ def build() -> Path:
 
     built = DIST / APP_NAME / f"{APP_NAME}.exe"
     # 在项目根放一份副本：双击那份时**工作目录正好是项目根**，
-    # 配置里的相对路径（config/、games/、logs/、模板）就都对得上。
+    # 相对路径（games/、logs/、模板）就都对得上。
     at_root = ROOT / f"{APP_NAME}.exe"
     shutil.copy2(built, at_root)
     return at_root

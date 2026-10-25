@@ -4,16 +4,16 @@
 
 它们**必须一起校验**：
 
-* 每个 ``Node.page`` 声明的状态必须在状态树里存在（写错一个字母，那一整条
+* 关联表里每个节点对应的状态必须在状态树里存在（写错一个字母，那一整条
   流程就永远不执行 —— 而且不报错，只是"什么也没发生"）；
 * **每个记录信息的状态都必须有流程节点认领**
-  （:func:`gamebot.flow.binding.validate_binding`）。这不是"值得提示"，而是
+  （:func:`gamebot.flow.state_binding.validate_binding`）。这不是"值得提示"，而是
   启动期直接 ``ConfigError``：重定位到无人认领的状态，游标就无处可去 ——
   而那正是"允许自动重定位"能成立的前提；
 * ``recovery_node`` 必须在流程图里存在。
 
-也必须一起加载、一起序列化。分开管理的话，很容易出现"配置里改了状态 id、
-流程图忘了改"这种跨文件的静默失效。
+也必须一起校验。分开管理的话，很容易出现"改了状态 id、流程图忘了改"
+这种跨文件的静默失效。
 
 ## 为什么状态和流程要分开装
 
@@ -31,11 +31,11 @@ from typing import TYPE_CHECKING, Any
 from ..exceptions import ConfigError
 from ..state.page import PageId, PageTree
 from ..utils.logging import get_logger
-from .bindings import NodeBindings
 from .graph import Graph, NodeId
+from .node_bindings import NodeBindings
 
 if TYPE_CHECKING:
-    from .binding import StateBinding
+    from .state_binding import StateBinding
 
 log = get_logger("flow.scenario")
 
@@ -165,7 +165,7 @@ class Scenario:
 
         1. 状态树自身合法（:meth:`PageTree.validate`）；
         2. 流程图自身合法（:meth:`Graph.validate`）；
-        3. **状态 ↔ 节点的关联合法**（:func:`gamebot.flow.binding.validate_binding`）：
+        3. **状态 ↔ 节点的关联合法**（:func:`gamebot.flow.state_binding.validate_binding`）：
            每个节点声明的状态必须存在，而且**每个记录信息的状态都必须有节点
            认领** —— 否则重定位到它就无处可去；
         4. ``options.recovery_node`` 必须在图里存在；
@@ -201,7 +201,7 @@ class Scenario:
     # ------------------------------------------------------------------ #
     def binding(self) -> StateBinding:
         """这份脚本的"状态 ↔ 节点"关联表（引擎和 ``gamebot check`` 用它）。"""
-        from .binding import StateBinding
+        from .state_binding import StateBinding
 
         return StateBinding(self.bindings, self.graph)
 

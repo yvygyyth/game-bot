@@ -139,7 +139,7 @@ PageLeaf("x", queries=(looks_like_x,))
 2. **重定位之后去哪**：状态层说"真实在 `home/jingji`"，流程图得回答"那归谁管"；
 3. **动完手之后我在哪**：节点跑完，当前"预期状态"要跟着变。
 
-三件事收在一张表上：**关联表**（`gamebot.flow.bindings.NodeBindings`）。
+三件事收在一张表上：**关联表**（`gamebot.flow.node_bindings.NodeBindings`）。
 它是**启动期定好的纯数据**，而且是**独立的一个产物** —— 不藏在状态树里，
 也不藏在流程图里（节点**不**声明自己是哪个状态）：
 
@@ -325,28 +325,36 @@ tick N+2 : 校验通过，执行 jingji 的步骤
 
 ## 七、加一个状态 / 节点时要动的地方
 
-```yaml
-states:                          # id 由嵌套位置推导：home/jingji/battle
-  home:
-    kind: group                  # YAML 里仍写 kind: group（解析成 PageGroup）
-    children:
-      jingji:
-        queries: [{type: ImageQuery, template: example/title.png}]
+```python
+# pages.py —— 状态（"我在哪"）
+FEATURE_TREE = PageGroup(
+    "home",
+    name="首页",
+    children=(
+        PageGroup(
+            "jingji",
+            name="竞技场",
+            children=(PageLeaf("battle", queries=(ImageQuery(T_TITLE),)),),
+        ),
+    ),
+)
 
-nodes:
-  jingji:
-    page: home/jingji            # 不写也行：不写就不校验、也不参与重定位
-    priority: 10                 # 同状态多节点时谁是主节点
-    steps: [{type: ClickImageStep, template: jingji/entry.png}]
+# graph.py —— 流程（"做什么、何时换"）
+Node(
+    "jingji",
+    steps=[click_entry],
+    transitions=[
+        Transition("battle", on_page("home/jingji/battle"), 10, "进战斗了"),
+    ],
+)
 
-edges:
-  - {source: jingji, target: battle, condition: {type: ImageQuery, template: skillbar.png}}
+# bindings.py —— 两者怎么对上（节点 id 和状态 id 不必同名）
+BINDINGS = NodeBindings(pairs=(Binding("jingji", "home/jingji/battle"),))
 ```
 
 **状态 id 是路径形式**，所以改父节点的 key 会连带改掉所有子节点的 id ——
-那时 `nodes[].page` 也得跟着改。`Scenario.validate()` 会检查这件事，
-而且 `flow/loader.py` 会额外给一句人话提示（"同名的状态还有 `home/lobby`，
-多半是某个父节点的 key 改过"）。
+那时关联表里的状态 id 也得跟着改。只改一半时 `Scenario.validate()` 会拦下
+悬空引用（`games check` 会把它们列出来），不会等到跑起来才炸。
 
 ## 八、还没定的两件事
 

@@ -182,9 +182,9 @@ class TestGuiLauncher:
             assert module in source, f"没有 hidden-import {module}"
 
     def test_the_entry_anchors_the_working_directory(self):
-        """**双击 exe 时工作目录是 exe 所在目录**，而配置里的路径
-        （``config/``、``games/``、``logs/``、模板）全部相对项目根 ——
-        不锚定的话会报"配置文件不存在"。
+        """**双击 exe 时工作目录是 exe 所在目录**，而运行期路径
+        （``games/``、``logs/``、模板）全部相对项目根 ——
+        不锚定的话会报"找不到脚本/模板"。
 
         实测过：从 ``%TEMP%`` 启动入口脚本，日志照样写进项目根的
         ``logs/ui.log``、快照也生成在项目根。

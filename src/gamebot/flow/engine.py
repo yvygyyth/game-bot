@@ -53,9 +53,9 @@ from ..state.page import UNKNOWN_PAGE, PageId, PageLeaf
 from ..state.tracker import PageChange, PageTracker
 from ..utils.logging import get_logger
 from ..utils.timing import Stopwatch, humanize
-from .binding import StateBinding
 from .graph import Decision, GraphCursor, Node, NodeId
 from .scenario import Scenario
+from .state_binding import StateBinding
 
 if TYPE_CHECKING:
     from collections.abc import Callable

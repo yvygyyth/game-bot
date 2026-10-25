@@ -170,7 +170,7 @@ class Node:
 
     ## 它**不**知道自己是哪个状态
 
-    节点和状态的对应关系在 :class:`~gamebot.flow.bindings.NodeBindings`
+    节点和状态的对应关系在 :class:`~gamebot.flow.node_bindings.NodeBindings`
     （一张**独立的关联表**）。理由：那是"两者怎么对上"这件事，
     既不属于状态树也不属于流程图 —— 写在任何一边都会让边界模糊，
     而且想单独看这张表就得把一边翻一遍。

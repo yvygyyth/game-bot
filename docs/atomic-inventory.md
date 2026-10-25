@@ -123,8 +123,9 @@ frame.clear_cache()
 > "委托"指 `run()` 把参数转发给 Frame 的对应方法，自己不掺逻辑 ——
 > 这样 Query 才能保持"纯数据、可序列化、可复用"。
 
-`query_registry()` 提供类型名 -> 类的映射，供 YAML 反序列化使用。
-`query_from_dict(data)` 还没写（属于流程层的 YAML 加载，不在原子层范围内）。
+`query_registry()` 提供类型名 -> 类的映射；`query_from_dict(data)` 把
+字典 / 模板名字符串还原成 Query 对象（日志回放、测试、将来若做配置驱动）。
+两者都在 `atomic/query.py`（登记表也在那儿，新增 Query 要补一行）。
 
 ---
 
