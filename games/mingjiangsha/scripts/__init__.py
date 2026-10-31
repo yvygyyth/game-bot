@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from .jingji import SPEC as jingji
+from .qianlidanqi import SPEC as qianlidanqi
 
 __all__ = [
     "jingji",
+    "qianlidanqi",
 ]
