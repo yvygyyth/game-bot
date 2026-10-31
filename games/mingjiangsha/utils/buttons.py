@@ -70,8 +70,14 @@ __all__ = [
 #: 默认阈值。实测同一家族的文字版本互相不命中，真按钮 0.979~0.999 —— 0.90 有余量。
 BUTTON_CONFIDENCE = 0.90
 
-#: 两个命中相距多近算"同一个按钮"（NMS 间距）。按钮宽 200+，30 足够。
+#: 两个命中相距多近算"同一个按钮"（单张模板内的 NMS 间距）。按钮宽 200+，30 足够。
 BUTTON_MIN_DISTANCE = 30
+
+#: **跨模板**去重半径：同一个按钮被家族里多张图同时命中时，只留分数最高的。
+#: 允许"同一个按钮的不同截图版本"共存在一个文件夹（不同分辨率重裁的、悬浮与常态
+#: 都像的）—— 这是加新截图时最容易发生的事。不去重就会变成"找到 2 个按钮"，
+#: `pick="only"` 直接报错，看起来像"按钮重复了"。
+BUTTON_SAME_SPOT = 60
 
 #: ``pick`` 的合法值。
 PICK_CHOICES = ("only", "best", "right", "left", "top", "bottom")
@@ -164,7 +170,26 @@ def find_buttons(
                     template=name,
                 )
             )
-    return sorted(hits, key=lambda hit: (hit.point.x, hit.point.y))
+    return _dedupe(hits)
+
+
+def _dedupe(hits: list[ButtonHit]) -> list[ButtonHit]:
+    """同一个按钮被多张模板命中时，只留分数最高的那个。
+
+    为什么需要：文件夹里**允许**放同一个按钮的不同截图版本（不同分辨率重裁的）。
+    那两张图会同时命中同一个按钮 —— 不去重就是"找到 2 个按钮"，
+    而 `pick="only"` 会报错，看起来像"按钮重复了"，其实只是模板重复了。
+    """
+    kept: list[ButtonHit] = []
+    for hit in sorted(hits, key=lambda item: item.score, reverse=True):
+        too_close = any(
+            abs(hit.point.x - other.point.x) <= BUTTON_SAME_SPOT
+            and abs(hit.point.y - other.point.y) <= BUTTON_SAME_SPOT
+            for other in kept
+        )
+        if not too_close:
+            kept.append(hit)
+    return sorted(kept, key=lambda item: (item.point.x, item.point.y))
 
 
 def click_button(
