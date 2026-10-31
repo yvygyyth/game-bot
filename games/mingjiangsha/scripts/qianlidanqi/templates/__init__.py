@@ -11,6 +11,7 @@ __all__ = [
     "T_CAMPAIGN_CARD",
     "T_FLOW",
     "T_HOME",
+    "T_NEXT",
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
     "T_QIANLI_CARD",
@@ -33,6 +34,8 @@ T_PICK_TITLE = "select/status-wujiang-select-title.png"
 T_PLACEHOLDER = "select/select-wujiang.png"
 #: 红色「开始挑战」（已选将、可开局）。
 T_START = "select/start.png"
+#: 红色「继续挑战」（已有进行中的挑战，点了直接进局内）。
+T_NEXT = "select/nextt.png"
 #: 灰色「开始挑战」（没选将）。
 T_START_DISABLED = "select/status-start-disable.png"
 #: 局内标题「千里单骑 · 无尽」（flow 界面）。

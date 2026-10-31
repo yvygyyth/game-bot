@@ -8,17 +8,19 @@
 | `qianli/select2` | :func:`pick_general` | 搜索入参武将 → 点第一个结果 |
 | `qianli/select3` | :func:`leave_pick` | 按 Esc 退回主界面 |
 | `qianli/select4` | :func:`start_run` | 点红色「开始挑战」 |
+| `qianli/select5` | :func:`continue_run` | 点红色「继续挑战」，直接进局内 |
 
 局内（`qianli/flow`）先做终态占位，步骤为空；后续再补。
 """
 
 from __future__ import annotations
 
-from .enter import enter_campaign, enter_qianli, open_pick, start_run
+from .enter import continue_run, enter_campaign, enter_qianli, open_pick, start_run
 from .leave import leave_pick
 from .pick import pick_general
 
 __all__ = [
+    "continue_run",
     "enter_campaign",
     "enter_qianli",
     "leave_pick",

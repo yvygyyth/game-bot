@@ -9,12 +9,12 @@ from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Point, Region
 
 from ..pages import MAIN_PLACEHOLDER_ROI, START_ROI
-from ..templates import T_PLACEHOLDER, T_QIANLI_CARD, T_START
+from ..templates import T_NEXT, T_PLACEHOLDER, T_QIANLI_CARD, T_START
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
-__all__ = ["enter_campaign", "enter_qianli", "open_pick", "start_run"]
+__all__ = ["continue_run", "enter_campaign", "enter_qianli", "open_pick", "start_run"]
 
 #: 首页「战役」卡的中心（源坐标）。这张卡在不同光照下分数只有 0.88 左右，
 #: 而位置是固定的 —— 直接点中心比卡在阈值上更稳。
@@ -59,3 +59,8 @@ def open_pick(ctx: RunContext) -> ActionResult[Any]:
 def start_run(ctx: RunContext) -> ActionResult[Any]:
     """已选将 → 点红色「开始挑战」，进入局内。"""
     return click_image(ctx, T_START, region=START_ROI, settle=START_SETTLE)
+
+
+def continue_run(ctx: RunContext) -> ActionResult[Any]:
+    """已有进行中的局 → 点红色「继续挑战」，直接进局内。"""
+    return click_image(ctx, T_NEXT, region=START_ROI, settle=START_SETTLE)

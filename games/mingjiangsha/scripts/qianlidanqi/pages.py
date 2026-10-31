@@ -9,6 +9,7 @@ home（容器）
     ├── qianli/select2       武将选择面板 · 没选将
     ├── qianli/select3       武将选择面板 · 已选将
     ├── qianli/select4       主界面 · 已选将（开始挑战是红的）
+    ├── qianli/select5       主界面 · 继续挑战（已有进行中的局）
     └── qianli/flow          局内（后续实现，先做终态占位）
 ```
 
@@ -19,7 +20,8 @@ home（容器）
 | `select1` | 千里单骑标题 + 灰色开始挑战 + 「选择武将」占位卡 | 选将面板 |
 | `select2` | 标题 + 「武将选择」面板标题 + 搜索按钮 + 占位卡 | — |
 | `select3` | 标题 + 面板标题 + 搜索按钮 | **占位卡**（已换成武将卡） |
-| `select4` | 标题 + 红色开始挑战 | 占位卡、面板 |
+| `select4` | 标题 + 红色「开始挑战」 | 占位卡、面板 |
+| `select5` | 标题 + 红色「继续挑战」 | 占位卡、面板 |
 
 提示：这些模板的位置都在**源坐标 2560x1369** 下量过；换分辨率要重量。
 """
@@ -34,6 +36,7 @@ from .templates import (
     T_CAMPAIGN,
     T_FLOW,
     T_HOME,
+    T_NEXT,
     T_PICK_TITLE,
     T_PLACEHOLDER,
     T_SEARCH,
@@ -128,12 +131,24 @@ FEATURE_TREE = PageGroup(
                     description="武将选择面板：占位卡没了，说明已经选中武将",
                 ),
                 PageLeaf(
+                    "qianli/select5",
+                    name="千里单骑 · 继续挑战",
+                    queries=(
+                        ImageQuery(T_SELECT_TITLE, region=TITLE_ROI),
+                        ImageQuery(T_NEXT, region=START_ROI),
+                    ),
+                    description="主界面：按钮是「继续挑战」，说明已有进行中的局，点了直接进局内",
+                ),
+                PageLeaf(
                     "qianli/select4",
                     name="千里单骑 · 已选将",
                     queries=(
                         ImageQuery(T_SELECT_TITLE, region=TITLE_ROI),
                         ImageQuery(T_START, region=START_ROI),
                     ),
+                    # 「继续挑战」和「开始挑战」是同一块红按钮、只差文字，
+                    # 用"没什么"把两者钉死，避免互相误认。
+                    exclude=(ImageQuery(T_NEXT, region=START_ROI),),
                     description="主界面：开始挑战变红，可以开局",
                 ),
                 PageLeaf(

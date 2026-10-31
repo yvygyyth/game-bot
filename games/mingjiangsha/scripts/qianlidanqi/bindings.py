@@ -14,6 +14,7 @@ BINDINGS = NodeBindings(
         Binding("pick_general", "qianli/select2"),
         Binding("leave_pick", "qianli/select3"),
         Binding("start_run", "qianli/select4"),
+        Binding("continue_run", "qianli/select5"),
         # 局内先做终态占位：进入 flow 画面就停。
         Binding("flow", "qianli/flow"),
     )

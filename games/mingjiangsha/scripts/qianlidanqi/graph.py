@@ -10,6 +10,7 @@ root --(进战役)--> campaign --(进千里单骑)--> open_pick --(打开选将)
                                                                   (Esc 回主界面)
                                                                           v
                                                                      start_run --(开始挑战)--> flow
+continue_run --(继续挑战)--> flow   （已有进行中的局；也可从任意位置被重定位过来）
 ```
 
 `flow` 是**局内占位**：对应的状态设了 ``terminal=True``，一进入局内画面就停。
@@ -25,6 +26,7 @@ from games import on_page
 from .bindings import BINDINGS
 from .pages import FEATURE_TREE
 from .steps import (
+    continue_run,
     enter_campaign,
     enter_qianli,
     leave_pick,
@@ -56,6 +58,8 @@ SCENARIO = ScenarioSpec(
             description="战役界面：点「千里单骑」卡",
             transitions=[
                 Transition("open_pick", on_page("qianli/select1"), 10, "进入千里单骑"),
+                # 已经有进行中的局时，点「千里单骑」会直接到「继续挑战」界面。
+                Transition("continue_run", on_page("qianli/select5"), 5, "已有进行中的局"),
             ],
         ),
         Node(
@@ -88,6 +92,14 @@ SCENARIO = ScenarioSpec(
             description="主界面：点红色「开始挑战」",
             transitions=[
                 Transition("flow", on_page("qianli/flow"), 10, "进入局内"),
+            ],
+        ),
+        Node(
+            "continue_run",
+            steps=[continue_run],
+            description="已有进行中的局：点「继续挑战」，直接进局内",
+            transitions=[
+                Transition("flow", on_page("qianli/flow"), 10, "继续挑战进局内"),
             ],
         ),
         Node(

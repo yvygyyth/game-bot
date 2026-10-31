@@ -47,10 +47,7 @@ def matcher() -> OpenCvMatcher:
     return OpenCvMatcher(TEMPLATES_DIR, preload=True, use_pyramid=False)
 
 
-def _locate(scenario, matcher, shot: str) -> str | None:
-    image = cv2.imread(str(RAW_DIR / shot))
-    assert image is not None, shot
-    image = image[:1369, :]  # 客户区：去掉底部任务栏
+def _locate_image(scenario, matcher, image) -> str | None:
     session = BaseSession(build_fake_backends(image=image), matcher=matcher)
     ctx = RunContext(
         session,
@@ -65,6 +62,12 @@ def _locate(scenario, matcher, shot: str) -> str | None:
         ctx.close()
 
 
+def _locate(scenario, matcher, shot: str) -> str | None:
+    image = cv2.imread(str(RAW_DIR / shot))
+    assert image is not None, shot
+    return _locate_image(scenario, matcher, image[:1369, :])  # 客户区：去掉任务栏
+
+
 @pytest.mark.parametrize(("expected", "shot"), CASES)
 def test_state_is_recognized(scenario, matcher, expected: str, shot: str) -> None:
     assert _locate(scenario, matcher, shot) == expected
@@ -74,6 +77,20 @@ def test_select2_and_select3_differ_by_the_placeholder(scenario, matcher) -> Non
     """两个面板只差"占位卡在不在" —— 这就是 exclude 的作用，单独钉一下。"""
     assert _locate(scenario, matcher, "select2.png") == "qianli/select2"
     assert _locate(scenario, matcher, "select3.png") == "qianli/select3"
+
+
+def test_select5_is_continue_challenge(scenario, matcher) -> None:
+    """「继续挑战」和「开始挑战」是同一块按钮，只差文字。
+
+    没有真机 select5 截图，就把 nextt 贴到 select4 的按钮位置合成一张：
+    nextt 应该 1.0 命中、本状态是 select5，而不是 select4。
+    """
+    image = cv2.imread(str(RAW_DIR / "select4.png"))[:1369].copy()
+    button = cv2.imread(str(TEMPLATES_DIR / "select/nextt.png"))
+    height, width = button.shape[:2]
+    image[1213 : 1213 + height, 2001 : 2001 + width] = button
+
+    assert _locate_image(scenario, matcher, image) == "qianli/select5"
 
 
 def test_all_templates_are_declared() -> None:
