@@ -34,7 +34,13 @@ CASES = (
     ("qianli/select3", "select3.png"),
     ("qianli/select4", "select4.png"),
     ("qianli/select5", "select5.png"),
-    ("qianli/flow", "flow1.png"),
+    ("qianli/map", "flow1.png"),
+    ("qianli/map", "flow2.png"),
+    ("qianli/pre_battle", "battle/battle1.png"),
+    ("qianli/gift", "battle/zengli.png"),
+    ("qianli/gift_kind", "battle/zengli2.png"),
+    ("qianli/end", "end.png"),
+    ("qianli/end2", "end2.png"),
 )
 
 

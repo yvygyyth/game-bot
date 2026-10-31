@@ -10,10 +10,17 @@ home（容器）
     ├── qianli/select3       武将选择面板 · 已选将
     ├── qianli/select4       主界面 · 已选将（开始挑战是红的）
     ├── qianli/select5       主界面 · 继续挑战（已有进行中的局）
-    └── qianli/flow          局内（后续实现，先做终态占位）
+    └── qianli/run           局内
+        ├── qianli/map       地图（选节点）
+        ├── qianli/pre_battle 战斗预览（开始对局）
+        ├── qianli/fight     战斗中（取消/设置/托管）
+        ├── qianli/gift      选赠礼武将
+        ├── qianli/gift_kind 选赠礼类别
+        ├── qianli/end       本局结束（领取奖励）
+        └── qianli/end2      恭喜获得浮层（Esc 回选将）
 ```
 
-四个 select 状态的区分：
+五个 select 状态的区分：
 
 | 状态 | 有什么 | 没什么 |
 |---|---|---|
@@ -28,13 +35,21 @@ home（容器）
 
 from __future__ import annotations
 
-from gamebot.atomic.query import ImageQuery
+from gamebot.atomic.query import ImageQuery, any_image
 from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 
 from .templates import (
     T_CAMPAIGN,
+    T_CLAIM_REWARD,
+    T_CONGRATS,
+    T_FIGHT_AUTO,
+    T_FIGHT_CANCEL,
+    T_FIGHT_SETTING,
     T_FLOW,
+    T_FLOW_MAP,
+    T_GIFT_KIND_TITLE,
+    T_GIFT_TITLE,
     T_HOME,
     T_NEXT,
     T_PICK_TITLE,
@@ -42,6 +57,7 @@ from .templates import (
     T_SEARCH,
     T_SELECT_TITLE,
     T_START,
+    T_START_BATTLE,
     T_START_DISABLED,
 )
 
@@ -72,6 +88,27 @@ PICK_PLACEHOLDER_ROI = Region(1990, 240, 430, 260)
 #: 局内标题「千里单骑 · 无尽」。
 FLOW_ROI = Region(0, 20, 600, 120)
 
+#: 局内地图右侧的小图标（和标题一起认地图）。
+MAP_ICON_ROI = Region(2430, 530, 100, 110)
+
+#: 地图上可以点的节点区域（旧脚本的 CHOICE_REGION）。
+NODE_REGION = Region(800, 350, 1630, 780)
+
+#: 点节点后的「开始对局」。
+START_BATTLE_ROI = Region(700, 1090, 350, 110)
+
+#: 赠礼第一屏标题。
+GIFT_TITLE_ROI = Region(950, 1165, 640, 95)
+
+#: 赠礼第二屏标题。
+GIFT_KIND_TITLE_ROI = Region(1025, 1165, 480, 95)
+
+#: 本局结束「领取奖励」。
+CLAIM_ROI = Region(1080, 1180, 420, 120)
+
+#: 「恭喜获得」浮层。
+CONGRATS_ROI = Region(880, 275, 640, 140)
+
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -97,6 +134,75 @@ FEATURE_TREE = PageGroup(
             name="千里单骑",
             description="千里单骑：选将 → 开始挑战 → 局内",
             children=(
+                PageGroup(
+                    "qianli/run",
+                    name="局内",
+                    description="千里单骑一局：地图 → 战斗 → 赠礼 → 地图/结束",
+                    children=(
+                        PageLeaf(
+                            "qianli/map",
+                            name="局内 · 地图",
+                            queries=(
+                                ImageQuery(T_FLOW, region=FLOW_ROI),
+                                ImageQuery(T_FLOW_MAP, region=MAP_ICON_ROI),
+                            ),
+                            description="地图：三个节点 + 当前挑战层数 + 结束挑战",
+                        ),
+                        PageLeaf(
+                            "qianli/pre_battle",
+                            name="局内 · 战斗预览",
+                            queries=(
+                                ImageQuery(T_START_BATTLE, region=START_BATTLE_ROI),
+                            ),
+                            description="点节点后的战斗预览：开始对局 / 再想一想",
+                        ),
+                        PageLeaf(
+                            "qianli/fight",
+                            name="局内 · 战斗中",
+                            queries=(
+                                any_image(
+                                    T_FIGHT_CANCEL,
+                                    T_FIGHT_SETTING,
+                                    T_FIGHT_AUTO,
+                                    confidence=0.9,
+                                ),
+                            ),
+                            description="战斗界面：取消换牌 / 设置 / 托管",
+                        ),
+                        PageLeaf(
+                            "qianli/gift",
+                            name="局内 · 选赠礼武将",
+                            queries=(
+                                ImageQuery(T_GIFT_TITLE, region=GIFT_TITLE_ROI),
+                            ),
+                            description="请选择接受谁的赠礼？",
+                        ),
+                        PageLeaf(
+                            "qianli/gift_kind",
+                            name="局内 · 选赠礼类别",
+                            queries=(
+                                ImageQuery(T_GIFT_KIND_TITLE, region=GIFT_KIND_TITLE_ROI),
+                            ),
+                            description="请选择一项赠礼？信物 / 武将牌 / 并肩作战…",
+                        ),
+                        PageLeaf(
+                            "qianli/end",
+                            name="局内 · 本局结束",
+                            queries=(
+                                ImageQuery(T_CLAIM_REWARD, region=CLAIM_ROI),
+                            ),
+                            description="本局结束：领取奖励",
+                        ),
+                        PageLeaf(
+                            "qianli/end2",
+                            name="局内 · 恭喜获得",
+                            queries=(
+                                ImageQuery(T_CONGRATS, region=CONGRATS_ROI),
+                            ),
+                            description="领奖后的「恭喜获得」浮层；Esc 关闭回选将",
+                        ),
+                    ),
+                ),
                 PageLeaf(
                     "qianli/select1",
                     name="千里单骑 · 没选将",
@@ -150,13 +256,6 @@ FEATURE_TREE = PageGroup(
                     # 用"没什么"把两者钉死，避免互相误认。
                     exclude=(ImageQuery(T_NEXT, region=START_ROI),),
                     description="主界面：开始挑战变红，可以开局",
-                ),
-                PageLeaf(
-                    "qianli/flow",
-                    name="千里单骑 · 局内（后续实现）",
-                    terminal=True,
-                    queries=(ImageQuery(T_FLOW, region=FLOW_ROI),),
-                    description="已是局内画面；局内流程后续再写",
                 ),
             ),
         ),

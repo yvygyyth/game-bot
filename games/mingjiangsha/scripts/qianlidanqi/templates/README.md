@@ -58,5 +58,12 @@ home（容器）
     ├── qianli/select3
     ├── qianli/select4
     ├── qianli/select5
-    └── qianli/flow        （terminal 占位，局内后续实现）
+    └── qianli/run
+        ├── qianli/map
+        ├── qianli/pre_battle
+        ├── qianli/fight
+        ├── qianli/gift
+        ├── qianli/gift_kind
+        ├── qianli/end
+        └── qianli/end2
 ```

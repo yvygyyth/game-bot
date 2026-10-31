@@ -9,7 +9,9 @@ from __future__ import annotations
 __all__ = [
     "T_CAMPAIGN",
     "T_CAMPAIGN_CARD",
+    "T_CLAIM_REWARD",
     "T_CONFIRM",
+    "T_CONGRATS",
     "T_FIGHT_AUTO",
     "T_FIGHT_CANCEL",
     "T_FIGHT_END",
@@ -20,6 +22,8 @@ __all__ = [
     "T_FLOW_MAP",
     "T_FLOW_SWITCH",
     "T_FLOW_UP",
+    "T_GIFT_KIND_TITLE",
+    "T_GIFT_TITLE",
     "T_HOME",
     "T_NEXT",
     "T_NODE_BATTLE",
@@ -36,6 +40,7 @@ __all__ = [
     "T_SEARCH",
     "T_SELECT_TITLE",
     "T_START",
+    "T_START_BATTLE",
     "T_START_DISABLED",
 ]
 
@@ -68,6 +73,17 @@ T_FLOW_BAG = "flow/bag.png"
 T_FLOW_SWITCH = "flow/switch.png"
 #: 地图上弹出的「武将技能」面板（先点空白关掉）。
 T_FLOW_UP = "flow/up.png"
+
+#: 点节点后的战斗预览「开始对局」。
+T_START_BATTLE = "flow/start_battle.png"
+#: 赠礼第一屏标题「请选择接受谁的赠礼？」。
+T_GIFT_TITLE = "flow/gift_title.png"
+#: 赠礼第二屏标题「请选择一项赠礼？」。
+T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
+#: 本局结束「领取奖励」。
+T_CLAIM_REWARD = "flow/claim_reward.png"
+#: 领奖后的「恭喜获得」浮层。
+T_CONGRATS = "flow/congrats.png"
 
 #: 通用「确定」（点节点后的确认、局内结束）。
 T_CONFIRM = "flow/confirm.png"

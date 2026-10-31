@@ -15,7 +15,13 @@ BINDINGS = NodeBindings(
         Binding("leave_pick", "qianli/select3"),
         Binding("start_run", "qianli/select4"),
         Binding("continue_run", "qianli/select5"),
-        # 局内先做终态占位：进入 flow 画面就停。
-        Binding("flow", "qianli/flow"),
+        # ---- 局内 ----
+        Binding("map", "qianli/map"),
+        Binding("pre_battle", "qianli/pre_battle"),
+        Binding("fight", "qianli/fight"),
+        Binding("gift", "qianli/gift"),
+        Binding("gift_kind", "qianli/gift_kind"),
+        Binding("end", "qianli/end"),
+        Binding("end2", "qianli/end2"),
     )
 )

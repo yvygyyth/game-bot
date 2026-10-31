@@ -9,8 +9,16 @@
 | `qianli/select3` | :func:`leave_pick` | 按 Esc 退回主界面 |
 | `qianli/select4` | :func:`start_run` | 点红色「开始挑战」 |
 | `qianli/select5` | :func:`continue_run` | 点红色「继续挑战」，直接进局内 |
+| `qianli/map` | :func:`choose_node` | 地图上点一个战斗节点 |
+| `qianli/pre_battle` | :func:`start_battle` | 点「开始对局」 |
+| `qianli/fight` | :func:`run_battle` | 取消换牌 → 托管 → 等结束 → 下一步 |
+| `qianli/gift` | :func:`pick_gift` | OCR 三个武将名 → 按优先表点一个 |
+| `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
+| `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
+| `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
-局内（`qianli/flow`）先做终态占位，步骤为空；后续再补。
+局内已实现：map → pre_battle → fight → gift → gift_kind，
+结束走 end → end2 → 回 select1。商店/事件节点后续再补。
 """
 
 from __future__ import annotations
@@ -18,13 +26,29 @@ from __future__ import annotations
 from .enter import continue_run, enter_campaign, enter_qianli, open_pick, start_run
 from .leave import leave_pick
 from .pick import pick_general
+from .run import (
+    choose_node,
+    claim_reward,
+    close_congrats,
+    pick_gift,
+    pick_kind,
+    run_battle,
+    start_battle,
+)
 
 __all__ = [
+    "choose_node",
+    "claim_reward",
+    "close_congrats",
     "continue_run",
     "enter_campaign",
     "enter_qianli",
     "leave_pick",
     "open_pick",
     "pick_general",
+    "pick_gift",
+    "pick_kind",
+    "run_battle",
+    "start_battle",
     "start_run",
 ]
