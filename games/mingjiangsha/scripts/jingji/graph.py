@@ -1,37 +1,37 @@
 """竞技场 —— 流程图（"做什么、何时换"）。
 
-## 八个节点，一条回边构成循环
+## 一条主线 + 提示框分支 + 一条回边
 
 ```
 lobby --(进竞技场)--> create_team --(建队后)--> add_pet --(加伙伴后)--> match
                                                                         |
-                                                                  (进选将界面)
-                                                                        v
-   +------------------------------------------------------------> pick_general
-   |                                                                    |
-   |                                                              (点了武将)
-   |                                                                    v
-   |                                                            confirm_general
-   |                                                                    |
-   |                                                              (点确定)
-   |                                                                    v
-   |                                                                  fight
-   |                                                                    |
-   |                                                        (投降确认 -> 结算)
-   |                                                                    v
-   +------------------（结算确认，回竞技场再开一局）------------------- settle
+                                          (弹了提示框，还没勾)          |
+                                +---------------------------------------+
+                                v                                       |
+                           tip_check --(勾上了)--> tip_confirm          |
+                                                       |                |
+                                          (关掉提示框，进选将)          |
+                                                       v                |
+                                +---------------------------------------+
+                                |                                       |
+                                |  (没弹提示框，直接进选将)              |
+                                v                                       v
+                          pick_general --(点了武将)--> confirm_general ...
 ```
 
-**循环就是最后那条回边**：``settle`` → ``match``，于是又点一次「开始匹配」。
-"刷 N 局"因此不需要额外的循环语法 —— 一张图上一条回边，加节点里的一个计数器。
+提示框是**模态**的、可能不出现：`match` 三条出边，按画面（`tip/unchecked` /
+`tip/checked` / `select/idle`）三选一。**没弹框是正常分支**，不是意外。
 
 ## 每条边都等"下一个状态出现了"才走
 
 用 ``on_page(下一个状态)`` 当条件。**点下去到界面更新有个过渡**，
-用画面说话比用时间可靠：状态还没变过来，这一轮就不换节点，下一轮再判 ——
-不会出现"以为换段了、其实还在原状态"的错位。
+用画面说话比用时间可靠：状态还没变过来，这一轮就不换节点，下一轮再判。
+（引擎现在会先判边、判不动才重定位 —— 正常换屏不会留下 Recovery。）
 
-## 桩：两处我没亲眼见过的过渡
+## 回边与两处未亲眼见过的过渡
+
+**循环就是最后那条回边**：``settle`` → ``match``。下面是两处"不知道实际界面
+长什么样"的假设，结构上就是普通边：
 
 1. **``settle`` → ``match``** —— 结算页点完「确认」之后回到哪？玩家没给那张截图。
    这里假设**回到竞技场界面**（加过伙伴、能看到「开始匹配」那个）。
@@ -57,7 +57,9 @@ from .pages import FEATURE_TREE
 from .steps import (
     add_pet,
     advance_fight,
+    check_tip,
     confirm_general,
+    confirm_tip,
     create_team,
     enter_jingji,
     finish_round,
@@ -110,9 +112,29 @@ SCENARIO = ScenarioSpec(
         Node(
             "match",
             steps=[start_match],
-            description="加完伙伴：点「开始匹配」（+ 提示框善后）",
+            description="加完伙伴：点「开始匹配」",
             transitions=[
-                Transition("pick_general", on_page("select/idle"), 10, "进选将界面"),
+                # 弹没弹提示框由**画面**决定，三条边各管一种：
+                Transition("tip_check", on_page("tip/unchecked"), 20, "弹了提示框（还没勾）"),
+                Transition("tip_confirm", on_page("tip/checked"), 15, "提示框已经勾好了"),
+                Transition("pick_general", on_page("select/idle"), 10, "没弹提示框，直接进选将"),
+            ],
+        ),
+        # ---------------- 提示框（模态，可能不出现）----------------
+        Node(
+            "tip_check",
+            steps=[check_tip],
+            description="提示框：勾上「本次登录不再提示」",
+            transitions=[
+                Transition("tip_confirm", on_page("tip/checked"), 10, "勾上了"),
+            ],
+        ),
+        Node(
+            "tip_confirm",
+            steps=[confirm_tip],
+            description="提示框：点「确定」，关掉它",
+            transitions=[
+                Transition("pick_general", on_page("select/idle"), 10, "进了选将界面"),
             ],
         ),
         # ---------------- 选将两步 ----------------

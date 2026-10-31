@@ -81,6 +81,8 @@ CASES: tuple[tuple[str, str], ...] = (
     ("jj/before_create", "jingji1.png"),
     ("jj/after_create", "jingji2.png"),
     ("jj/after_add", "jingji3.png"),
+    ("tip/unchecked", "tip1.png"),
+    ("tip/checked", "tip2.png"),
     ("select/idle", "select1.png"),
     ("select/picked", "select2.png"),
     ("fight/hand", "zhandou1.png"),
@@ -97,6 +99,8 @@ TEMPLATE_OF: dict[str, str] = {
     "jj/before_create": "jj/before_create.png",
     "jj/after_create": "jj/after_create.png",
     "jj/after_add": "jj/after_add.png",
+    "tip/unchecked": "jj/tip_check.png",
+    "tip/checked": "jj/tip_checked.png",
     "select/idle": "select/idle.png",
     "select/picked": "select/picked.png",
     "fight/hand": "fight/hand.png",
@@ -140,6 +144,28 @@ class TestEveryAnchorIdentifiesItsOwnState:
         assert result.value.id == want, (
             f"{raw_name} 应该认成 {want!r}，实际认成 {result.value.id!r} —— "
             f"检查 {TEMPLATE_OF[want]} 裁的范围和分数"
+        )
+
+
+class TestTipStates:
+    """提示框是**状态**：框体 + 复选框两态（AND），默认就断言。
+
+    它同时验证"模态"：提示框盖住竞技场时，定位结果必须是 `tip/*`，
+    而不是底下那张「开始匹配」（`jj/after_add` 对提示框做了 exclude）。
+    """
+
+    @pytest.mark.parametrize(
+        ("want", "raw_name"),
+        (("tip/unchecked", "tip1.png"), ("tip/checked", "tip2.png")),
+    )
+    def test_both_checkbox_states_are_recognized(self, tree, want, raw_name):
+        result = tree.locate(_session(_frame_of(raw_name)).capture())
+
+        assert result.ok, f"{raw_name}: 定位出错 {result.message}"
+        assert result.value is not None
+        assert result.value.id == want, (
+            f"{raw_name} 应该认成 {want!r}，实际 {result.value.id!r} —— "
+            "检查 jj/tip_check.png / jj/tip_checked.png 的裁剪与 TIP_CHECKBOX_ROI"
         )
 
 

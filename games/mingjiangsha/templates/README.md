@@ -20,19 +20,27 @@ templates/QJ/                蓝底金框按钮：下一步
 > 因为只比边框环，不同文字版本会命中同一个位置；`find_buttons` 按位置去重，
 > 所以"把家族里每张图都试一遍"不会歧义。
 
-调用时只说"点哪种按钮"，不说"点哪句字"：
+调用时**直接挑对应的方法**（四种按钮各一个入口，底层都只比边框环）：
 
 ```python
-from games.mingjiangsha.templates import BUTTON_SHADOW_CANCEL, BUTTON_SHADOW_CONFIRM
-from games.mingjiangsha.utils import click_button
+from games.mingjiangsha.utils import (
+    click_pattern_confirm,
+    click_qj_next,
+    click_shadow_cancel,
+    click_shadow_confirm,
+)
 
-click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 创建队伍 / 添加伙伴 / 确定 都算
-click_button(ctx, BUTTON_SHADOW_CANCEL)    # 取消
-click_button(ctx, BUTTON_QJ_NEXT)          # 下一步
+click_shadow_confirm(ctx)    # 金色发光：创建队伍 / 添加伙伴 / 确定 / 投降确认
+click_pattern_confirm(ctx)   # 金色花纹大按钮：选将确定 / 开始匹配 / 结算确认
+click_shadow_cancel(ctx)     # 青色：取消
+click_qj_next(ctx)           # 蓝底金框：下一步
 ```
 
+> 底层还有通用的 `click_button(ctx, 家族名)`：给"确实要按名字动态选"的场合用
+> （比如四选一按配置决定）。写脚本时优先用上面四个 —— 意图清楚、也少传一个字符串。
+
 **加一种文字版本不用改代码**：裁一张这个按钮的图丢进对应文件夹即可。
-**加一种新按钮**：新建文件夹，调用时传文件夹名。
+**加一种新按钮**：新建文件夹，并在 `utils/buttons.py` 加一个对应的方法。
 
 ### 裁图约定
 

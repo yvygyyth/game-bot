@@ -70,6 +70,12 @@ from gamebot.atomic import actions
 from gamebot.bootstrap import project_root
 from gamebot.exceptions import ConfigError
 from gamebot.types import ActionResult, Point, Region
+from games.mingjiangsha.templates import (
+    BUTTON_PATTERN_CONFIRM,
+    BUTTON_QJ_NEXT,
+    BUTTON_SHADOW_CANCEL,
+    BUTTON_SHADOW_CONFIRM,
+)
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -80,6 +86,10 @@ __all__ = [
     "BUTTON_RING_WIDTH",
     "ButtonHit",
     "click_button",
+    "click_pattern_confirm",
+    "click_qj_next",
+    "click_shadow_cancel",
+    "click_shadow_confirm",
     "find_buttons",
     "folder_templates",
     "ring_mask",
@@ -334,3 +344,94 @@ def _pick(hits: list[ButtonHit], pick: str) -> ButtonHit:
     if pick == "bottom":
         return max(hits, key=lambda hit: hit.point.y)
     return hits[0]  # only
+
+
+# --------------------------------------------------------------------------- #
+# 四种按钮各一个入口
+#
+# 底层是同一个 :func:`click_button`（只比边框环），但**写脚本的人知道
+# 自己要的是哪种按钮** —— 让调用点直接说清"金色确认 / 花纹确认 / 青色取消 /
+# 蓝色下一步"，比传一个字符串文件夹名更难写错，日志里也一眼看出意图。
+# --------------------------------------------------------------------------- #
+def click_shadow_confirm(
+    ctx: RunContext,
+    region: Region | None = None,
+    *,
+    pick: str = "only",
+    confidence: float = BUTTON_CONFIDENCE,
+    templates: list[str] | None = None,
+    settle: float = 0.0,
+) -> ActionResult[Point]:
+    """点**金色发光确认按钮**：创建队伍 / 添加伙伴 / 确定 / 投降确认…"""
+    return click_button(
+        ctx,
+        BUTTON_SHADOW_CONFIRM,
+        region,
+        pick=pick,
+        confidence=confidence,
+        templates=templates,
+        settle=settle,
+    )
+
+
+def click_pattern_confirm(
+    ctx: RunContext,
+    region: Region | None = None,
+    *,
+    pick: str = "only",
+    confidence: float = BUTTON_CONFIDENCE,
+    templates: list[str] | None = None,
+    settle: float = 0.0,
+) -> ActionResult[Point]:
+    """点**金色花纹边框的大确认按钮**：选将确定 / 开始匹配 / 结算确认…"""
+    return click_button(
+        ctx,
+        BUTTON_PATTERN_CONFIRM,
+        region,
+        pick=pick,
+        confidence=confidence,
+        templates=templates,
+        settle=settle,
+    )
+
+
+def click_shadow_cancel(
+    ctx: RunContext,
+    region: Region | None = None,
+    *,
+    pick: str = "only",
+    confidence: float = BUTTON_CONFIDENCE,
+    templates: list[str] | None = None,
+    settle: float = 0.0,
+) -> ActionResult[Point]:
+    """点**青色发光取消按钮**。"""
+    return click_button(
+        ctx,
+        BUTTON_SHADOW_CANCEL,
+        region,
+        pick=pick,
+        confidence=confidence,
+        templates=templates,
+        settle=settle,
+    )
+
+
+def click_qj_next(
+    ctx: RunContext,
+    region: Region | None = None,
+    *,
+    pick: str = "only",
+    confidence: float = BUTTON_CONFIDENCE,
+    templates: list[str] | None = None,
+    settle: float = 0.0,
+) -> ActionResult[Point]:
+    """点**蓝底金框的「下一步」**。"""
+    return click_button(
+        ctx,
+        BUTTON_QJ_NEXT,
+        region,
+        pick=pick,
+        confidence=confidence,
+        templates=templates,
+        settle=settle,
+    )

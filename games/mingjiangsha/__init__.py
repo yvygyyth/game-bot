@@ -7,10 +7,22 @@
 from __future__ import annotations
 
 from .scripts import jingji
-from .utils import click_button, find_buttons, go_back
+from .utils import (
+    click_button,
+    click_pattern_confirm,
+    click_qj_next,
+    click_shadow_cancel,
+    click_shadow_confirm,
+    find_buttons,
+    go_back,
+)
 
 __all__ = [
     "click_button",
+    "click_pattern_confirm",
+    "click_qj_next",
+    "click_shadow_cancel",
+    "click_shadow_confirm",
     "find_buttons",
     "go_back",
     "jingji",

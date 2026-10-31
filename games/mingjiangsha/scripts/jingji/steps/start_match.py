@@ -1,56 +1,36 @@
-"""推进队伍流程：创建队伍 → 添加伙伴 → 开始匹配（+ 提示框善后）。
+"""推进队伍流程：创建队伍 → 添加伙伴 → 开始匹配。
 
-三个函数各管一个按钮，**都走公共方法** :func:`games.mingjiangsha.utils.click_button`：
-它只比按钮的**边框环**（不认中间文字），所以这里不再为每句文案单独裁图。
+按钮点击各走**对应家族的方法**（:func:`~games.mingjiangsha.utils.click_shadow_confirm`
+/ :func:`~games.mingjiangsha.utils.click_pattern_confirm`）：底层只比**边框环**、
+不认中间文字，所以换文案不用重裁图。
 
-## 三个按钮分属两个家族
+## 提示框不在这里了
 
-| 步骤 | 按钮 | 家族 |
+「开始匹配」之后可能弹的提示框现在是**状态**：
+
+| 状态 | 认什么 | 节点 / 步骤 |
 |---|---|---|
-| :func:`create_team` / :func:`add_pet` | 创建队伍 / 添加伙伴 | ``shadowConfirm``（金色发光） |
-| :func:`start_match` | 开始匹配 | ``patternConfirm``（金色花纹框） |
+| `tip/unchecked` | 框体 + 复选框（未勾） | `tip_check` / :func:`check_tip` |
+| `tip/checked` | 框体 + 复选框（已勾） | `tip_confirm` / :func:`confirm_tip` |
 
-同一时刻同一位置只会出现一个同类按钮，所以用默认的 ``pick="only"``：
-多于一个就报错，不猜。
-
-## 现在**全图找**，没给 ``region``
-
-用户要求：默认不加 roi，误命中多了再加。理由见 `pages.py` 里那段说明 ——
-一句话：模板刚裁、界面位移还没量过，这时候设紧框的风险是"框差 10px →
-永远找不到"，而症状和"模板裁错了"一样难查。
-
-**想提速或防误命中就加 ``region=``**。两组按钮分两处位置，别共用一个框：
-
-| 步骤 | 按钮在哪（客户区） |
-|---|---|
-| :func:`create_team` / :func:`add_pet` | 右侧偏中，约 x 2230~2430, y 855~915 |
-| :func:`start_match` | 右下角，约 x 1935~2275, y 1165~1245 |
-
-## 为什么三个按钮分成三个函数
-
-它们在同一块面板的**同一个位置**，只有文字不同。合并成一个"找到哪个点哪个"
-会丢掉两样东西：
-
-* **状态守卫**：关联表把它们放在三个不同状态上，位置不对时根本轮不到这个函数；
-* **失败信息**：现在能说清是"创建队伍"没认出来；合并之后只能说"三个都没认出来"。
+流程图上 `match` 有三条出边：弹框未勾 → `tip_check`；弹框已勾 → `tip_confirm`；
+没弹框、直接进选将 → `pick_general`。**没弹框是正常分支**，不是意外。
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from gamebot.atomic import actions
+from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Region
-from gamebot.types import Point as _Point
-from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM, BUTTON_SHADOW_CONFIRM
-from games.mingjiangsha.utils import click_button
+from games.mingjiangsha.utils import click_pattern_confirm, click_shadow_confirm
 
-from ..templates import T_TIP
+from ..templates import T_TIP_CHECK
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
-__all__ = ["add_pet", "create_team", "start_match"]
+__all__ = ["add_pet", "check_tip", "confirm_tip", "create_team", "start_match"]
 
 #: 点按钮之后等界面反应的时间（秒）。
 CLICK_SETTLE = 0.6
@@ -61,66 +41,46 @@ CLICK_SETTLE = 0.6
 TEAM_BUTTON_REGION = Region(2190, 820, 300, 160)
 START_MATCH_REGION = Region(1900, 1120, 420, 160)
 
+#: 提示框里两个可点位置（同样按实测位置 + 余量）。
+TIP_CHECKBOX_REGION = Region(1080, 810, 150, 140)
+TIP_CONFIRM_REGION = Region(930, 880, 330, 150)
 
-def create_team(ctx: RunContext) -> ActionResult[Any]:
+
+def create_team(ctx: RunContext) -> ActionResult[object]:
     """建队前：点「创建队伍」。"""
-    return click_button(
-        ctx, BUTTON_SHADOW_CONFIRM, TEAM_BUTTON_REGION, settle=CLICK_SETTLE
-    )
+    return click_shadow_confirm(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
 
 
-def add_pet(ctx: RunContext) -> ActionResult[Any]:
+def add_pet(ctx: RunContext) -> ActionResult[object]:
     """建队后：点「添加伙伴」。
 
     和「创建队伍」同一个位置、同一个家族（只有文字不同）——
     公共方法只比边框，所以它俩共用一套模板。
     """
-    return click_button(
-        ctx, BUTTON_SHADOW_CONFIRM, TEAM_BUTTON_REGION, settle=CLICK_SETTLE
-    )
+    return click_shadow_confirm(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
 
 
-def start_match(ctx: RunContext) -> ActionResult[Any]:
-    """加完伙伴：点「开始匹配」，然后处理**可能**弹出的提示框。
+def start_match(ctx: RunContext) -> ActionResult[object]:
+    """加完伙伴：点「开始匹配」。
 
-    不"等弹窗出现"（没弹就白等），而是：点按钮 → 睡一下 → 认一下在不在 →
-    在就勾选 + 确定。看不出来就不点，避免误点别处。
+    之后弹不弹提示框由**状态**说了算（`tip/unchecked` / `tip/checked`），
+    流程图会自己分流 —— 这个步骤不猜、不等待。
     """
-    clicked = click_button(
-        ctx, BUTTON_PATTERN_CONFIRM, START_MATCH_REGION, settle=0.8
-    )
-    if not clicked.ok:
-        return clicked
-
-    tip = _find_tip(ctx)
-    if tip is None:
-        return clicked.with_meta(tip="没弹")
-
-    # 先勾「本次登录不再提示」，再点确定（顺序反了勾选不生效）。
-    # 偏移相对提示框左上角（tip1：框 (829,592)，复选框 (1148,874)，确定 (1085,951)）。
-    ox, oy = tip.x, tip.y
-    checkbox = _Point(ox + 319, oy + 282)
-    checked = actions.click_logic_point(ctx.session, checkbox)
-    if not checked.ok:
-        return checked
-    ctx.invalidate_frame()
-
-    confirm = _Point(ox + 256, oy + 359)
-    confirmed = actions.click_logic_point(ctx.session, confirm)
-    if not confirmed.ok:
-        return confirmed
-    ctx.invalidate_frame()
-
-    return clicked.with_meta(tip="已勾选并确认", tip_at=(ox, oy))
+    return click_pattern_confirm(ctx, START_MATCH_REGION, settle=0.8)
 
 
-def _find_tip(ctx: RunContext) -> Region | None:
-    """提示框在不在？在则返回其框（源坐标）。模板不含「确定」，点确定靠相对偏移。"""
-    found = ctx.frame().find_image(T_TIP)
-    if not found.ok or found.value is None:
-        return None
-    # find_image 返回中心点；相对偏移要从左上角算，取 meta.rect。
-    rect = found.meta.get("rect")
-    if not isinstance(rect, Region):  # pragma: no cover
-        return None
-    return rect
+def check_tip(ctx: RunContext) -> ActionResult[object]:
+    """提示框 · 未勾：点「本次登录不再提示」复选框。
+
+    用复选框模板本身定位（和状态识别同一张图），点它的中心。
+    """
+    return click_image(ctx, T_TIP_CHECK, region=TIP_CHECKBOX_REGION, settle=0.4)
+
+
+def confirm_tip(ctx: RunContext) -> ActionResult[object]:
+    """提示框 · 已勾：点「确定」。
+
+    「确定」和别的金色确认按钮同家族，所以直接用
+    :func:`~games.mingjiangsha.utils.click_shadow_confirm`。
+    """
+    return click_shadow_confirm(ctx, TIP_CONFIRM_REGION, settle=0.8)

@@ -13,26 +13,22 @@
 | 流程节点 | 状态末梢 | 干什么 |
 |---|---|---|
 | ``lobby`` | ``lobby`` | 点首页的竞技入口 |
-| ``team`` | ``jj/before_create`` | 点「创建队伍」 |
-| ``team`` | ``jj/after_create`` | 点「添加伙伴」 |
-| ``match`` | ``jj/after_add`` | 点「开始匹配」（+ 提示框善后） |
-| ``select`` | ``select/idle`` | 点第 1 张武将卡 |
-| ``select`` | ``select/picked`` | 点「确定」 |
+| ``create_team`` | ``jj/before_create`` | 点「创建队伍」 |
+| ``add_pet`` | ``jj/after_create`` | 点「添加伙伴」 |
+| ``match`` | ``jj/after_add`` | 点「开始匹配」 |
+| ``tip_check`` | ``tip/unchecked`` | 勾「本次登录不再提示」 |
+| ``tip_confirm`` | ``tip/checked`` | 点「确定」关掉提示框 |
+| ``pick_general`` | ``select/idle`` | 点第 1 张武将卡 |
+| ``confirm_general`` | ``select/picked`` | 点「确定」进战斗 |
 | ``fight`` | ``fight/hand`` | 取消换牌 → 麻花结 → 投降 → 确认 |
 | ``settle`` | ``fight/done`` | 结算三步 + 记一局 |
+| ``finish`` | ``over`` | 刷够局数的终态 |
 
-## 为什么一个流程节点能关联多个状态
+## 一个流程节点只关联**一个**状态
 
-``team`` 关联两个状态、``match`` 一个、``select`` 两个 —— 它们**共用同一个步骤**：
-
-* ``team``：创建队伍和添加伙伴都是"点那个按钮"，只是按钮文字不同。
-  一个函数里写"点当前状态那个按钮"比写两个节点更省事，而且不会漏掉其中一个；
-* ``select``：点卡和点确定是两个**不同**的步骤，所以它们各自是独立的
-  ``Node``（同名 ``select`` 不行），见 :mod:`.graph`。
-
-⚠️ **一个节点只能关联一个状态**（``NodeBindings`` 会在装配期拦下写两个的）——
-不然"进入这个节点后跑哪个状态的定位代码"就不确定了。所以上面表格里
-``team`` 出现两次是**两条关联**（两个不同节点），不是一条关联对应两个状态。
+``NodeBindings`` 在装配期就会拦下"一个节点写两个状态"—— 不然"进入这个节点后
+跑哪个状态的定位代码"就不确定了。提示框/选将/战斗的每一步都是**独立节点**，
+所以每一步都有自己的状态守卫：位置不对时那个步骤根本不会被调用。
 
 ## 三条不变式
 
@@ -53,6 +49,8 @@ BINDINGS = NodeBindings(
         Binding("create_team", "jj/before_create"),
         Binding("add_pet", "jj/after_create"),
         Binding("match", "jj/after_add"),
+        Binding("tip_check", "tip/unchecked"),
+        Binding("tip_confirm", "tip/checked"),
         Binding("pick_general", "select/idle"),
         Binding("confirm_general", "select/picked"),
         Binding("fight", "fight/hand"),

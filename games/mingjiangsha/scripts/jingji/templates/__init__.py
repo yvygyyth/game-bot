@@ -25,6 +25,8 @@ __all__ = [
     "T_SELECT_IDLE",
     "T_SELECT_PICKED",
     "T_TIP",
+    "T_TIP_CHECK",
+    "T_TIP_CHECKED",
 ]
 
 # ---- 状态锚点（只给状态识别；按钮点击走游戏级家族模板）----
@@ -36,9 +38,12 @@ T_SELECT_IDLE = "select/idle.png"
 T_SELECT_PICKED = "select/picked.png"
 T_FIGHT_HAND = "fight/hand.png"
 T_FIGHT_DONE = "fight/done.png"
+# 提示框：框体（证明是这个弹窗）+ 复选框两态（未勾 / 已勾，证明勾没勾）。
+T_TIP = "jj/tip.png"
+T_TIP_CHECK = "jj/tip_check.png"
+T_TIP_CHECKED = "jj/tip_checked.png"
 
 # ---- 步骤点击 / 识别（不进状态树）----
-T_TIP = "jj/tip.png"
 T_SELECT_HEALTH = "select/select_first.png"
 T_FIGHT_SPACE = "fight/space.png"
 T_FIGHT_MENU = "fight/fight_menu.png"

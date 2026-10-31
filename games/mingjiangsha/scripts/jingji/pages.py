@@ -28,7 +28,8 @@ home
 否则会出现"明明在屏幕上却定位不到"。
 
 战斗中间那几张快照（圆结、投降、空白区…）没有分支，做成步骤即可；
-状态只留给可能停住或从别处回来的锚点。匹配后 tip 弹窗见 `steps/start_match.py`。
+状态只留给可能停住或从别处回来的锚点。提示框也是状态（`tip/unchecked` /
+`tip/checked`），由流程图的边分流（见 `graph.py`）。
 
 模板路径见 :mod:`.templates`。阈值走框架默认。
 """
@@ -48,7 +49,19 @@ from .templates import (
     T_LOBBY,
     T_SELECT_IDLE,
     T_SELECT_PICKED,
+    T_TIP,
+    T_TIP_CHECK,
+    T_TIP_CHECKED,
 )
+
+#: 提示框大致范围（源坐标）：框体（1065x360）+ 复选框都在里面。
+#: 提示框是**模态**的 —— 它盖住竞技场时，`jj/after_add` 要被否决（否则
+#: 底下那张「开始匹配」还会被认出来，流程会以为没弹框）。
+TIP_ROI = Region(720, 500, 1140, 430)
+
+#: 复选框那一小块。**必须单独框住**：整张提示框里还有别的地方长得像灰方块
+#: （实测未勾的模板在"已勾"图上、别处能到 0.96），收进这一块就只剩真复选框。
+TIP_CHECKBOX_ROI = Region(1080, 790, 150, 140)
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -87,7 +100,41 @@ FEATURE_TREE = PageGroup(
                     name="竞技场 · 加完伙伴",
                     roi=Region(1850, 1070, 520, 260),
                     queries=(ImageQuery(T_AFTER_ADD),),
-                    description="右下角是「开始匹配」",
+                    # 提示框盖住这个界面时，"加完伙伴"就不成立（模态弹窗）。
+                    exclude=(ImageQuery(T_TIP, region=TIP_ROI),),
+                    description="右下角是「开始匹配」；提示框弹着时不算这个状态",
+                ),
+            ),
+        ),
+        PageGroup(
+            "tip",
+            name="提示框",
+            description="开始匹配后可能弹的框：复选框未勾 / 已勾两态",
+            children=(
+                PageLeaf(
+                    "tip/unchecked",
+                    name="提示框 · 未勾",
+                    roi=TIP_ROI,
+                    # 框体证明"是这个弹窗"；复选框（自己的小块）证明"勾没勾"。
+                    # 阈值显式写 0.9：复选框两态在整框范围里只差 0.87~0.96，
+                    # 收到 0.9 才分得开（未勾 1.0 / 勾上 0.70）。
+                    confidence=0.9,
+                    queries=(
+                        ImageQuery(T_TIP),
+                        ImageQuery(T_TIP_CHECK, region=TIP_CHECKBOX_ROI),
+                    ),
+                    description="「本次登录不再提示」没勾",
+                ),
+                PageLeaf(
+                    "tip/checked",
+                    name="提示框 · 已勾",
+                    roi=TIP_ROI,
+                    confidence=0.9,
+                    queries=(
+                        ImageQuery(T_TIP),
+                        ImageQuery(T_TIP_CHECKED, region=TIP_CHECKBOX_ROI),
+                    ),
+                    description="勾上了，下一步点「确定」",
                 ),
             ),
         ),

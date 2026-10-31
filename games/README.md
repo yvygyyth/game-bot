@@ -451,19 +451,27 @@ games/<游戏>/templates/                    ← 再找（跨脚本共用，兜�
 `fallback_dirs`）。两处都用 `templates/__init__.py` 的 `T_*` 常量登记路径 ——
 界面检查时会两个根都查。
 
-游戏级的典型内容：**按钮家族、通用弹窗、公共图标**。名将杀已经整理成四类按钮：
+游戏级的典型内容：**按钮家族、通用弹窗、公共图标**。名将杀已经整理成四类按钮，
+每类一个方法（底层都只比边框环，换文字不用重裁）：
 
 ```python
-from games.mingjiangsha.templates import BUTTON_SHADOW_CANCEL, BUTTON_SHADOW_CONFIRM
-from games.mingjiangsha.utils import click_button
+from games.mingjiangsha.utils import (
+    click_pattern_confirm,
+    click_qj_next,
+    click_shadow_cancel,
+    click_shadow_confirm,
+)
 
-click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 金色确认：创建队伍/添加伙伴/确定 都算
-click_button(ctx, BUTTON_SHADOW_CANCEL)    # 取消
+click_shadow_confirm(ctx)    # 金色发光：创建队伍/添加伙伴/确定/投降确认
+click_pattern_confirm(ctx)   # 金色花纹：选将确定/开始匹配/结算确认
+click_shadow_cancel(ctx)     # 青色：取消
+click_qj_next(ctx)           # 蓝底金框：下一步
 ```
 
-**一个文件夹 = 一种按钮**：同一家族里的各种文字版本都放进去，调用时只说"点哪种
-按钮"。加一个文字版本 = 丢一张图进文件夹，**不用改代码**；加一种新按钮 = 新建
-文件夹。阈值、裁图约定和真机实测分数见
+通用入口 `click_button(ctx, 家族名)` 仍在（给按配置动态选的场合）。
+**一个文件夹 = 一种按钮**：同一家族里的各种文字版本都放进去。加一个文字版本 =
+丢一张图进文件夹，**不用改代码**；加一种新按钮 = 新建文件夹 + 加一个方法。
+阈值、裁图约定和真机实测分数见
 [`mingjiangsha/templates/README.md`](mingjiangsha/templates/README.md)。
 
 ### 模板怎么分目录（这块来回改过几次，值得单独说）
