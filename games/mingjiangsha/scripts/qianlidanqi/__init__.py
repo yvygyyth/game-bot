@@ -10,13 +10,16 @@
 | 有哪些节点、什么条件换节点 | :mod:`.graph` |
 | 每个节点具体做什么 | :mod:`.steps` |
 | 模板路径 | :mod:`.templates` |
+| 局内状态/赠礼优先表 | :mod:`.store` |
+| 局内流程设计稿 | `templates/FLOW.md` |
 
 ## 流程一句话
 
 首页点「战役」→ 点「千里单骑」→ 点「选择武将」→ 搜索入参武将并点第一个结果
 → Esc 退回主界面 → 点「开始挑战」→ 进入局内。
 
-局内（`qianli/flow`）先做**终态占位**：一进局内画面就停，后面的局内流程再补。
+局内（`qianli/flow`）先做**终态占位**：一进局内画面就停。
+局内状态/赠礼优先表已经按旧工程搬到 :mod:`.store`，局内流程的下一步设计见 `templates/FLOW.md`。
 """
 
 from __future__ import annotations

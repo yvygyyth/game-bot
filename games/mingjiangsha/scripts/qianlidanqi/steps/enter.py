@@ -9,6 +9,7 @@ from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Point, Region
 
 from ..pages import MAIN_PLACEHOLDER_ROI, START_ROI
+from ..store import reset_run_state
 from ..templates import T_NEXT, T_PLACEHOLDER, T_QIANLI_CARD, T_START
 
 if TYPE_CHECKING:
@@ -57,10 +58,15 @@ def open_pick(ctx: RunContext) -> ActionResult[Any]:
 
 
 def start_run(ctx: RunContext) -> ActionResult[Any]:
-    """已选将 → 点红色「开始挑战」，进入局内。"""
+    """已选将 → 点红色「开始挑战」，进入局内（开新一局的状态）。"""
+    reset_run_state(ctx)
     return click_image(ctx, T_START, region=START_ROI, settle=START_SETTLE)
 
 
 def continue_run(ctx: RunContext) -> ActionResult[Any]:
-    """已有进行中的局 → 点红色「继续挑战」，直接进局内。"""
+    """已有进行中的局 → 点红色「继续挑战」，直接进局内。
+
+    继续的是**原来那局**：铜币/赠礼记录可能还在，这里不重置，
+    由局内流程按实际画面自己补。
+    """
     return click_image(ctx, T_NEXT, region=START_ROI, settle=START_SETTLE)
