@@ -186,8 +186,6 @@ SCENARIO = ScenarioSpec(
     ),
     options=EngineOptions(
         tick_interval=0.4,
-        # 过场动画本来就会短暂认不出来，给一点宽容期
-        unknown_grace=2.0,
         # 连续命中才算"确认进入"，过滤动画里的闪现
         require_confirmed=True,
         # 循环次数由步骤里的计数器决定（见 finish_round），

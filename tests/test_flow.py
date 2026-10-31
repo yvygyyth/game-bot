@@ -22,7 +22,6 @@ from gamebot.flow import (
     RunReport,
     Scenario,
     StopReason,
-    UnknownPolicy,
 )
 from gamebot.state import Page, PageGroup, PageTracker, PageTree
 from gamebot.types import ActionResult, Point
@@ -481,12 +480,6 @@ class TestScenario:
         )
         assert scenario.validate() is None
 
-    def test_recovery_node_must_exist(self) -> None:
-        scenario = build_scenario()
-        scenario.options.recovery_node = "ghost"
-        with pytest.raises(ConfigError):
-            scenario.validate()
-
     def test_stop_pages_must_exist(self) -> None:
         scenario = build_scenario()
         scenario.options.stop_pages = ("ghost",)
@@ -563,7 +556,6 @@ class TestEngineOptions:
     def test_defaults(self) -> None:
         options = EngineOptions()
         assert options.tick_interval == 0.2
-        assert options.on_unknown is UnknownPolicy.WAIT
         assert options.require_confirmed is True
         assert options.validate() == []
 
@@ -571,7 +563,6 @@ class TestEngineOptions:
         assert any("tick_interval" in p for p in EngineOptions(tick_interval=0).validate())
         assert any("max_runtime" in p for p in EngineOptions(max_runtime=0).validate())
         assert any("max_ticks" in p for p in EngineOptions(max_ticks=-1).validate())
-        assert any("unknown_grace" in p for p in EngineOptions(unknown_grace=-1).validate())
 
 
 class TestStopReason:
@@ -1071,7 +1062,6 @@ class TestRelocateAfterStepFailure:
     def test_unknown_state_waits_instead_of_guessing(self, ctx, matcher) -> None:
         """认不出来时只等，绝不猜、绝不动作。"""
         scenario, _tree = build_live()
-        scenario.options.unknown_grace = 99.0
         engine = FlowEngine(scenario, ctx)
         matcher.matches = {}
 
@@ -1143,3 +1133,90 @@ class TestEngineRunStory:
         # 重定位那次之后没再乱跳
         assert report.recoveries[0].to_node == "arena"
         assert report.to_dict()["recoveries"], "报告里要能看到重定位"
+
+class TestEdgeEvaluation:
+    """两条结构纪律：失败后不跳过中间节点、边条件每轮只求值一次。"""
+
+    @staticmethod
+    def _chain():
+        tree = PageTree()
+        tree.add(PageGroup("home"))
+        for name in ("a", "b", "c"):
+            tree.add(Page(f"home/{name}", queries=(ImageQuery(f"{name}.png"),)), parent="home")
+        graph = Graph(initial="a")
+        for node_id in ("a", "b", "c"):
+            graph.add_node(Node(node_id))
+        graph.connect("a", "b", priority=10, condition=ImageQuery("b.png"))
+        graph.connect("b", "c", priority=10)  # 无条件：专门用来暴露"多走一条边"
+        scenario = Scenario(
+            name="chain",
+            tree=tree,
+            graph=graph,
+            bindings=NodeBindings.of(
+                [("a", "home/a"), ("b", "home/b"), ("c", "home/c")]
+            ),
+            options=EngineOptions(tick_interval=0.01, require_confirmed=False),
+        )
+        return scenario
+
+    def test_failed_step_does_not_skip_the_next_node(self, ctx, matcher) -> None:
+        """步骤失败 -> 按边推进到 b；不能在同轮再判一次边、把 b 的步骤跳过去。"""
+        from gamebot.execution.executor import Executor
+
+        scenario = self._chain()
+        ctx.executor = Executor(ctx)
+        calls: list[str] = []
+
+        def failing(_ctx):
+            matcher.matches = {"b.png": (Point(1, 1), 0.99)}
+            return ActionResult.not_found("没找到")
+
+        def b_step(_ctx):
+            calls.append("b")
+            return ActionResult.success(1)
+
+        scenario.graph.nodes["a"].steps = [failing]
+        scenario.graph.nodes["b"].steps = [b_step]
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/a", now=0.0)
+        matcher.matches = {"a.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+        assert engine.cursor.current == "b", "失败后按边推进，不能顺手再走一条把 b 跳过"
+
+        engine.tracker.advance_tick()
+        engine.tick()
+        assert calls == ["b"], "下一轮该执行 b 的步骤"
+
+    def test_edge_condition_is_evaluated_once_per_tick(self, ctx, matcher) -> None:
+        tree = PageTree()
+        tree.add(PageGroup("home"))
+        tree.add(Page("home/a", queries=(ImageQuery("a.png"),)), parent="home")
+        tree.add(Page("home/b", queries=(ImageQuery("b.png"),)), parent="home")
+        graph = Graph(initial="a")
+        graph.add_node(Node("a"))
+        graph.add_node(Node("b"))
+        count = 0
+
+        def counting(_ctx):
+            nonlocal count
+            count += 1
+            return False
+
+        graph.connect("a", "b", priority=10, condition=counting)
+        scenario = Scenario(
+            name="once",
+            tree=tree,
+            graph=graph,
+            bindings=NodeBindings.of([("a", "home/a"), ("b", "home/b")]),
+            options=EngineOptions(tick_interval=0.01, require_confirmed=False),
+        )
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/a", now=0.0)
+        matcher.matches = {"a.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert count == 1, f"边条件跑了 {count} 次（应该只求值一次）"

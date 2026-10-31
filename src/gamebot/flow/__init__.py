@@ -51,7 +51,7 @@ from .graph import (
     Transition,
 )
 from .node_bindings import Binding, NodeBindings
-from .scenario import EngineOptions, Scenario, UnknownPolicy
+from .scenario import EngineOptions, Scenario
 from .state_binding import StateBinding
 
 __all__ = [
@@ -73,5 +73,4 @@ __all__ = [
     "StateBinding",
     "StopReason",
     "Transition",
-    "UnknownPolicy",
 ]

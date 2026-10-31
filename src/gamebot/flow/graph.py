@@ -743,9 +743,20 @@ class GraphCursor:
         self.history.append(target)
         return True
 
-    def step(self, ctx: RunContext, *, now: float = 0.0) -> NodeId | None:
-        """"评估 + 移动"一步到位。返回移动后的当前节点。"""
-        decision = self.evaluate(ctx, now=now)
+    def step(
+        self,
+        ctx: RunContext,
+        *,
+        now: float = 0.0,
+        decision: Decision | None = None,
+    ) -> NodeId | None:
+        """"评估 + 移动"一步到位。返回移动后的当前节点。
+
+        :param decision: 已经评估好的决策。传了就不再重新评估 ——
+            边条件可能是 ``ImageQuery``，重评等于**多跑一遍匹配**；
+            而且带副作用的条件下两遍结果可能不一致。
+        """
+        decision = decision or self.evaluate(ctx, now=now)
         if decision.target is not None:
             self.advance(decision.target, now=now)
         return decision.target

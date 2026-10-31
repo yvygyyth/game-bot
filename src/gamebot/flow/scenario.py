@@ -9,8 +9,7 @@
 * **每个记录信息的状态都必须有流程节点认领**
   （:func:`gamebot.flow.state_binding.validate_binding`）。这不是"值得提示"，而是
   启动期直接 ``ConfigError``：重定位到无人认领的状态，游标就无处可去 ——
-  而那正是"允许自动重定位"能成立的前提；
-* ``recovery_node`` 必须在流程图里存在。
+  而那正是"允许自动重定位"能成立的前提。
 
 也必须一起校验。分开管理的话，很容易出现"改了状态 id、流程图忘了改"
 这种跨文件的静默失效。
@@ -25,13 +24,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import ConfigError
 from ..state.page import PageId, PageTree
 from ..utils.logging import get_logger
-from .graph import Graph, NodeId
+from .graph import Graph
 from .node_bindings import NodeBindings
 
 if TYPE_CHECKING:
@@ -39,27 +37,7 @@ if TYPE_CHECKING:
 
 log = get_logger("flow.scenario")
 
-__all__ = ["EngineOptions", "Scenario", "UnknownPolicy"]
-
-
-class UnknownPolicy(StrEnum):
-    """认不出状态时怎么办。
-
-    "认不出来"是最常见的真实情况（动画中间帧、网络卡住、游戏在加载），
-    所以必须显式选一个策略，而不是靠默认行为蒙混。
-    """
-
-    WAIT = "wait"
-    """原地等，重新截图识别。大多数情况选它。"""
-
-    RELOAD_TICK = "reload_tick"
-    """放弃本轮，立刻下一轮。识别很便宜时用。"""
-
-    RECOVERY = "recovery"
-    """跳到 ``recovery_node``（比如"回主界面"），主动纠偏。"""
-
-    STOP = "stop"
-    """直接停流程并报告。适合"不认识就绝不乱点"的保守场景。"""
+__all__ = ["EngineOptions", "Scenario"]
 
 
 @dataclass(slots=True)
@@ -78,14 +56,6 @@ class EngineOptions:
 
     stop_pages: tuple[PageId, ...] = ()
     """进入这些状态即结束流程（如 ``"closed"``）。"""
-
-    on_unknown: UnknownPolicy = UnknownPolicy.WAIT
-    recovery_node: NodeId = ""
-    """``on_unknown == RECOVERY`` 时跳到哪个节点。"""
-
-    unknown_grace: float = 1.0
-    """宽容期（秒）。进入未知状态后的这段时间只等不动作 —— 过场动画本来
-    就会短暂认不出来。没有它，脚本会在每次场景切换时误判并乱点。"""
 
     require_confirmed: bool = True
     """状态未"确认进入"（连续命中帧数不够）前不执行动作。默认开。"""
@@ -117,8 +87,6 @@ class EngineOptions:
             problems.append("max_ticks 不能为负")
         if self.dead_end_rounds < 0:
             problems.append("dead_end_rounds 不能为负（0 = 关掉'流程走完'判定）")
-        if self.unknown_grace < 0:
-            problems.append("unknown_grace 不能为负")
         return problems
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,9 +95,6 @@ class EngineOptions:
             "max_runtime": self.max_runtime,
             "max_ticks": self.max_ticks,
             "stop_pages": list(self.stop_pages),
-            "on_unknown": self.on_unknown.value,
-            "recovery_node": self.recovery_node,
-            "unknown_grace": self.unknown_grace,
             "require_confirmed": self.require_confirmed,
             "dry_run": self.dry_run,
         }
@@ -168,9 +133,8 @@ class Scenario:
         3. **状态 ↔ 节点的关联合法**（:func:`gamebot.flow.state_binding.validate_binding`）：
            每个节点声明的状态必须存在，而且**每个记录信息的状态都必须有节点
            认领** —— 否则重定位到它就无处可去；
-        4. ``options.recovery_node`` 必须在图里存在；
-        5. ``options.stop_pages`` 必须在树里存在；
-        6. 运行参数合法。
+        4. ``options.stop_pages`` 必须在树里存在；
+        5. 运行参数合法。
 
         :raises StateError: 状态树的问题。
         :raises FlowError: 流程图的问题。
@@ -183,10 +147,6 @@ class Scenario:
         # 关联表的引用错误在这里报（节点关联的状态在不在、状态有没有人认领）
         self.bindings.validate(self.tree, self.graph)
 
-        if self.options.recovery_node and self.options.recovery_node not in self.graph.nodes:
-            problems.append(
-                f"recovery_node 指向不存在的节点: {self.options.recovery_node!r}"
-            )
         for page_id in self.options.stop_pages:
             if page_id not in self.tree:
                 problems.append(f"stop_pages 里不存在的状态: {page_id!r}")

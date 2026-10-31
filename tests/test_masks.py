@@ -51,3 +51,13 @@ class TestRingMask:
 
         with pytest.raises(ValueError):
             ring_mask((10, 10), inset=4, width=12)
+
+def test_business_ring_mask_delegates_to_framework() -> None:
+    """业务层不再留第二份几何：两边必须逐像素一致。"""
+    from gamebot.vision.masks import ring_mask as framework
+    from games.mingjiangsha.utils.buttons import ring_mask as business
+
+    assert np.array_equal(
+        business((100, 200), inset=4, width=12),
+        framework((100, 200), inset=4, width=12),
+    )

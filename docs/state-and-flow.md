@@ -244,8 +244,8 @@ BINDINGS.node_for("home/jingji/before_create")   # -> "jingji"                  
 ### 认不出来 ≠ 出错
 
 * `success(PageMatch(id="unknown"))` —— 认不出来是**有效结果**。过场动画、
-  加载、切场景都会短暂认不出来，所以必须显式定义怎么应对
-  （`on_unknown: wait | reload_tick | recovery | stop` + `unknown_grace` 宽容期）。
+  加载、切场景都会短暂认不出来。引擎的应对是固定的：等 `RECOVER_DELAY`
+  （期间画面恢复就取消）→ 搜树 → 搜不到才停。没有可配置的未知策略。
 * `error` —— 只用于底层真出错（模板文件缺失、Matcher 抛异常）。
   把它当成"认不出来"会把配置错误伪装成游戏行为，极难排查。
 

@@ -172,8 +172,11 @@ int / float / 布尔 —— 否则步骤里拿到的是字符串，`range("5")` 
 
 - `PageTree.locate()` 即使什么都没认出来也返回 `success`，
   value 是 `PageMatch(id=UNKNOWN_PAGE)`；
-- `unknown_grace` 给一段宽容期，期间只等不动作；
-- 之后按 `on_unknown` 策略走（`wait` / `reload_tick` / `recovery` / `stop`）。
+- 引擎先等 `RECOVER_DELAY`（5s）—— 期间画面一旦能认出来就取消这次重定位
+  （过场动画就是这种"自己会好"的情况）；
+- 等满之后搜一遍树；搜到了就按边/关联表落位，两轮都搜不到才**停下并说明原因**。
+  没有可配置的"未知策略"：早先有过 `on_unknown` / `unknown_grace`，引擎改成
+  固定路径后它们就不再生效，已经删掉。
 
 没有这套东西，脚本会在每次场景切换时误判并开始乱点。
 
@@ -324,8 +327,8 @@ FlowEngine.tick()
   └─⑧ 检查预算（max_runtime / max_ticks）-> ctx.sleep(tick_interval)
 ```
 
-认不出来（`unknown`）不算"走错了"——那是"看不清"，由 `unknown_grace` 宽容期
-和 `on_unknown` 策略处理，宽容期内**只等不动作**。
+认不出来（`unknown`）不算"走错了"——那是"看不清"：先等 `RECOVER_DELAY`
+（期间画面恢复就取消），等满再搜树，搜不到才停。**等待期间只等不动作**。
 
 ## 五、调试方法论（重要）
 

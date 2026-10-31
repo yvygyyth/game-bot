@@ -609,7 +609,8 @@ class FlowEngine:
             # 同一套条件与优先级）；对不上才说明"真跑偏了"，那时才恢复定位。
             if anchor != UNKNOWN_PAGE and self._advance_if_edge_matches(now=now):
                 return None
-            return self._realign(frame, node, bound, anchor, now=now)
+            self._realign(frame, node, bound, anchor, now=now)
+            return None
 
         # 没关联状态：只要锚点没有被**别的**节点认领，就继续待着（让位给认领它的）
         if anchor == UNKNOWN_PAGE:
@@ -619,7 +620,8 @@ class FlowEngine:
         owner = self.binding.node_for(anchor)
         if owner is None or owner == node.id:
             return self._run_current(node, now=now)
-        return self._realign(frame, node, node.id, anchor, now=now)
+        self._realign(frame, node, node.id, anchor, now=now)
+        return None
 
     # ------------------------------------------------------------------ #
     # 两条分支
@@ -647,8 +649,9 @@ class FlowEngine:
             #
             # 所以这里**主动**拿新帧把位置摆正，并把因果写进日志
             # （"因某步失败"），而不是留给下一轮当成一次普通的自检不符。
-            self._relocate_after_failure(node, last, now=now)
-            self._note_advance(now=now)
+            moved = self._relocate_after_failure(node, last, now=now)
+            if not moved:
+                self._note_advance(now=now)
             return last
 
         # 转移决策：**没走成的也记**（"为什么它不动"要靠这个回答）
@@ -678,7 +681,7 @@ class FlowEngine:
 
     def _relocate_after_failure(
         self, node: Node, failure: StepOutcome, *, now: float
-    ) -> None:
+    ) -> bool:
         """一步失败了：拿**新帧**看看现在到底在哪，该挪就挪。
 
         和 :meth:`_realign` 的区别只在**触发原因**（这里是"某步失败"，
@@ -690,6 +693,9 @@ class FlowEngine:
         失败之前那次 ``locate`` 用的是**已经用过的帧**（``_frame()`` 在 TTL 内复用），
         而失败的那一步很可能已经点了按钮 —— 那张图过期了。
         不作废帧的话，这里会得出"位置没变"的错误结论。
+
+        :return: 游标**已经挪过**了返回 True（调用方就不要再 ``_note_advance``，
+            否则会在新节点上再判一次边、把中间节点跳过去）。
         """
         # 作废缓存 -> 真的抓一张新的
         self.ctx.invalidate_frame()
@@ -700,7 +706,7 @@ class FlowEngine:
         if not found.ok or found.value is None:
             # 底层定位出错：不猜，交给下一轮（它有自己的错误处理）。
             log.debug("节点 %r 步骤失败后重新定位出错: %s", node.id, found.message)
-            return
+            return False
         self.tracker.update(found.value, now=now, reason="失败后重新定位")
         anchor = self.tracker.current_id
 
@@ -709,7 +715,7 @@ class FlowEngine:
             # 节点不关联状态（纯逻辑/纯等待节点）：没有"该在的位置"可言，
             # 不猜、不挪 —— 下一轮它会照常再试一次。
             log.debug("节点 %r 不关联状态，步骤失败后不做重定位", node.id)
-            return
+            return False
 
         if anchor == bound:
             # 画面还在原地：失败是"这一步没命中"，不是"位置跑了"。
@@ -721,7 +727,7 @@ class FlowEngine:
                 failure.message,
                 anchor,
             )
-            return
+            return False
 
         # 画面确实变了：如果某条出边等的就是新画面，那是**正常推进**
         # （点了按钮、进了下一屏），不该记成重定位。
@@ -732,11 +738,11 @@ class FlowEngine:
                 failure.step,
                 failure.message,
             )
-            return
+            return True
 
         # 位置确实变了、又没有边接得住：交给和自检不符时**同一套**重定位逻辑
         # （慢路径确认 + 关联表反查 + 记 Recovery）
-        self._realign(frame, node, bound, anchor, now=now, cause="步骤失败")
+        return self._realign(frame, node, bound, anchor, now=now, cause="步骤失败")
 
     #: 重定位时先查"最近待过的状态"队列，查几个。
     #:
@@ -761,26 +767,6 @@ class FlowEngine:
     #: 5 秒是按"点按钮之后的动画 + 网络加载"这个量级定的。
     RECOVER_DELAY = 5.0
 
-    def _locate_now(self, *, now: float) -> PageId:
-        """拿当前帧问一句"现在到底在哪个状态"（快路径，**不动跟踪器**）。
-
-        专门给"某步失败之后要不要重定位"用：
-
-        * 用**快路径**而不是 :meth:`PageTree.recover` —— 后者是扩散搜索，
-          代价高；这里只需要一个瞬时判断，判断完立刻交给 :meth:`_realign`
-          （那里才走慢路径确认）。**慢路径只在一个地方跑，不重复实现。**
-        * **不动跟踪器**：跟踪器管的是"连续命中几帧了"（确认进入），
-          这里只是内部问一句，更新它会让确认计数凭空 +1 ——
-          等于用一次内部查询把"连续 N 帧"的闸门放过去了。
-        * 认不出来 / 底层报错都返回 ``UNKNOWN_PAGE``：那会走
-          :meth:`_recover_later` 的延迟重定位，是安全的默认。
-        """
-        frame = self.ctx.frame()
-        found = self.scenario.tree.locate(frame, self.tracker.current_id, now=now)
-        if not found.ok or found.value is None:
-            return UNKNOWN_PAGE
-        return found.value.id
-
     def _realign(
         self,
         frame: Frame,
@@ -790,7 +776,7 @@ class FlowEngine:
         *,
         now: float,
         cause: str = "自检不符",
-    ) -> StepOutcome | None:
+    ) -> bool:
         """状态对不上：走意外路径（重定位）。
 
         这是"状态树用来在意外时重定位到某个流程节点"的实现：
@@ -810,8 +796,10 @@ class FlowEngine:
         """
         if anchor == UNKNOWN_PAGE:
             self._recover_later(expected, cause=cause, now=now)
+            # 认不出来也允许"按边推进"：边条件自己可能就是在找下一页
+            # （``ImageQuery`` 形式的边不依赖状态树认出当前页）。
             self._note_advance(now=now)
-            return None
+            return True
         self._pending_recover = None
 
         # 认得出、只是和预期不同：**不用等**（画面已经明确可识别了），直接搜。
@@ -839,7 +827,7 @@ class FlowEngine:
                 "重定位到状态 %r，但没有任何节点认领它 —— 保持原地", anchor
             )
             self._note_advance(now=now)
-            return None
+            return True
 
         self.cursor.advance(target, now=now)
         self._note_recovery(node.id, expected, anchor, target, recovered.value)
@@ -851,9 +839,11 @@ class FlowEngine:
             anchor,
             target,
         )
-        # 本轮不再执行：先把位置摆正，干活交给下一轮
+        # 本轮不再执行：先把位置摆正，干活交给下一轮；顺手判一条边
+        # （和以前一样）。调用方据此跳过自己的 ``_note_advance``，
+        # 避免同一轮连走两条边。
         self._note_advance(now=now)
-        return None
+        return True
 
     # ------------------------------------------------------------------ #
     # 内部
@@ -864,8 +854,9 @@ class FlowEngine:
         "记决策 + 走一步"是所有"本轮不动作"分支的公共尾巴，收在一处是为了
         保证**没有哪个分支会忘记推进**（忘了就是永久卡死）。
         """
-        self._note_decision(self.cursor.evaluate(self.ctx, now=now))
-        self.cursor.step(self.ctx, now=now)
+        decision = self.cursor.evaluate(self.ctx, now=now)
+        self._note_decision(decision)
+        self.cursor.step(self.ctx, now=now, decision=decision)
 
     def _emit(self, kind: EventKind, **data: Any) -> None:
         """发一条事件。没挂总线时是空操作 —— 调用点不用到处判空。"""
@@ -970,14 +961,13 @@ class FlowEngine:
         而不是继续等宽容期。用户看到的是"停下来了、有原因"，
         而不是"卡着不动也不报错"。
 
-        ## 为什么不用宽容期那套（``on_unknown`` 策略）
+        ## 为什么没有可配置的"未知策略"
 
-        那套用的是 ``EngineOptions.on_unknown``（WAIT / STOP / RECOVERY /
-        RELOAD_TICK），而这里要表达的是**更明确的一件事**：
-        "等够了、也搜过了、确实没有" —— 那只有一个正确处理：结束。
-        两套机制叠在一起只会让"到底等到什么时候"说不清。
-        （``on_unknown`` / ``unknown_grace`` 配置项**保留着**，因为它们是公开
-        API，删掉会让别人的配置突然报错；只是引擎不再用它们决定"停不停"了。）
+        以前这里有一套 ``on_unknown`` / ``unknown_grace`` 配置（wait / stop /
+        recovery / reload_tick），但引擎后来改成"认不出来 -> 等 RECOVER_DELAY
+        秒 -> 搜一遍 -> 搜不到就停"这一条固定路径，那些配置就**再也不生效**了。
+        配置项留在那里会让使用者以为能调，实际调了没用 —— 所以直接删掉，
+        只保留 :attr:`RECOVER_DELAY` 这一个真正起作用的数。
         """
         deadline = now + self.RECOVER_DELAY
         if self._pending_recover is None:

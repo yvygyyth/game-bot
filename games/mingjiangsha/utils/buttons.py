@@ -148,26 +148,20 @@ def ring_mask(shape: tuple[int, int], *, inset: int, width: int) -> Any:
     为什么要有它：按钮换文字时**中间的字变了**，但边框没变。整块模板比对会因为
     文字不同而失配；只比这个环（遮罩中心）就能忽略文字。
 
+    **几何实现在框架层**（:func:`gamebot.vision.masks.ring_mask`）—— 这里只做
+    默认参数和错误消息的包装，业务层不再留第二份几何代码。
+
     :param shape: 模板的 ``(高, 宽)``。
     :param inset: 从裁剪图**外沿**往里缩多少像素再取环 —— 用来跳过裁剪时带进来的
         背景（背景随界面变，浅色弹窗和深色面板差 140 个亮度级）。
     :param width: 环的宽度。
     """
-    import numpy as np  # 业务层用，不把它带到状态/流程层的导入期
+    from gamebot.vision.masks import ring_mask as _framework_ring_mask
 
-    height, width_px = shape[:2]
-    mask = np.zeros((height, width_px), np.uint8)
-    top, bottom = inset, height - inset
-    left, right = inset, width_px - inset
-    if bottom - top <= 0 or right - left <= 0:
-        raise ConfigError(
-            f"按钮模板太小（{width_px}x{height}），放不下 inset={inset} 的边框环"
-        )
-    mask[top:bottom, left : left + width] = 1
-    mask[top:bottom, right - width : right] = 1
-    mask[top : top + width, left:right] = 1
-    mask[bottom - width : bottom, left:right] = 1
-    return mask
+    try:
+        return _framework_ring_mask(shape, inset=inset, width=width)
+    except ValueError as exc:
+        raise ConfigError(f"按钮模板太小，放不下 inset={inset} 的边框环: {exc}") from exc
 
 
 def _mask_for(ctx: RunContext, template: str) -> Any:
