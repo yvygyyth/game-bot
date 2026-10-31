@@ -7,15 +7,14 @@ home
     ├── jj/before_create   「创建队伍」
     ├── jj/after_create    「添加伙伴」
     ├── jj/after_add       「开始匹配」
-    ├── select（分类）
-    │   ├── select/idle    「确定」灰
-    │   └── select/picked  「确定」金
+    ├── select              选将界面（点卡 + 确定）
     └── fight（分类）
         ├── fight/hand     换牌弹窗
         └── fight/done     结算「确认」
 ```
 
-`select` / `fight` 是分类节点：同一界面的先后时刻，各挂独立叶子。
+`fight` 是分类节点：同一界面的先后时刻（换牌 / 结算）各挂独立叶子。
+`select` 是一个单独的叶子（选将界面只有一种样子要看）。
 分类节点自己没有 queries，信息记在叶子上。
 
 ## ROI 是量出来的，不是猜的
@@ -47,8 +46,7 @@ from .templates import (
     T_FIGHT_DONE,
     T_FIGHT_HAND,
     T_LOBBY,
-    T_SELECT_IDLE,
-    T_SELECT_PICKED,
+    T_SELECT_SCREEN,
     T_TIP,
     T_TIP_CHECK,
     T_TIP_CHECKED,
@@ -101,7 +99,9 @@ FEATURE_TREE = PageGroup(
                     roi=Region(1850, 1070, 520, 260),
                     queries=(ImageQuery(T_AFTER_ADD),),
                     # 提示框盖住这个界面时，"加完伙伴"就不成立（模态弹窗）。
-                    exclude=(ImageQuery(T_TIP, region=TIP_ROI),),
+                    # 阈值抬到 0.95：提示框模板在竞技场原画上能到 0.85~0.9
+                    # （实测把卷轴那块误认成提示框），0.95 才只认真弹窗。
+                    exclude=(ImageQuery(T_TIP, region=TIP_ROI, confidence=0.95),),
                     description="右下角是「开始匹配」；提示框弹着时不算这个状态",
                 ),
             ),
@@ -138,26 +138,12 @@ FEATURE_TREE = PageGroup(
                 ),
             ),
         ),
-        PageGroup(
+        PageLeaf(
             "select",
             name="选将",
-            description="选将界面：「确定」灰 / 金两态",
-            children=(
-                PageLeaf(
-                    "select/idle",
-                    name="选将 · 未选",
-                    roi=Region(990, 640, 570, 300),
-                    queries=(ImageQuery(T_SELECT_IDLE),),
-                    description="「确定」是灰的 —— 还没点武将",
-                ),
-                PageLeaf(
-                    "select/picked",
-                    name="选将 · 已选",
-                    roi=Region(990, 640, 570, 300),
-                    queries=(ImageQuery(T_SELECT_PICKED),),
-                    description="「确定」是金的 —— 武将已选",
-                ),
-            ),
+            roi=Region(300, 700, 220, 140),
+            queries=(ImageQuery(T_SELECT_SCREEN),),
+            description="选将界面：点一张武将卡，再点「确定」",
         ),
         PageGroup(
             "fight",

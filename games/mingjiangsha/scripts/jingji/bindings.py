@@ -18,8 +18,7 @@
 | ``match`` | ``jj/after_add`` | 点「开始匹配」 |
 | ``tip_check`` | ``tip/unchecked`` | 勾「本次登录不再提示」 |
 | ``tip_confirm`` | ``tip/checked`` | 点「确定」关掉提示框 |
-| ``pick_general`` | ``select/idle`` | 点第 1 张武将卡 |
-| ``confirm_general`` | ``select/picked`` | 点「确定」进战斗 |
+| ``pick_general`` | ``select`` | 点第 1 张武将卡 + 「确定」 |
 | ``fight`` | ``fight/hand`` | 取消换牌 → 麻花结 → 投降 → 确认 |
 | ``settle`` | ``fight/done`` | 结算三步 + 记一局 |
 | ``finish`` | ``over`` | 刷够局数的终态 |
@@ -51,8 +50,7 @@ BINDINGS = NodeBindings(
         Binding("match", "jj/after_add"),
         Binding("tip_check", "tip/unchecked"),
         Binding("tip_confirm", "tip/checked"),
-        Binding("pick_general", "select/idle"),
-        Binding("confirm_general", "select/picked"),
+        Binding("pick_general", "select"),
         Binding("fight", "fight/hand"),
         Binding("settle", "fight/done"),
         # 终态也要有节点认领 —— 否则重定位到它就无处可去。

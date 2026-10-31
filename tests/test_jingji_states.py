@@ -83,8 +83,7 @@ CASES: tuple[tuple[str, str], ...] = (
     ("jj/after_add", "jingji3.png"),
     ("tip/unchecked", "tip1.png"),
     ("tip/checked", "tip2.png"),
-    ("select/idle", "select1.png"),
-    ("select/picked", "select2.png"),
+    ("select", "select1.png"),
     ("fight/hand", "zhandou1.png"),
     ("fight/done", "zhandou7.png"),
 )
@@ -101,8 +100,7 @@ TEMPLATE_OF: dict[str, str] = {
     "jj/after_add": "jj/after_add.png",
     "tip/unchecked": "jj/tip_check.png",
     "tip/checked": "jj/tip_checked.png",
-    "select/idle": "select/idle.png",
-    "select/picked": "select/picked.png",
+    "select": "select/screen.png",
     "fight/hand": "fight/hand.png",
     "fight/done": "fight/done.png",
 }

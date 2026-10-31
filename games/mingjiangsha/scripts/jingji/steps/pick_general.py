@@ -1,16 +1,16 @@
 """选将：点一个武将的血条 → 点「确定」。
 
-## 为什么拆成两个函数（对应两个状态）
+## 为什么是一步、一个状态
 
-选将界面的**确定按钮有两种样子**：没选武将时是灰的、选了之后是金的。
-关联表把它拆成 ``select/idle`` 和 ``select/picked`` 两个叶子，各有各的步骤：
+选将界面的「确定」按钮**两种样子**（没选武将时灰、选了之后金），本来拆过
+``select/idle`` / ``select/picked`` 两个状态。但**真机上那个按钮的尺寸和截图里
+不一样**（实拍 435x89，旧模板 401x105），两个状态的模板都匹配不上；而"金/灰"
+又只差在颜色上，模板匹配对颜色不敏感。
 
-* ``select/idle``  -> :func:`pick_general`：点一张武将卡（点完确定变金）
-* ``select/picked`` -> :func:`confirm_general`：点确定
-
-**好处是不需要"选没选过"的判断。** 状态机天然知道走到哪一步：
-卡在 ``select/idle`` 就说明上次点卡没生效、会再点一次；
-而确定按钮只有在状态变成 ``picked``（金）之后才会被点。
+所以改成：**一个状态 ``select``**（认「换座」按钮 —— 它在两种状态下完全一样，
+实测 1.000），步骤里点完卡睡 0.5s、再点固定坐标的「确定」。
+「确定」在选将界面是**居中固定**的（实拍中心约 (1276, 739)），和首页的
+竞技入口一样，固定坐标在这里是安全的。
 
 ## 怎么认出"武将卡"：找**血条**
 
@@ -36,17 +36,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.types import ActionResult, Region
+from gamebot.types import ActionResult
 from gamebot.types import Point as _Point
-from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
-from games.mingjiangsha.utils import click_button
 
 from ..templates import T_SELECT_HEALTH
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
 
-__all__ = ["CONFIRM_SETTLE", "PICK_SETTLE", "confirm_general", "pick_general"]
+__all__ = ["CONFIRM_POINT", "CONFIRM_SETTLE", "PICK_SETTLE", "pick_general"]
 
 #: 点武将卡之后等它变成选中态（秒）。界面要重画那张卡的边框。
 PICK_SETTLE = 0.5
@@ -54,8 +52,8 @@ PICK_SETTLE = 0.5
 #: 点「确定」之后等进战斗（秒）。战斗加载比一般界面慢，给宽一点。
 CONFIRM_SETTLE = 1.5
 
-#: 「确定」按钮区（源坐标，2560x1369 客户区实测位置 + 余量）。
-CONFIRM_REGION = Region(1050, 700, 470, 170)
+#: 「确定」的中心（源坐标）。选将界面居中固定，灰/金两态位置不变。
+CONFIRM_POINT = _Point(1276, 739)
 
 #: 判定"这两个命中属于同一张卡"的 x 容差（像素）。
 #:
@@ -103,10 +101,10 @@ def _group_by_column(points: list[_Point], gap: int = COLUMN_GAP) -> list[list[_
 
 
 def pick_general(ctx: RunContext) -> ActionResult[Any]:
-    """选将 · 未选：找血条，点一张武将卡。
+    """选将：找血条，点一张武将卡，再点「确定」。
 
-    点完卡之后「确定」会变金 —— 那是**下一个状态**（``select/picked``），
-    所以这里除了作废帧不做别的：状态机下一轮自己会认出来。
+    点完卡先等 ``PICK_SETTLE``（界面要重画选中态），然后点居中固定的
+    「确定」；进战斗的加载用 ``CONFIRM_SETTLE`` 兜底。
     """
     # 全图找。提速时加 region= —— 武将卡那一排大致在
     # 客户区 y 200~620、x 100~2450（8 张等距，间距约 268）。
@@ -132,21 +130,16 @@ def pick_general(ctx: RunContext) -> ActionResult[Any]:
         return clicked
     ctx.invalidate_frame()
     ctx.sleep(PICK_SETTLE)
-    return clicked.with_meta(
+
+    # 「确定」：选将界面居中固定；点完等战斗加载。
+    confirmed = actions.click_source_point(ctx.session, CONFIRM_POINT)
+    if not confirmed.ok:
+        return confirmed
+    ctx.invalidate_frame()
+    ctx.sleep(CONFIRM_SETTLE)
+    return confirmed.with_meta(
         cards=len(columns),
         column_x=target.x,
         picked_at=(target.x, target.y),
-    )
-
-
-def confirm_general(ctx: RunContext) -> ActionResult[Any]:
-    """选将 · 已选：点「确定」进战斗。
-
-    走公共方法：它只比按钮的**边框环**，所以「确定」和别的金色花纹确认按钮
-    共用一个家族模板，换文案不用重裁图。
-    """
-    # 全图找。提速时加 region= —— 确定按钮在**屏幕中间**
-    # （客户区约 x 1120~1500, y 750~825）。
-    return click_button(
-        ctx, BUTTON_PATTERN_CONFIRM, CONFIRM_REGION, settle=CONFIRM_SETTLE
+        confirmed_at=(CONFIRM_POINT.x, CONFIRM_POINT.y),
     )

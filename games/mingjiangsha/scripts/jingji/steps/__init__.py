@@ -10,8 +10,7 @@
 | `jj/after_add` | :func:`start_match` | 点「开始匹配」 |
 | `tip/unchecked` | :func:`check_tip` | 勾「本次登录不再提示」 |
 | `tip/checked` | :func:`confirm_tip` | 点「确定」，关掉提示框 |
-| `select/idle` | :func:`pick_general` | 点第 1 张武将卡（→ 变成 `select/picked`） |
-| `select/picked` | :func:`confirm_general` | 点「确定」 |
+| `select` | :func:`pick_general` | 点第 1 张武将卡 + 点「确定」 |
 | `fight/hand` | :func:`advance_fight` | 取消换牌 → 麻花结 → 投降 → 确认 |
 | `fight/done` | :func:`finish_round` | 点空白区 → 下一步 → 确认（+ 记一局） |
 
@@ -35,14 +34,13 @@ from __future__ import annotations
 from .advance_fight import advance_fight
 from .enter_jingji import enter_jingji
 from .finish_round import finish_round, noop
-from .pick_general import confirm_general, pick_general
+from .pick_general import pick_general
 from .start_match import add_pet, check_tip, confirm_tip, create_team, start_match
 
 __all__ = [
     "add_pet",
     "advance_fight",
     "check_tip",
-    "confirm_general",
     "confirm_tip",
     "create_team",
     "enter_jingji",

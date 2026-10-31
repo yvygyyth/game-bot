@@ -16,11 +16,11 @@ lobby --(进竞技场)--> create_team --(建队后)--> add_pet --(加伙伴后)-
                                 |                                       |
                                 |  (没弹提示框，直接进选将)              |
                                 v                                       v
-                          pick_general --(点了武将)--> confirm_general ...
+                          pick_general --(点卡+确定)--> fight ...
 ```
 
 提示框是**模态**的、可能不出现：`match` 三条出边，按画面（`tip/unchecked` /
-`tip/checked` / `select/idle`）三选一。**没弹框是正常分支**，不是意外。
+`tip/checked` / `select`）三选一。**没弹框是正常分支**，不是意外。
 
 ## 每条边都等"下一个状态出现了"才走
 
@@ -38,7 +38,7 @@ lobby --(进竞技场)--> create_team --(建队后)--> add_pet --(加伙伴后)-
    若实际不是，脚本会卡在 ``settle`` 反复确认，日志里表现为"重定位不到目标" ——
    那时把这条边改成实际去向即可（改一个字符串）。
 
-2. **``confirm_general`` → ``fight``** —— 点完确定到进战斗之间有加载。
+2. **``pick_general`` → ``fight``** —— 点完确定到进战斗之间有加载。
    这里直接等 ``fight/hand``（换牌弹窗）出现。若加载慢或中间还有"准备"界面，
    需要补一个状态。等待超时写在对应 step 的 ``wait_for`` 调用处。
 
@@ -58,7 +58,6 @@ from .steps import (
     add_pet,
     advance_fight,
     check_tip,
-    confirm_general,
     confirm_tip,
     create_team,
     enter_jingji,
@@ -117,7 +116,7 @@ SCENARIO = ScenarioSpec(
                 # 弹没弹提示框由**画面**决定，三条边各管一种：
                 Transition("tip_check", on_page("tip/unchecked"), 20, "弹了提示框（还没勾）"),
                 Transition("tip_confirm", on_page("tip/checked"), 15, "提示框已经勾好了"),
-                Transition("pick_general", on_page("select/idle"), 10, "没弹提示框，直接进选将"),
+                Transition("pick_general", on_page("select"), 10, "没弹提示框，直接进选将"),
             ],
         ),
         # ---------------- 提示框（模态，可能不出现）----------------
@@ -137,21 +136,11 @@ SCENARIO = ScenarioSpec(
                 Transition("pick_general", on_page("select/idle"), 10, "进了选将界面"),
             ],
         ),
-        # ---------------- 选将两步 ----------------
+        # ---------------- 选将 ----------------
         Node(
             "pick_general",
             steps=[pick_general],
-            description="选将：找血条，点一张武将卡",
-            transitions=[
-                Transition(
-                    "confirm_general", on_page("select/picked"), 10, "武将已选（确定变金）"
-                ),
-            ],
-        ),
-        Node(
-            "confirm_general",
-            steps=[confirm_general],
-            description="选将：点「确定」进战斗",
+            description="选将：找血条点一张卡，再点「确定」",
             transitions=[
                 Transition("fight", on_page("fight/hand"), 10, "进战斗（换牌弹窗）"),
             ],

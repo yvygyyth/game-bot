@@ -492,8 +492,7 @@ games/mingjiangsha/scripts/jingji/templates/
 ├── jj/before_create.png     jj 下三个叶子
 ├── jj/after_create.png
 ├── jj/after_add.png
-├── select/idle.png          select 下两个叶子
-├── select/picked.png
+├── select/screen.png        选将（单个叶子）
 ├── fight/hand.png           fight 下两个叶子
 ├── fight/done.png
 ├── clicks/…                 只用来**点**、不对应状态
@@ -501,12 +500,12 @@ games/mingjiangsha/scripts/jingji/templates/
 ```
 
 **按父状态分，不按叶子分。** 试过给每个叶子单独建目录
-（`select/picked/picked.png`）—— 那层目录名和文件名永远一样，
+（`fight/done/done.png`）—— 那层目录名和文件名永远一样，
 只是把路径写长了一遍，反而更碎。父状态这一层就够用了：
-进 `select/` 看到那两张「确定」按钮，进 `fight/` 看到那两张战斗快照。
+进 `select/` 看到选将锚点，进 `fight/` 看到那两张战斗快照。
 
 **按状态分而不是按"锚点/点击"分**：代码里确实是按锚点/点击分组的，
-但**排错时的思路不是那个**。出问题问的是"`select/picked` 认不出来"，
+但**排错时的思路不是那个**。出问题问的是"`select` 认不出来"，
 不是"第 4 张锚点图不对" —— 按状态分之后，进对目录就能一眼看全候选。
 
 **文件名不带前缀。** 目录已经表达了，`select/select__picked.png`
@@ -523,7 +522,7 @@ games/mingjiangsha/scripts/jingji/templates/
 "哪个常量指向的文件没了"和"哪个图没人引用"（两个方向都查）。
 
 **目录层级要跟着模板名走。** 模板名是相对模板根的路径，所以
-`"select/picked.png"` 会落到 `<根>/select/picked.png`。
+`"select/screen.png"` 会落到 `<根>/select/screen.png`。
 名字里带层级、磁盘上却没建那个子目录，报的是"找不到图"而不是"目录不存在"。
 
 **改了目录就要改模板名，反之亦然。** 两处对不上时唯一的症状就是
