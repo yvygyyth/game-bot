@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any
 from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, wait_for
-from gamebot.types import ActionResult
+from gamebot.types import ActionResult, Region
 from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
 from games.mingjiangsha.utils import click_button
 
@@ -68,6 +68,9 @@ __all__ = ["ROUNDS_KEY", "finish_round", "noop"]
 
 #: 已完成的局数记在黑板里的这个键上。
 ROUNDS_KEY = "fight.rounds"
+
+#: 结算页「确认」按钮区（源坐标，2560x1369 客户区实测位置 + 余量）。
+CONFIRM_REGION = Region(1070, 1200, 430, 150)
 
 #: 点完空白区 / 「确认」后等界面跟上的时间（秒）。结算面板是滑入的。
 FIGHT_NEXT_SETTLE = 1.2
@@ -100,7 +103,9 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     # 同属 patternConfirm 家族，换文案不用重裁图。
     # 全图找。提速时加 region= —— 结算页的「确认」在**底部中间**
     # （客户区约 x 1200~1445, y 1250~1315）。
-    confirmed = click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=FIGHT_NEXT_SETTLE)
+    confirmed = click_button(
+        ctx, BUTTON_PATTERN_CONFIRM, CONFIRM_REGION, settle=FIGHT_NEXT_SETTLE
+    )
     if not confirmed.ok:
         return confirmed
 

@@ -155,7 +155,8 @@ BINDINGS.node_for("home/jingji/before_create")   # -> "jingji"                  
 
 > **校验不在关联表上。** "节点期望的状态和实测对不上"这件事没有单独的机制：
 > 进入流程节点 -> 关联表说"当前状态是它关联的那个" -> 跑那个状态的**定位代码** ->
-> 对上了干活，对不上重定位。**自检和定位是同一个动作。**
+> 对上了干活；对不上先看边（正常推进），边也接不住才重定位。
+> **自检和定位是同一个动作。**
 > 想知道某个节点当前对不对得上，问引擎的 `FlowEngine.check_state()`。
 
 ### 一个方向是"一定"，另一个方向是"最多一个"
@@ -196,11 +197,13 @@ BINDINGS.node_for("home/jingji/before_create")   # -> "jingji"                  
 (5) 终态判断（stop_pages / 状态的 terminal 标记）
 (6) 锚点和"我以为我在的地方"一致吗？
       是 -> 执行节点步骤（状态没确认前不动手）
-      否 -> 意外：
-           a. tree.recover(frame, near=expected)   慢路径：末梢优先 + 逐步扩散
-           b. binding.node_for(真锚点)             问出"这归哪个节点管"
-           c. 游标落到那个节点（重定位），本轮不执行
-           d. 记一条 Recovery：从哪到哪、试过谁
+      否 -> 先问一句：这是不是**某条出边等的下一页**？（边条件本来就用画面写）
+           能对上 -> 正常推进（和步骤后判边同一套条件），**不记重定位**
+           对不上 -> 意外：
+               a. tree.recover(frame, near=expected)   慢路径：末梢优先 + 逐步扩散
+               b. binding.node_for(真锚点)             问出"这归哪个节点管"
+               c. 游标落到那个节点（重定位），本轮不执行
+               d. 记一条 Recovery：从哪到哪、试过谁
 (7) cursor.step()                              时间：条件满足就换目标
 (8) 检查预算（时长 / 轮数），sleep(tick_interval)
 ```
@@ -266,24 +269,30 @@ BINDINGS.node_for("home/jingji/before_create")   # -> "jingji"                  
 "它怎么跑那儿去了"永远有答案。而早期那条规矩的代价（忘写边就原地不动）
 现在也不必付了。
 
-### 一个容易误会的现象：画面一变就会有重定位
+### 画面一变：先走边，走不了才重定位
 
-正常流程里，**每次点击换屏都会产生一次重定位**，这是对的，不是 bug：
+正常流程里，**每次点击换屏**都会先问"这是不是某条出边等的下一页"：
 
 ```
 tick N   : 执行"点竞技入口"，画面在 tick 结束后才变
-tick N+1 : 锚点已经变成 home/jingji/before_create，但游标还在 lobby（图里的边这一轮才评估）
-           -> 快路径验 lobby 不成立 -> recover 找到 home/jingji/before_create
-           -> 游标落到 jingji 节点，本轮不执行
+tick N+1 : 锚点已经是 home/jingji/before_create，游标还在 lobby
+           -> 先按边判：lobby --(on_page(before_create))--> jingji
+           -> 边成立 => **正常推进**，不搜树、不记重定位；本轮不执行
 tick N+2 : 校验通过，执行 jingji 的步骤
 ```
 
-也就是说：**图负责"该去哪"，状态树负责"现在到底在哪"**，而屏幕的变化
-总是比游标早一轮到达。重定位把这一轮的空档补上。真正需要状态树救命的场景是
-"图的边完全没写对路"（比如被弹窗打断、跑到了图上没有边的分支）。
+这就是"边条件用画面写"的本意。**只有边接不住的时候才需要状态树救命**：
+被弹窗打断、跑到图上没有边的分支、点了按钮却停在原地。
 
-验证脚本 `verify_new_model.py` 里第 1 条和第 1b 条就把这两种情况分开断言了：
-画面变 -> 重定位都落在正确节点上；**画面不变 -> 零重定位**。
+早先的版本没有这一步，页面一变就直奔 `recover()`（全树扩散 + 关联表反查）——
+每条边都白写了，而且每次换屏要 3~7 秒。现在：
+
+* **画面变、边接得住** -> 一次条件评估（几个毫秒），零重定位；
+* **画面变、边接不住** -> 才是重定位，留 `Recovery` 记录。
+
+`tests/test_flow.py` 里两条对着的用例把它们钉死了：
+`test_page_change_that_an_edge_waits_for_is_a_normal_transition` 和
+`test_unexpected_state_re_anchors_the_cursor`。
 
 ## 六、流程怎么结束：`no_more_work`
 

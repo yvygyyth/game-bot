@@ -425,7 +425,7 @@ class TestRecoverDelay:
             engine.tick(now=1000.0)  # 认不出来 -> 登记
             assert engine._pending_recover is not None
 
-            # 画面恢复了：现在能认出 a/1（= 当前节点绑定的状态）
+            # 画面恢复了：现在能认出 a/1（一个明确的状态）
             engine.ctx.session.matcher.matches = {"a1.png": (Point(1, 1), 0.99)}  # type: ignore[union-attr]
             engine.ctx.invalidate_frame()
             engine.tick(now=1001.0)

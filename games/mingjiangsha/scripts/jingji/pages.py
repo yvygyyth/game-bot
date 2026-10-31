@@ -18,6 +18,15 @@ home
 `select` / `fight` 是分类节点：同一界面的先后时刻，各挂独立叶子。
 分类节点自己没有 queries，信息记在叶子上。
 
+## ROI 是量出来的，不是猜的
+
+每个叶子都带 `roi`：**源分辨率 2560x1369 下的实测位置 + 80~100px 余量**。
+全屏定位一次约 2.6s，收进 ROI 后只要几毫秒；多给的余量足够容忍
+"模板裁得紧一点 / 客户区差一两个像素"。
+
+换分辨率或窗口大小后，ROI 要按新截图重新量（模板也要重裁），
+否则会出现"明明在屏幕上却定位不到"。
+
 战斗中间那几张快照（圆结、投降、空白区…）没有分支，做成步骤即可；
 状态只留给可能停住或从别处回来的锚点。匹配后 tip 弹窗见 `steps/start_match.py`。
 
@@ -28,6 +37,7 @@ from __future__ import annotations
 
 from gamebot.atomic.query import ImageQuery
 from gamebot.state import PageGroup, PageLeaf
+from gamebot.types import Region
 
 from .templates import (
     T_AFTER_ADD,
@@ -49,6 +59,7 @@ FEATURE_TREE = PageGroup(
             "lobby",
             name="首页",
             min_stable_frames=2,  # 首页那排卡有滑入动画，等它停稳
+            roi=Region(1110, 700, 470, 300),
             queries=(ImageQuery(T_LOBBY),),
             description="首页：「竞技」卡（熊猫头）",
         ),
@@ -60,18 +71,21 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "jj/before_create",
                     name="竞技场 · 建队前",
+                    roi=Region(2140, 780, 390, 230),
                     queries=(ImageQuery(T_BEFORE_CREATE),),
                     description="右下角是「创建队伍」",
                 ),
                 PageLeaf(
                     "jj/after_create",
                     name="竞技场 · 建队后",
+                    roi=Region(2140, 780, 390, 230),
                     queries=(ImageQuery(T_AFTER_CREATE),),
                     description="右下角是「添加伙伴」",
                 ),
                 PageLeaf(
                     "jj/after_add",
                     name="竞技场 · 加完伙伴",
+                    roi=Region(1850, 1070, 520, 260),
                     queries=(ImageQuery(T_AFTER_ADD),),
                     description="右下角是「开始匹配」",
                 ),
@@ -85,12 +99,14 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "select/idle",
                     name="选将 · 未选",
+                    roi=Region(990, 640, 570, 300),
                     queries=(ImageQuery(T_SELECT_IDLE),),
                     description="「确定」是灰的 —— 还没点武将",
                 ),
                 PageLeaf(
                     "select/picked",
                     name="选将 · 已选",
+                    roi=Region(990, 640, 570, 300),
                     queries=(ImageQuery(T_SELECT_PICKED),),
                     description="「确定」是金的 —— 武将已选",
                 ),
@@ -104,12 +120,14 @@ FEATURE_TREE = PageGroup(
                 PageLeaf(
                     "fight/hand",
                     name="战斗 · 换牌",
+                    roi=Region(810, 510, 900, 450),
                     queries=(ImageQuery(T_FIGHT_HAND),),
                     description="「是否需要更换初始手牌？」（每局开头）",
                 ),
                 PageLeaf(
                     "fight/done",
                     name="战斗 · 结算",
+                    roi=Region(1020, 1150, 520, 260),
                     queries=(ImageQuery(T_FIGHT_DONE),),
                     description="结算页的「确认」",
                 ),
@@ -119,6 +137,7 @@ FEATURE_TREE = PageGroup(
             "over",
             name="刷完了",
             terminal=True,
+            roi=Region(1110, 700, 470, 300),
             queries=(ImageQuery(T_LOBBY),),
             description=(
                 "局数刷够后的终态。特征和首页一样（还是那张竞技卡）——"

@@ -42,6 +42,9 @@ SPEC = FeatureSpec(
     description="刷竞技场：建队 → 匹配 → 选将 → 投降 → 结算，循环 N 局",
     scenario=SCENARIO,
     form=FORM,
+    # 这个游戏固定 2560x1369 客户区，模板也是按它裁的 ——
+    # 关掉多尺度：每次匹配只跑 1.0 一个尺度，定位/找按钮成本降到约 1/5。
+    use_pyramid=False,
 )
 
 __all__ = ["SPEC"]

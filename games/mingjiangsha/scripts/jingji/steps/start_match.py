@@ -55,10 +55,18 @@ __all__ = ["add_pet", "create_team", "start_match"]
 #: 点按钮之后等界面反应的时间（秒）。
 CLICK_SETTLE = 0.6
 
+#: 按钮区（源坐标，2560x1369 客户区实测位置 + 余量）。
+#: 给了 region 就不用全屏找 —— 找按钮从 ~0.8s 降到 ~0.05s。
+#: 换分辨率/窗口大小后要跟着改（状态树的 roi 同理）。
+TEAM_BUTTON_REGION = Region(2190, 820, 300, 160)
+START_MATCH_REGION = Region(1900, 1120, 420, 160)
+
 
 def create_team(ctx: RunContext) -> ActionResult[Any]:
     """建队前：点「创建队伍」。"""
-    return click_button(ctx, BUTTON_SHADOW_CONFIRM, settle=CLICK_SETTLE)
+    return click_button(
+        ctx, BUTTON_SHADOW_CONFIRM, TEAM_BUTTON_REGION, settle=CLICK_SETTLE
+    )
 
 
 def add_pet(ctx: RunContext) -> ActionResult[Any]:
@@ -67,7 +75,9 @@ def add_pet(ctx: RunContext) -> ActionResult[Any]:
     和「创建队伍」同一个位置、同一个家族（只有文字不同）——
     公共方法只比边框，所以它俩共用一套模板。
     """
-    return click_button(ctx, BUTTON_SHADOW_CONFIRM, settle=CLICK_SETTLE)
+    return click_button(
+        ctx, BUTTON_SHADOW_CONFIRM, TEAM_BUTTON_REGION, settle=CLICK_SETTLE
+    )
 
 
 def start_match(ctx: RunContext) -> ActionResult[Any]:
@@ -76,7 +86,9 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
     不"等弹窗出现"（没弹就白等），而是：点按钮 → 睡一下 → 认一下在不在 →
     在就勾选 + 确定。看不出来就不点，避免误点别处。
     """
-    clicked = click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=0.8)
+    clicked = click_button(
+        ctx, BUTTON_PATTERN_CONFIRM, START_MATCH_REGION, settle=0.8
+    )
     if not clicked.ok:
         return clicked
 

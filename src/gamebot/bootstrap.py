@@ -328,6 +328,7 @@ def bootstrap_from_spec(
         templates,
         fallback_dirs=(game_templates,) if game_templates.is_dir() else (),
         recorder=recorder,
+        use_pyramid=feature.use_pyramid,
     )
     reader = build_reader(recorder=recorder, engine=ocr)
 

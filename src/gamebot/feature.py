@@ -45,6 +45,10 @@ class FeatureSpec:
         （见 :class:`~gamebot.scenario_spec.ScenarioSpec`）。
     :param description: 一句话说明，进列表和日志。
     :param form: 运行参数表单。没有就是空表单（界面上不显示那一块）。
+    :param use_pyramid: 模板匹配要不要多尺度（默认开）。**分辨率固定**的脚本
+        可以关掉：关掉后每次匹配只跑 1.0 一个尺度，成本降到约 1/5。
+        代价是窗口/分辨率一变就可能对不上（那时按新分辨率重裁）。
+        见 :func:`gamebot.bootstrap.build_matcher`。
     """
 
     name: str
@@ -54,6 +58,8 @@ class FeatureSpec:
     scenario: ScenarioSpec
     description: str = ""
     form: FormSpec | None = None
+    #: 模板匹配要不要多尺度（见类 docstring）。分辨率固定的脚本可以关掉。
+    use_pyramid: bool = True
 
     @property
     def templates_dir(self) -> str:

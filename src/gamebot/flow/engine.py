@@ -573,6 +573,12 @@ class FlowEngine:
         self.tracker.update(match, now=now, reason="定位")
         anchor = self.tracker.current_id
 
+        # 画面认出来了 -> "延迟重定位"的待办作废（那只是过渡动画，不是真卡住）。
+        # 放在这里而不是只放 `_realign`：换屏后如果**直接走边**推进，就轮不到
+        # `_realign`，待办会一直挂着，下一轮再认不出来时行为就不对了。
+        if anchor != UNKNOWN_PAGE:
+            self._pending_recover = None
+
         # (4) 终态判断（stop_pages 或状态的 terminal 标记）
         if self._check_terminal(anchor, now=now):
             return None
@@ -592,6 +598,27 @@ class FlowEngine:
         if bound is not None:
             if anchor == bound:
                 return self._run_current(node, now=now)
+            # 画面已经明确是**另一个**状态。先问一句：这是不是某条出边等的下一页？
+            #
+            # 边条件本来就是用画面写的（``on_page``），所以"页面变成 B、而这条边
+            # 等 B"就是**正常推进**。以前这里直接走 ``_realign``（全树 recover +
+            # 关联表反查），结果是：每点一次按钮、每次换屏都当异常处理 ——
+            # 一次 3~7s，比步骤本身还贵。
+            #
+            # 现在先按边的语义判一次：能对上的边就正常走（和 ``_note_advance``
+            # 同一套条件与优先级）；对不上才说明"真跑偏了"，那时才恢复定位。
+            if anchor != UNKNOWN_PAGE:
+                decision = self.cursor.evaluate(self.ctx, now=now)
+                if decision.target is not None:
+                    log.info(
+                        "按画面推进：节点 %r -> %r（实测状态 %r）",
+                        node.id,
+                        decision.target,
+                        anchor,
+                    )
+                    self.cursor.advance(decision.target, now=now)
+                    self._note_decision(decision)
+                    return None
             return self._realign(frame, node, bound, anchor, now=now)
 
         # 没关联状态：只要锚点没有被**别的**节点认领，就继续待着（让位给认领它的）

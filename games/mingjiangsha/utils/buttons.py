@@ -62,7 +62,7 @@ click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 创建队伍 / 添加伙伴 / 确�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -312,6 +312,7 @@ def click_button(
     ctx.invalidate_frame()
     if settle:
         ctx.sleep(settle)
+    clicked = replace(clicked, message=f"点了 {hit.template} 的中心（{folder}）")
     return clicked.with_meta(
         folder=folder,
         template=hit.template,

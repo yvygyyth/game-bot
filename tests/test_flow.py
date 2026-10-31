@@ -801,11 +801,15 @@ def build_live() -> tuple[Scenario, object]:
 
     ``ctx`` 用的是假后端 + ``FakeMatcher``，所以"屏幕上有什么"由测试直接改
     ``matcher.matches`` 决定。
+
+    ``home/arena`` 是**没有入边**的状态：用来测"真跑偏了"的重定位 ——
+    它和 ``home/battle`` 的区别是后者有 ``lobby -> battle`` 这条边等着。
     """
     tree = PageTree()
     tree.add(PageGroup("home"))
     tree.add(Page("home/lobby", queries=(ImageQuery("lobby.png"),)), parent="home")
     tree.add(Page("home/battle", queries=(ImageQuery("battle.png"),)), parent="home")
+    tree.add(Page("home/arena", queries=(ImageQuery("arena.png"),)), parent="home")
     tree.add(
         Page("net", overlay=True, priority=100, queries=(ImageQuery("net.png"),))
     )
@@ -813,14 +817,20 @@ def build_live() -> tuple[Scenario, object]:
     graph = Graph(initial="lobby")
     graph.add_node(Node("lobby",))
     graph.add_node(Node("battle",))
+    graph.add_node(Node("arena",))
     graph.connect("lobby", "battle", priority=10, condition=ImageQuery("battle.png"))
+    # arena 只是"可达"（否则 validate 报死代码），它的边**永远不成立** ——
+    # 用来测"真跑偏了"：画面是 arena，但没有一条边在等它。
+    graph.connect("lobby", "arena", priority=5, condition=ImageQuery("never.png"))
     graph.connect("battle", "lobby", priority=10, condition=ImageQuery("lobby.png"))
 
     scenario = Scenario(
         name="live",
         tree=tree,
         graph=graph,
-        bindings=NodeBindings.of([("lobby", "home/lobby"), ("battle", "home/battle")]),
+        bindings=NodeBindings.of(
+            [("lobby", "home/lobby"), ("battle", "home/battle"), ("arena", "home/arena")]
+        ),
         options=EngineOptions(tick_interval=0.01, require_confirmed=False),
     )
     return scenario, tree
@@ -838,8 +848,13 @@ class TestEngineRealign:
         assert engine.cursor.current == "lobby"
         assert engine.report.recoveries == []
 
-    def test_unexpected_state_re_anchors_the_cursor(self, ctx, matcher) -> None:
-        """**核心语义**：状态层说"其实在 battle"，引擎把游标挪到 battle 节点。"""
+    def test_page_change_that_an_edge_waits_for_is_a_normal_transition(
+        self, ctx, matcher
+    ) -> None:
+        """画面变成**出边在等的状态** = 正常推进，不该记成重定位。
+
+        这是"每点一次按钮就重定位一次"的修复：边条件本来就是用画面写的。
+        """
         scenario, _tree = build_live()
         engine = FlowEngine(scenario, ctx)
         engine.tracker.set_initial("home/lobby", now=0.0)
@@ -849,14 +864,27 @@ class TestEngineRealign:
         engine.tick()
 
         assert engine.cursor.current == "battle"
-        assert engine.tracker.current_id == "home/battle"
+        assert engine.report.recoveries == [], "有边可走就不是异常，别记重定位"
+
+    def test_unexpected_state_re_anchors_the_cursor(self, ctx, matcher) -> None:
+        """**核心语义**：状态层说"其实在 arena"，引擎把游标挪到 arena 节点。"""
+        scenario, _tree = build_live()
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"arena.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "arena"
+        assert engine.tracker.current_id == "home/arena"
 
     def test_recovery_is_never_silent(self, ctx, matcher) -> None:
         """自动跳可以被接受，唯一理由是**它不隐形**：每次跳都有记录。"""
         scenario, _tree = build_live()
         engine = FlowEngine(scenario, ctx)
         engine.tracker.set_initial("home/lobby", now=0.0)
-        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+        matcher.matches = {"arena.png": (Point(1, 1), 0.99)}
 
         engine.tracker.advance_tick()
         engine.tick()
@@ -864,8 +892,8 @@ class TestEngineRealign:
         assert len(engine.report.recoveries) == 1
         record = engine.report.recoveries[0]
         assert record.expected == "home/lobby"
-        assert record.actual == "home/battle"
-        assert record.to_node == "battle"
+        assert record.actual == "home/arena"
+        assert record.to_node == "arena"
         assert record.from_node == "lobby"
         assert record.attempts, "慢路径试过谁必须记下来"
 
@@ -880,22 +908,22 @@ class TestEngineRealign:
 
         calls: list[str] = []
 
-        def battle_step(c):
-            calls.append("battle")
+        def arena_step(c):
+            calls.append("arena")
             return ActionResult.success(1)
 
-        scenario.graph.nodes["battle"].steps = [battle_step]
+        scenario.graph.nodes["arena"].steps = [arena_step]
         engine = FlowEngine(scenario, ctx)
         engine.tracker.set_initial("home/lobby", now=0.0)
-        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+        matcher.matches = {"arena.png": (Point(1, 1), 0.99)}
 
         engine.tracker.advance_tick()
         engine.tick()
-        assert calls == [], "本轮不该执行 battle 的步骤"
+        assert calls == [], "本轮不该执行 arena 的步骤"
 
         engine.tracker.advance_tick()
         engine.tick()
-        assert calls == ["battle"], "下一轮才执行"
+        assert calls == ["arena"], "下一轮才执行"
 
     def test_unclaimed_state_keeps_position(self, ctx, matcher) -> None:
         """认出来了但没人认领时不乱跳 —— 而且照样留痕。"""
@@ -1063,7 +1091,12 @@ class TestEngineRunStory:
         engine = FlowEngine(scenario, ctx)
 
         def scripted(_engine, _outcome) -> None:
-            """让画面按剧本变化：先在 lobby，第 3 轮被弹窗打断后到 battle。"""
+            """让画面按剧本变化：先在 lobby，第 3 轮被弹窗打断，之后到 arena。
+
+            为什么是 arena 而不是 battle：battle 有 ``lobby -> battle`` 这条边
+            等着 —— 那会被引擎当成**正常推进**（不该记重定位）。arena 没有任何
+            边等它，才真的是"跑偏了"，测得到重定位。
+            """
             tick = engine.report.ticks
             if tick <= 2:
                 matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
@@ -1071,7 +1104,7 @@ class TestEngineRunStory:
                 matcher.matches = {"net.png": (Point(2, 2), 0.99)}  # 主状态认不出
             else:
                 matcher.matches = {
-                    "battle.png": (Point(1, 1), 0.99),
+                    "arena.png": (Point(1, 1), 0.99),
                     "net.png": (Point(2, 2), 0.99),
                 }
             ctx.invalidate_frame()
@@ -1079,8 +1112,8 @@ class TestEngineRunStory:
         report = engine.run(on_tick=scripted)
 
         assert report.stop_reason is StopReason.MAX_TICKS
-        assert engine.cursor.current == "battle"
-        assert [r.actual for r in report.recoveries] == ["home/battle"]
+        assert engine.cursor.current == "arena"
+        assert [r.actual for r in report.recoveries] == ["home/arena"]
         # 重定位那次之后没再乱跳
-        assert report.recoveries[0].to_node == "battle"
+        assert report.recoveries[0].to_node == "arena"
         assert report.to_dict()["recoveries"], "报告里要能看到重定位"

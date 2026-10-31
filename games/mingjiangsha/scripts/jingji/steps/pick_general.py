@@ -36,7 +36,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.types import ActionResult
+from gamebot.types import ActionResult, Region
 from gamebot.types import Point as _Point
 from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
 from games.mingjiangsha.utils import click_button
@@ -53,6 +53,9 @@ PICK_SETTLE = 0.5
 
 #: 点「确定」之后等进战斗（秒）。战斗加载比一般界面慢，给宽一点。
 CONFIRM_SETTLE = 1.5
+
+#: 「确定」按钮区（源坐标，2560x1369 客户区实测位置 + 余量）。
+CONFIRM_REGION = Region(1050, 700, 470, 170)
 
 #: 判定"这两个命中属于同一张卡"的 x 容差（像素）。
 #:
@@ -144,4 +147,6 @@ def confirm_general(ctx: RunContext) -> ActionResult[Any]:
     """
     # 全图找。提速时加 region= —— 确定按钮在**屏幕中间**
     # （客户区约 x 1120~1500, y 750~825）。
-    return click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=CONFIRM_SETTLE)
+    return click_button(
+        ctx, BUTTON_PATTERN_CONFIRM, CONFIRM_REGION, settle=CONFIRM_SETTLE
+    )
