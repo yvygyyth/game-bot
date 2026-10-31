@@ -36,11 +36,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult
 from gamebot.types import Point as _Point
+from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
+from games.mingjiangsha.utils import click_button
 
-from ..templates import T_SELECT_HEALTH, T_SELECT_PICKED
+from ..templates import T_SELECT_HEALTH
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -138,11 +139,9 @@ def pick_general(ctx: RunContext) -> ActionResult[Any]:
 def confirm_general(ctx: RunContext) -> ActionResult[Any]:
     """选将 · 已选：点「确定」进战斗。
 
-    点的目标复用**状态锚点**那张模板（``select/picked.png`` = 金色确定按钮）：
-    它就是屏幕中间那个按钮，位置没有歧义，没必要为"点它"再单独裁一张图。
-    （代价：改状态识别就会动到这个点击目标 —— 但换按钮样子的概率极低，
-    而少维护一张图是实实在在的收益。）
+    走公共方法：它只比按钮的**边框环**，所以「确定」和别的金色花纹确认按钮
+    共用一个家族模板，换文案不用重裁图。
     """
     # 全图找。提速时加 region= —— 确定按钮在**屏幕中间**
     # （客户区约 x 1120~1500, y 750~825）。
-    return click_image(ctx, T_SELECT_PICKED, settle=CONFIRM_SETTLE)
+    return click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=CONFIRM_SETTLE)

@@ -1,7 +1,17 @@
 """推进队伍流程：创建队伍 → 添加伙伴 → 开始匹配（+ 提示框善后）。
 
-三个函数各管一个按钮，都用 :func:`~gamebot.execution.builtins.click_image`
-（它自带"找到 → 点 → 作废帧"）。
+三个函数各管一个按钮，**都走公共方法** :func:`games.mingjiangsha.utils.click_button`：
+它只比按钮的**边框环**（不认中间文字），所以这里不再为每句文案单独裁图。
+
+## 三个按钮分属两个家族
+
+| 步骤 | 按钮 | 家族 |
+|---|---|---|
+| :func:`create_team` / :func:`add_pet` | 创建队伍 / 添加伙伴 | ``shadowConfirm``（金色发光） |
+| :func:`start_match` | 开始匹配 | ``patternConfirm``（金色花纹框） |
+
+同一时刻同一位置只会出现一个同类按钮，所以用默认的 ``pick="only"``：
+多于一个就报错，不猜。
 
 ## 现在**全图找**，没给 ``region``
 
@@ -9,7 +19,7 @@
 一句话：模板刚裁、界面位移还没量过，这时候设紧框的风险是"框差 10px →
 永远找不到"，而症状和"模板裁错了"一样难查。
 
-**想提速或防误命中就加 ``region=``**。三个按钮分两处位置，别共用一个框：
+**想提速或防误命中就加 ``region=``**。两组按钮分两处位置，别共用一个框：
 
 | 步骤 | 按钮在哪（客户区） |
 |---|---|
@@ -30,11 +40,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Region
 from gamebot.types import Point as _Point
+from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM, BUTTON_SHADOW_CONFIRM
+from games.mingjiangsha.utils import click_button
 
-from ..templates import T_AFTER_ADD, T_AFTER_CREATE, T_BEFORE_CREATE, T_TIP
+from ..templates import T_TIP
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -47,15 +58,16 @@ CLICK_SETTLE = 0.6
 
 def create_team(ctx: RunContext) -> ActionResult[Any]:
     """建队前：点「创建队伍」。"""
-    return click_image(ctx, T_BEFORE_CREATE, settle=CLICK_SETTLE)
+    return click_button(ctx, BUTTON_SHADOW_CONFIRM, settle=CLICK_SETTLE)
 
 
 def add_pet(ctx: RunContext) -> ActionResult[Any]:
     """建队后：点「添加伙伴」。
 
-    和「创建队伍」同一个位置（只有文字不同），加框时可以共用同一个框。
+    和「创建队伍」同一个位置、同一个家族（只有文字不同）——
+    公共方法只比边框，所以它俩共用一套模板。
     """
-    return click_image(ctx, T_AFTER_CREATE, settle=CLICK_SETTLE)
+    return click_button(ctx, BUTTON_SHADOW_CONFIRM, settle=CLICK_SETTLE)
 
 
 def start_match(ctx: RunContext) -> ActionResult[Any]:
@@ -64,7 +76,7 @@ def start_match(ctx: RunContext) -> ActionResult[Any]:
     不"等弹窗出现"（没弹就白等），而是：点按钮 → 睡一下 → 认一下在不在 →
     在就勾选 + 确定。看不出来就不点，避免误点别处。
     """
-    clicked = click_image(ctx, T_AFTER_ADD, settle=0.8)
+    clicked = click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=0.8)
     if not clicked.ok:
         return clicked
 

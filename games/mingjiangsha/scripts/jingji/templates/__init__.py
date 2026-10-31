@@ -27,7 +27,7 @@ __all__ = [
     "T_TIP",
 ]
 
-# ---- 状态锚点（也常复用为点击目标）----
+# ---- 状态锚点（只给状态识别；按钮点击走游戏级家族模板）----
 T_LOBBY = "lobby/lobby.png"
 T_BEFORE_CREATE = "jj/before_create.png"
 T_AFTER_CREATE = "jj/after_create.png"

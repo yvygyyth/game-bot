@@ -10,14 +10,15 @@ games/mingjiangsha/templates/                  ← 再找（公共图）
 ## 按钮：**一个文件夹 = 一种按钮**
 
 ```
-templates/shadowConfirm/     金色发光按钮：创建队伍 / 添加伙伴 / 确定 …
-templates/patternConfirm/    金色花纹边框的大按钮：确定
+templates/shadowConfirm/     金色发光按钮：创建队伍 / 添加伙伴 / 确定 / 投降确认 …
+templates/patternConfirm/    金色花纹边框的大按钮：确定 / 开始匹配 / 结算确认 …
 templates/shadowCancel/      青色发光按钮：取消
 templates/QJ/                蓝底金框按钮：下一步
 ```
 
-> 同一家族里放的是**这种按钮的各种文字版本**。同一时刻、同一个位置只会出现一个，
-> 所以"把家族里每张图都试一遍，谁命中就点谁"不会歧义。
+> 同一家族里放的是**这种按钮的各种文字版本**（尺寸不同就再各存一张）。
+> 因为只比边框环，不同文字版本会命中同一个位置；`find_buttons` 按位置去重，
+> 所以"把家族里每张图都试一遍"不会歧义。
 
 调用时只说"点哪种按钮"，不说"点哪句字"：
 

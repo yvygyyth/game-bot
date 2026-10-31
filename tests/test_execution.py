@@ -334,7 +334,8 @@ class TestFailureFrames:
 class TestJingjiStepsUseTheSharedHelpers:
     """竞技场的步骤**别再重写"找到 → 点 → 作废帧"**。
 
-    那三个动作 :func:`click_image` 里已经各有一份实现，重写一遍就会各错各的。
+    现在三个队伍按钮都走 :func:`games.mingjiangsha.utils.click_button`
+    （只比边框环、不认文字）。这里钉住的是"用的是公共方法、失败如实返回"。
 
     ## 为什么这几条不用 ``ctx`` 装置
 
@@ -349,6 +350,9 @@ class TestJingjiStepsUseTheSharedHelpers:
 
     SIZE = (2560, 1369)
 
+    #: 按钮家族模板名（游戏级）。``click_button`` 按家族找，不再用功能级文字模板。
+    FAMILY_TEMPLATE = "shadowConfirm/before_create.png"
+
     def _make_ctx(self, tmp_path, matcher):
         from gamebot.atomic.backends.fake import build_fake_backends
         from gamebot.atomic.session import BaseSession
@@ -358,17 +362,18 @@ class TestJingjiStepsUseTheSharedHelpers:
         session = BaseSession(build_fake_backends(size=self.SIZE), matcher=matcher)
         return RunContext(
             session,
-            name="test",
+            # 必须是真实脚本名：按钮家族目录是 ``games/<游戏>/templates/<家族>``，
+            # 用 "test" 会找不到那个文件夹（这是配置错误，不是"没找到按钮"）。
+            name="mingjiangsha/jingji",
             paths=RunPaths.under(tmp_path),
             frame_ttl=0.5,
         )
 
     def test_create_team_clicks_through_the_shared_helper(self, tmp_path, matcher):
-        """``create_team`` 命中就点、并把模板名带进 meta（journal 靠它）。"""
+        """``create_team`` 命中就点、并把家族/模板带进 meta（journal 靠它）。"""
         from games.mingjiangsha.scripts.jingji.steps import create_team
-        from games.mingjiangsha.scripts.jingji.templates import T_BEFORE_CREATE
 
-        matcher.matches = {T_BEFORE_CREATE: (Point(2300, 880), 0.95)}
+        matcher.all_matches = {self.FAMILY_TEMPLATE: [Point(2300, 880)]}
         run_ctx = self._make_ctx(tmp_path, matcher)
         try:
             outcome = Executor(run_ctx).run(create_team)
@@ -376,13 +381,14 @@ class TestJingjiStepsUseTheSharedHelpers:
             run_ctx.close()
 
         assert outcome.ok is True, outcome.message
-        assert outcome.action["template"] == T_BEFORE_CREATE
+        assert outcome.action["template"] == self.FAMILY_TEMPLATE
+        assert outcome.action["point"] == Point(2300, 880)
 
     def test_create_team_reports_not_found_when_missing(self, tmp_path, matcher):
         """没命中就如实 ``not_found`` —— 上层会拿实测状态去重定位，不在这里重试。"""
         from games.mingjiangsha.scripts.jingji.steps import create_team
 
-        matcher.matches = {}
+        matcher.all_matches = {}
         run_ctx = self._make_ctx(tmp_path, matcher)
         try:
             outcome = Executor(run_ctx).run(create_team)

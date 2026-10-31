@@ -5,8 +5,8 @@
 | 序 | 对应图 | 点什么 | 怎么定位置 |
 |---|---|---|---|
 | 1 | `zhandou5` | 「点击空白区域到下一步」 | 找 ``T_FIGHT_SPACE``（**提示文字本身**） |
-| 2 | `zhandou6` | 「下一步」 | 模板 ``T_FIGHT_NEXT`` |
-| 3 | `zhandou7` | 「确认」 | 找 ``T_FIGHT_DONE``（就是状态锚点那张） |
+| 2 | `zhandou6` | 「下一步」 | 模板 ``T_FIGHT_NEXT``（等它出现再点） |
+| 3 | `zhandou7` | 「确认」 | 公共方法 ``click_button(patternConfirm)``（只比边框环） |
 
 ## 第 1 步为什么从固定坐标改成找图
 
@@ -35,11 +35,14 @@
 * **仓库**（``ctx.store(RUNS)``）—— 历史上总共刷了几局，**关掉界面再开接着数**。
   它落在 ``data/stores/mingjiangsha/jingji.runs.json``，见 :mod:`..store.runs`。
 
-## 「确认」为什么复用状态锚点
+## 「确认」为什么用公共方法
 
-`fight/done` 这个状态就是靠 ``fight/done.png``（结算页的「确认」）认出来的，
-而这里要点的也正是它 —— 一张图两用是刻意的：省一张模板，
-而且不会出现"认出来是结算页、却点了别的按钮"。
+「确认」和选将的「确定」、竞技场的「开始匹配」是同一种花纹按钮（`patternConfirm`），
+所以走 :func:`games.mingjiangsha.utils.click_button`：只比边框环、不认文字，
+换文案不用重裁图。结算页上只有这一个同类按钮，`pick="only"` 足够。
+
+（第 2 步的「下一步」仍用 ``wait_for`` + 点中心 —— 那里**等待本身**是重点：
+面板是滑入的，必须等它出现再点。）
 """
 
 from __future__ import annotations
@@ -51,10 +54,12 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, wait_for
 from gamebot.types import ActionResult
+from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
+from games.mingjiangsha.utils import click_button
 
 from ..form import ROUNDS_PARAM
 from ..store import RUNS
-from ..templates import T_FIGHT_DONE, T_FIGHT_NEXT, T_FIGHT_SPACE
+from ..templates import T_FIGHT_NEXT, T_FIGHT_SPACE
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -90,10 +95,12 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
         return step
     ctx.invalidate_frame()
 
-    # ---- 3. 点结算页的「确认」（复用状态锚点那张模板）----
+    # ---- 3. 点结算页的「确认」----
+    # 走公共方法（只比边框环）：「确认」和选将的「确定」、竞技场的「开始匹配」
+    # 同属 patternConfirm 家族，换文案不用重裁图。
     # 全图找。提速时加 region= —— 结算页的「确认」在**底部中间**
     # （客户区约 x 1200~1445, y 1250~1315）。
-    confirmed = click_image(ctx, T_FIGHT_DONE, settle=FIGHT_NEXT_SETTLE)
+    confirmed = click_button(ctx, BUTTON_PATTERN_CONFIRM, settle=FIGHT_NEXT_SETTLE)
     if not confirmed.ok:
         return confirmed
 
