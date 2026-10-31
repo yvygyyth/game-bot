@@ -106,10 +106,13 @@ class TestFamiliesOnRealScreens:
 
 
 class TestFamiliesAreDistinct:
-    def test_different_labels_in_one_family_do_not_match_each_other(
-        self, matcher: OpenCvMatcher
-    ) -> None:
-        """同家族的不同文字版本互不命中 —— 否则"同位置只有一个"就不成立。"""
+    def test_unmasked_matching_does_not_confuse_labels(self, matcher: OpenCvMatcher) -> None:
+        """**整块**模板不会把一种文字认成另一种（这是"为什么要只比边框"的基线）。
+
+        运行时不用整块比（文字会变），而是只比边框环 —— 见 ``TestRingTable`` 和
+        ``TestRingMatching``。这条留着的价值是：说明"整块比"本身是精确的，
+        换文字失配不是 bug，是特性。
+        """
         base = cv2.imread(str(GAME / "shadowConfirm" / "before_create.png"))
         assert base is not None
 
@@ -197,3 +200,141 @@ class TestEndToEndOnARealScreenshot:
         # 取消按钮的中心约 (1474, 953)，绝不能点过去
         assert abs(result.value.x - 1474) > 50
 
+
+class TestRingMatching:
+    """只比边框环：**同一尺寸、换文字**也能命中（整块模板会比不上）。"""
+
+    def test_unmasked_template_fails_on_a_different_label(self, matcher, screenshots) -> None:
+        """基准：整块模板在「换文字」的按钮上匹配不上 —— 这是要被解决的问题。"""
+        image = _screenshot(screenshots, "jingji2.png")   # 这里是「添加伙伴」
+        hits = matcher.match_all(
+            image,
+            "shadowConfirm/before_create.png",            # 模板是「创建队伍」
+            confidence=CONFIDENCE,
+            min_distance=30,
+        )
+        assert hits == [], f"整块模板不该命中另一种文字，实际 {[(h.score, h.point) for h in hits]}"
+
+    def test_ring_mask_matches_a_different_label_of_the_same_size(
+        self, matcher, screenshots, tmp_path: Path
+    ) -> None:
+        """只比边框：确定 -> 添加伙伴 命中，位置就是那个按钮。"""
+        from gamebot.atomic.backends.fake import build_fake_backends
+        from gamebot.atomic.session import BaseSession
+        from gamebot.config.schema import RunPaths
+        from gamebot.context import RunContext
+        from gamebot.types import Region
+        from games.mingjiangsha.utils import find_buttons
+
+        image = _screenshot(screenshots, "jingji2.png")
+        bundle = build_fake_backends(image=image)
+        session = BaseSession(
+            bundle,
+            matcher=OpenCvMatcher(FEATURE, fallback_dirs=(GAME,), preload=False),
+        )
+        ctx = RunContext(session, name="mingjiangsha/jingji", paths=RunPaths.under(tmp_path))
+        try:
+            # 模板是「创建队伍」，画面上是「添加伙伴」—— 文字不同、尺寸相同
+            hits = find_buttons(
+                ctx,
+                "shadowConfirm",
+                Region(2100, 800, 420, 200),
+                templates=["shadowConfirm/before_create.png"],
+            )
+        finally:
+            ctx.close()
+
+        assert len(hits) == 1, f"应该正好命中一个按钮，实际 {hits}"
+        assert abs(hits[0].point.x - 2332) <= 6
+        assert abs(hits[0].point.y - 895) <= 6
+        assert hits[0].score >= 0.95
+
+    def test_ring_mask_does_not_match_a_different_size(self, matcher, screenshots) -> None:
+        """环的位置跟着尺寸走：确定（263x92）不该命中 218x72 的添加伙伴。
+
+        这是**已知限制**（见 buttons.py 的"尺寸/底色"那节）：换尺寸要另存一张，
+        但不用重裁文字版本。
+        """
+        from games.mingjiangsha.utils import ring_mask
+
+        image = _screenshot(screenshots, "jingji2.png")
+        tpl = cv2.imread(str(GAME / "shadowConfirm" / "ok.png"))
+        assert tpl is not None
+        mask = ring_mask(tpl.shape[:2], inset=4, width=12)
+
+        hits = matcher.match_all(
+            image,
+            "shadowConfirm/ok.png",
+            confidence=CONFIDENCE,
+            min_distance=30,
+            mask=mask,
+        )
+        assert hits == [], f"不同尺寸不该命中，实际 {[(h.score, h.point) for h in hits]}"
+
+#: 只比边框环的实测表（截图, 家族, 模板, 分数下限）
+RING_CASES = [
+    ("tip1.png", "shadowConfirm", "ok.png", 0.95),
+    ("tip1.png", "shadowCancel", "cancel.png", 0.95),
+    ("jingji1.png", "shadowConfirm", "before_create.png", 0.95),
+    ("jingji2.png", "shadowConfirm", "after_create.png", 0.95),
+    ("select2.png", "patternConfirm", "ok1.png", 0.95),
+    ("zhandou6.png", "QJ", "qj1.png", 0.95),
+    ("zhandou7.png", "QJ", "qj2.png", 0.95),
+]
+
+
+class TestRingTable:
+    """运行时用的就是"只比边框环" —— 这张表就是 templates/README 里那张。"""
+
+    @pytest.mark.parametrize(("shot", "folder", "template", "floor"), RING_CASES)
+    def test_it_hits_once_with_a_high_score(
+        self,
+        matcher: OpenCvMatcher,
+        screenshots: dict[str, np.ndarray],
+        shot: str,
+        folder: str,
+        template: str,
+        floor: float,
+    ) -> None:
+        from games.mingjiangsha.utils import BUTTON_RING_INSET, BUTTON_RING_WIDTH, ring_mask
+
+        image = _screenshot(screenshots, shot)
+        tpl = cv2.imread(str(GAME / folder / template))
+        assert tpl is not None
+        mask = ring_mask(
+            tpl.shape[:2], inset=BUTTON_RING_INSET, width=BUTTON_RING_WIDTH
+        )
+
+        hits = matcher.match_all(
+            image,
+            f"{folder}/{template}",
+            confidence=0.90,
+            min_distance=30,
+            mask=mask,
+        )
+
+        assert len(hits) == 1, f"{shot} 应该正好命中 1 个，实际 {len(hits)}"
+        assert hits[0].score >= floor
+
+    @pytest.mark.parametrize("shot", ["home.png", "jingji3.png", "zhandou2.png", "zhandou5.png"])
+    def test_screens_without_these_buttons_have_no_hits(
+        self, matcher: OpenCvMatcher, screenshots: dict[str, np.ndarray], shot: str
+    ) -> None:
+        """画面里根本没有这类按钮时，环也不该命中（误报=点错地方）。"""
+        from games.mingjiangsha.utils import BUTTON_RING_INSET, BUTTON_RING_WIDTH, ring_mask
+
+        image = _screenshot(screenshots, shot)
+        for folder, template in (
+            ("shadowConfirm", "before_create.png"),
+            ("shadowCancel", "cancel.png"),
+            ("QJ", "qj1.png"),
+        ):
+            tpl = cv2.imread(str(GAME / folder / template))
+            assert tpl is not None
+            mask = ring_mask(
+                tpl.shape[:2], inset=BUTTON_RING_INSET, width=BUTTON_RING_WIDTH
+            )
+            hits = matcher.match_all(
+                image, f"{folder}/{template}", confidence=0.90, min_distance=30, mask=mask
+            )
+            assert hits == [], f"{shot} 上 {folder}/{template} 误命中 {hits}"

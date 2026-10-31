@@ -157,6 +157,9 @@ class TestKeySignatures:
             "confidence",
             "max_count",
             "min_distance",
+            # 只在"比一部分像素"时需要（按钮只比边框环、忽略文字）；
+            # 普通找图不传它，行为不变。
+            "mask",
         ]
 
     def test_wait_any_of_signature(self) -> None:

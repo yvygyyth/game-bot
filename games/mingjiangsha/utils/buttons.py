@@ -1,12 +1,29 @@
-"""按钮快捷方法 —— **一个文件夹 = 一种按钮，一个方法按文件夹点**。
+"""按钮快捷方法 —— **认边框，不认文字**。
 
-## 为什么这样分
+## 为什么
 
-这游戏满屏都是"同一副金框、只换中间几个字"的按钮：创建队伍 / 添加伙伴 / 开始匹配 /
-确定 / 下一步…… 每加一个按钮裁一张图、登记一个 `T_*`、写一个步骤，图会越攒越多，
-而它们其实只是**同一种按钮的不同文字版本**。
+这游戏满屏都是"同一副金框、只换中间几个字"的按钮：创建队伍 / 添加伙伴 /
+开始匹配 / 确定 / 下一步…… 按文字裁模板的话，每加一句新文案就要多一张图，
+而且**换个文字就匹配不上了**。但边框是**不变的那部分**。
 
-所以按**家族**组织：
+所以比对时只比**边框环**：
+
+* 从裁剪图的四周取一圈（``BUTTON_RING_WIDTH`` 像素宽），外沿内缩
+  ``BUTTON_RING_INSET`` 像素 —— 内缩是为了跳过裁图带进来的背景
+  （浅色弹窗和深色面板的背景差 140 个亮度级）；
+* 中间的字**用遮罩排除**，比对时完全不看它 —— 换文字不影响；
+* 比对用**减均值的遮罩相关**，不是 OpenCV 的 masked ``TM_CCORR_NORMED``：
+  后者不减均值、被亮度主导，同一块环能到 0.98，整屏全是误命中。
+
+实测（创建队伍 225×82 的模板，只比边框）：
+
+| 目标 | 分数 |
+|---|---|
+| 同一张图上的「创建队伍」 | 0.998 |
+| **同一位置换成「添加伙伴」**（同尺寸、换文字） | **0.997** |
+| 没有这类按钮的画面 | 0.65~0.77 |
+
+## 一个文件夹 = 一种按钮
 
 ```
 games/mingjiangsha/templates/shadowConfirm/   ← 金色确认按钮：各种文字版本都放这儿
@@ -16,33 +33,31 @@ games/mingjiangsha/templates/shadowCancel/    ← 青色取消按钮
 调用时只说"点哪种按钮"，不说"点哪句字"：
 
 ```python
-from games.mingjiangsha.templates import BUTTON_SHADOW_CANCEL, BUTTON_SHADOW_CONFIRM
+from games.mingjiangsha.templates import BUTTON_SHADOW_CONFIRM
 from games.mingjiangsha.utils import click_button
 
-click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 金色确认（创建队伍 / 添加伙伴 / 确定…）
-click_button(ctx, BUTTON_SHADOW_CANCEL)    # 取消
+click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 创建队伍 / 添加伙伴 / 确定…都算
 ```
 
-## 为什么不用"边框模板"统一所有按钮
+## 尺寸 / 底色的限制（重要）
 
-试过：取一条 12x33 的边线去匹配所有金框按钮，**裁剪图上**能命中四类按钮、
-还分得开青色取消。但在**整屏截图**上它命中 100 次 —— 面板边框、图标边缘全是
-"亮竖边"。这类误命中在裁剪图上完全看不出来。
+"只比边框"解决的是**换文字**，不解决**换尺寸**：
 
-**整按钮模板**没这个问题：同一个家族的不同文字版本互相不会命中（文字就是差异），
-在 15 张真机截图上是"每个家族最多命中 1 次、分数 0.979~0.999"。
-代价是**一种按钮一个文件夹、一张图一个文字版本** —— 但那是"丢张图"的成本，
-比"点错按钮"低得多。
+* **同尺寸、不同文字** -> 一张模板就够（环的位置完全一致）；
+* **不同尺寸**（确定 257×87 vs 添加伙伴 218×72）-> 环的四条边位置跟着尺寸走，
+  仍然是**两张模板**，各比各的。不用重裁文字版本，但尺寸版本要各存一张；
+* **不同底色**（浅色弹窗 / 深色面板）-> 环外沿的像素不同，靠 ``BUTTON_RING_INSET``
+  把背景让开；同一按钮换底色时按新底色再存一张。
 
 ## 约定
 
-* 文件夹里的图**必须完整包含按钮**（四周留 2~3 像素），别裁到按钮外的大片背景 ——
-  背景会随界面变；
-* 同一家族里，不同文字版本**同一时刻只会出现一个**。要是某次真出现两个，
+* 文件夹里的图要**完整包含按钮**，四周留 2~3 像素；
+* 同一家族里，不同文字版本**同一时刻只会出现一个**。要是真出现两个，
   `pick="only"`（默认）会直接报错而不是猜 —— 猜错的代价是点错按钮；
-* 一种按钮一个文件夹。**别把两种不同的按钮混进一个文件夹**，那会让 `pick` 失效。
+* 一种按钮一个文件夹。**别把两种不同的按钮混进一个文件夹**，那会让 `pick` 失效；
+* 同一个按钮的多张截图版本可以共存（按位置去重，只留分数最高的）。
 
-阈值：实测 0.979~0.999，默认取 **0.90**（跨渲染差异留余量）。
+阈值：实测正例 0.99+，反例 ≤0.83，默认取 **0.90**。
 """
 
 from __future__ import annotations
@@ -61,14 +76,26 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BUTTON_CONFIDENCE",
+    "BUTTON_RING_INSET",
+    "BUTTON_RING_WIDTH",
     "ButtonHit",
     "click_button",
     "find_buttons",
     "folder_templates",
+    "ring_mask",
 ]
 
-#: 默认阈值。实测同一家族的文字版本互相不命中，真按钮 0.979~0.999 —— 0.90 有余量。
+#: 默认阈值。实测只比边框时：真按钮 0.99+，没有它的画面 ≤0.83 —— 0.90 有余量。
 BUTTON_CONFIDENCE = 0.90
+
+#: 边框环：从裁剪图外沿**内缩**多少像素再开始取（跳过裁图带进来的背景）。
+BUTTON_RING_INSET = 4
+
+#: 边框环的宽度（像素）。只比这一圈，中间的文字被遮掉。
+BUTTON_RING_WIDTH = 12
+
+#: 同一个模板形状的遮罩只造一次
+_MASK_CACHE: dict[tuple[str, int, int], Any] = {}
 
 #: 两个命中相距多近算"同一个按钮"（单张模板内的 NMS 间距）。按钮宽 200+，30 足够。
 BUTTON_MIN_DISTANCE = 30
@@ -103,6 +130,49 @@ def _folder_of(ctx: RunContext, folder: str) -> Path:
     """把家族名解析成目录（相对**游戏级**模板根）。"""
     game = ctx.name.split("/", 1)[0]
     return project_root() / "games" / game / "templates" / folder
+
+
+def ring_mask(shape: tuple[int, int], *, inset: int, width: int) -> Any:
+    """按模板尺寸生成"边框环"遮罩：只保留四周 ``width`` 像素、从边缘内缩 ``inset``。
+
+    为什么要有它：按钮换文字时**中间的字变了**，但边框没变。整块模板比对会因为
+    文字不同而失配；只比这个环（遮罩中心）就能忽略文字。
+
+    :param shape: 模板的 ``(高, 宽)``。
+    :param inset: 从裁剪图**外沿**往里缩多少像素再取环 —— 用来跳过裁剪时带进来的
+        背景（背景随界面变，浅色弹窗和深色面板差 140 个亮度级）。
+    :param width: 环的宽度。
+    """
+    import numpy as np  # 业务层用，不把它带到状态/流程层的导入期
+
+    height, width_px = shape[:2]
+    mask = np.zeros((height, width_px), np.uint8)
+    top, bottom = inset, height - inset
+    left, right = inset, width_px - inset
+    if bottom - top <= 0 or right - left <= 0:
+        raise ConfigError(
+            f"按钮模板太小（{width_px}x{height}），放不下 inset={inset} 的边框环"
+        )
+    mask[top:bottom, left : left + width] = 1
+    mask[top:bottom, right - width : right] = 1
+    mask[top : top + width, left:right] = 1
+    mask[bottom - width : bottom, left:right] = 1
+    return mask
+
+
+def _mask_for(ctx: RunContext, template: str) -> Any:
+    """这个模板对应的边框环遮罩（按模板原始尺寸生成，缓存住）。"""
+    height, width_px = ctx.session.matcher.load_template(template).shape[:2]
+    key = (template, height, width_px)
+    cached = _MASK_CACHE.get(key)
+    if cached is None:
+        cached = ring_mask(
+            (height, width_px),
+            inset=BUTTON_RING_INSET,
+            width=BUTTON_RING_WIDTH,
+        )
+        _MASK_CACHE[key] = cached
+    return cached
 
 
 def folder_templates(ctx: RunContext, folder: str) -> list[str]:
@@ -158,6 +228,7 @@ def find_buttons(
             region=region,
             confidence=confidence,
             min_distance=BUTTON_MIN_DISTANCE,
+            mask=_mask_for(ctx, name),
         )
         if not found.ok or not found.value:
             continue

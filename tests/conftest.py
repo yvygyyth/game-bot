@@ -71,6 +71,7 @@ class FakeMatcher:
         max_count=0,
         min_distance=10,
         grayscale=True,
+        mask=None,
     ):
         self.calls.append((template, region))
         points = self.all_matches.get(template, [])
@@ -85,6 +86,13 @@ class FakeMatcher:
     def compare(self, image, region, template, confidence=0.9):
         found = self.matches.get(template)
         return found[1] if found else None
+
+    def load_template(self, template: str):
+        """给"按模板尺寸生成遮罩"用（`buttons.py` 会拿它量尺寸）。
+
+        尺寸随便给一个固定值 —— 假匹配器不看图，只看预设的命中点。
+        """
+        return np.zeros((64, 200, 3), dtype=np.uint8)
 
 
 class FakeReader:

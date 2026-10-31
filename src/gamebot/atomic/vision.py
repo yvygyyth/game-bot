@@ -103,11 +103,15 @@ class Matcher(Protocol):
         max_count: int = 0,
         min_distance: int = 10,
         grayscale: bool = True,
+        mask: ImageArray | None = None,
     ) -> list[MatchResult]:
         """找出所有命中点。
 
         :param max_count: 最多返回几个；``0`` 表示不限。
         :param min_distance: 非极大值抑制的最小间距（像素），防止同一个图标被算成多个。
+        :param mask: 和模板同尺寸的 0/1 遮罩；给了就**只比较遮罩内的像素**。
+            用途：只比按钮的边框环、忽略中间的文字（不同文字共用一张模板）。
+            不支持的实现可以忽略它 —— 调用方（``buttons.py``）只在需要时传。
         """
         ...
 

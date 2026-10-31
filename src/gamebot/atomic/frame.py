@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Hashable
 from pathlib import Path
@@ -228,17 +229,28 @@ class Frame:
         confidence: float | None = None,
         max_count: int = 0,
         min_distance: int = 10,
+        mask: Any = None,
     ) -> ActionResult[list[Point]]:
         """查找所有匹配，返回点列表。
 
         :param max_count: ``0`` 表示不限。
         :param min_distance: 非极大值抑制间距，防止同一图标重复计数。
+        :param mask: 和模板同尺寸的 0/1 遮罩；给了就**只比较遮罩内的像素**。
+            用来"只比按钮边框、忽略中间文字"（见 ``games/mingjiangsha/utils/buttons.py``）。
         :return: ``success(value=[Point, ...], scores=[...])``；一个都没有时 ``not_found``。
         """
         threshold = self._confidence(confidence)
+        # 缓存键要带上遮罩 —— 同一个模板、不同遮罩是两个不同的查询。
+        # 用内容摘要：遮罩本身很小，算一次摘要比"每次都真的重算匹配"便宜得多。
+        mask_key = None
+        if mask is not None:
+            raw = mask.tobytes() if hasattr(mask, "tobytes") else bytes(mask)
+            mask_key = hashlib.blake2b(raw, digest_size=8).hexdigest()
         return self.cached(
-            ("find_all_images", template, region, threshold, max_count, min_distance),
-            lambda: self._find_all_images(template, region, threshold, max_count, min_distance),
+            ("find_all_images", template, region, threshold, max_count, min_distance, mask_key),
+            lambda: self._find_all_images(
+                template, region, threshold, max_count, min_distance, mask
+            ),
         )
 
     def _find_all_images(
@@ -248,6 +260,7 @@ class Frame:
         confidence: float,
         max_count: int,
         min_distance: int,
+        mask: Any = None,
     ) -> ActionResult[list[Point]]:
         matcher = self._matcher()
         if matcher is None:
@@ -261,14 +274,19 @@ class Frame:
                 f"搜索区域为空: {region!r}", elapsed=perf_counter() - started, template=template
             )
 
+        kwargs: dict[str, Any] = {
+            "region": search,
+            "confidence": confidence,
+            "max_count": max_count,
+            "min_distance": min_distance,
+        }
+        if mask is not None:
+            kwargs["mask"] = mask
         try:
             hits = matcher.match_all(
                 self._image,
                 template,
-                region=search,
-                confidence=confidence,
-                max_count=max_count,
-                min_distance=min_distance,
+                **kwargs,
             )
         except Exception as exc:
             return ActionResult.error(

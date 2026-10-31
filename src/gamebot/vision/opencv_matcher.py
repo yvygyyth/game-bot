@@ -20,8 +20,9 @@
 5. **模板比画面大** 时 ``matchTemplate`` 会抛异常，必须先判断再调用。
 6. **NMS**。``match_all`` 必须做非极大值抑制，否则一个图标会返回几十个相邻点；
    用切比雪夫距离（比欧氏距离便宜，效果等价）。
-7. **带 alpha 的 PNG** 直接丢 alpha 通道（``BGRA2BGR``）。按 alpha 做掩码匹配
-   （``TM_CCORR_NORMED`` + mask）慢得多，而游戏 UI 图标基本不靠透明区区分。
+7. **带 alpha 的 PNG** 直接丢 alpha 通道（``BGRA2BGR``）。需要"只比一部分像素"
+   （例如只比按钮边框、忽略文字）时，用 ``mask=`` 显式传遮罩 —— 见
+   :meth:`OpenCvMatcher._masked_matrix`。
 """
 
 from __future__ import annotations
@@ -40,6 +41,20 @@ __all__ = ["OpenCvMatcher"]
 
 #: 纯色区域的 matchTemplate 结果是 NaN，统一压到这个分数（必然低于任何阈值）
 _NAN_FLOOR = -1.0
+
+
+def _scaled_mask(mask: np.ndarray | None, prepared: np.ndarray) -> np.ndarray | None:
+    """把遮罩缩放到模板**当前**尺寸。
+
+    金字塔会缩放模板，遮罩必须跟着缩放，否则尺寸对不上（直接抛异常）。
+    用最近邻：遮罩只有 0/1，插值出 0.5 没有意义。
+    """
+    if mask is None:
+        return None
+    height, width = prepared.shape[:2]
+    if mask.shape[:2] == (height, width):
+        return mask
+    return cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
 
 #: match_all 的候选上限。画面全白 + 低阈值时候选可能有几十万个，
 #: 取前 N 个高分候选已经足够（NMS 之后通常只剩几个）。
@@ -219,17 +234,65 @@ class OpenCvMatcher:
         return image[y1:y2, x1:x2], Point(x1, y1)
 
     @staticmethod
+    def _masked_matrix(
+        search: np.ndarray,
+        template: np.ndarray,
+        mask: np.ndarray,
+    ) -> np.ndarray:
+        """**遮罩内的减均值相关** —— 只比较 mask 覆盖的像素。
+
+        为什么不用 ``cv2.matchTemplate(..., TM_CCORR_NORMED, mask=...)``：那个不减均值，
+        结果被亮度主导 —— 任何一块亮的区域都能到 0.98。实测拿它做"只比边框"，
+        整屏到处是 0.98 的误命中。
+
+        这里用 NCC（减均值、除以标准差），只是把每一项都乘上 mask：
+        ``sum((T-meanT)*(I-meanI)*M) / sqrt(sum((T-meanT)^2 * M) * sum((I-meanI)^2 * M))``。
+        全部用 ``TM_CCORR`` 卷积算，O(像素) 而不是逐窗口循环。
+
+        :param search: 搜索区域的灰度图。
+        :param template: 模板（与 mask 同尺寸）。
+        :param mask: 0/1 遮罩。
+        :return: 与 ``search`` 对应的分数矩阵（NaN 已兜底）。
+        """
+        image = search.astype(np.float32)
+        tpl = template.astype(np.float32)
+        cover = (mask > 0).astype(np.float32)
+        count = float(cover.sum())
+        if count <= 0 or tpl.shape != cover.shape:
+            raise BackendError("遮罩为空或与模板尺寸不一致")
+
+        mean = float((tpl * cover).sum() / count)
+        centered = (tpl - mean) * cover
+        var_template = float((centered * centered).sum())
+
+        numerator = cv2.matchTemplate(image, centered, cv2.TM_CCORR)
+        sum_image = cv2.matchTemplate(image, cover, cv2.TM_CCORR)
+        sum_square = cv2.matchTemplate(image * image, cover, cv2.TM_CCORR)
+        var_image = np.maximum(sum_square - (sum_image * sum_image) / count, 0.0)
+
+        denominator = np.sqrt(var_template * var_image)
+        matrix = np.zeros_like(numerator)
+        np.divide(numerator, denominator, out=matrix, where=denominator > 1e-6)
+        matrix = np.nan_to_num(matrix, nan=_NAN_FLOOR, posinf=_NAN_FLOOR, neginf=_NAN_FLOOR)
+        return matrix
+
     def _raw_result(
-        search: np.ndarray, template: np.ndarray
+        self,
+        search: np.ndarray,
+        template: np.ndarray,
+        mask: np.ndarray | None = None,
     ) -> tuple[np.ndarray, tuple[int, int]] | None:
-        """跑一次 matchTemplate。
+        """跑一次 matchTemplate（可选遮罩）。
 
         :return: ``(分数矩阵, (模板宽, 模板高))``；模板比画面大时返回 None。
         """
         th, tw = template.shape[:2]
         if th > search.shape[0] or tw > search.shape[1]:
             return None
-        matrix = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        if mask is None:
+            matrix = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        else:
+            matrix = self._masked_matrix(search, template, mask)
         matrix = np.nan_to_num(matrix, nan=_NAN_FLOOR, posinf=_NAN_FLOOR, neginf=_NAN_FLOOR)
         return matrix, (tw, th)
 
@@ -253,6 +316,7 @@ class OpenCvMatcher:
         confidence: float = 0.9,
         use_pyramid: bool = True,
         grayscale: bool = True,
+        mask: np.ndarray | None = None,
     ) -> MatchResult | None:
         search, offset = self._crop(image, region)
         if search is None:
@@ -264,7 +328,8 @@ class OpenCvMatcher:
 
         for scale in self._scales(use_pyramid):
             prepared = self._prepare(template, scale=scale, grayscale=gray)
-            found = self._raw_result(probe, prepared)
+            scaled_mask = _scaled_mask(mask, prepared)
+            found = self._raw_result(probe, prepared, scaled_mask)
             if found is None:
                 continue
             matrix, (tw, th) = found
@@ -293,11 +358,15 @@ class OpenCvMatcher:
         max_count: int = 0,
         min_distance: int = 10,
         grayscale: bool = True,
+        mask: np.ndarray | None = None,
     ) -> list[MatchResult]:
         """找出所有命中点。
 
         只做单尺度匹配（协议里没有 ``use_pyramid``）—— 多尺度 + 多实例的
         去重逻辑很难解释清楚，需要时应该按固定分辨率重新采集模板。
+
+        ``mask`` 给了就只比较遮罩内的像素（见 :meth:`_masked_matrix`）——
+        用来"只比按钮边框、忽略中间文字"。
         """
         search, offset = self._crop(image, region)
         if search is None:
@@ -306,7 +375,7 @@ class OpenCvMatcher:
         gray = grayscale and self.grayscale
         probe = self._to_gray(search) if gray else search
         prepared = self._prepare(template, scale=1.0, grayscale=gray)
-        found = self._raw_result(probe, prepared)
+        found = self._raw_result(probe, prepared, _scaled_mask(mask, prepared))
         if found is None:
             return []
         matrix, (tw, th) = found
