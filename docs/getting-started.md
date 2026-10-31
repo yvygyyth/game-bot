@@ -3,25 +3,53 @@
 ## 启动（一条命令）
 
 ```powershell
-uv run python -m gamebot ui
+uv run python -m gamebot
 ```
 
 界面就出来了。**改代码立刻生效**，不用重新打包。
 
 日志在 `logs/ui.log`。
 
+> 整个项目**只有这一条命令**。写脚本、检查、空跑、开跑、看识别结果全在界面里 ——
+> 不再有 `list / check / run` 那些要背的东西。
+
+---
+
+## 界面里怎么用
+
+```
+① 选软件（下拉框列出可见窗口，并显示客户区坐标）
+② 选游戏
+③ 选脚本（再挑一个起始节点，调试用）
+   → 勾不勾「空跑」→ ▶ 开始 / ■ 停止
+```
+
+**选完脚本就自动检查了**：定义对不对、模板图缺不缺，结论都在「检查输出」页。
+缺图会直接写 `缺模板: jj/xxx.png <- 状态 xxx` —— 照着补图即可。
+
+**「空跑（只识别，不操作）」**：照常截图、识别、决策、记账，但不下发任何点击。
+调脚本时先勾上它，确认状态认得对、流程走得通，再取消勾选真跑。
+
+跑起来之后看三页：
+
+| 页 | 里面是什么 |
+|---|---|
+| **状态 / 流程** | 状态树和流程图，当前状态/节点描红 |
+| **识图日志** | 每次匹配的带框图（红=命中、橙=未命中、蓝=搜索范围）+ 分数表 |
+| **检查输出** | 检查结论、每次运行的报告（含每次重定位） |
+
 ---
 
 ## 什么时候需要"以管理员身份运行"
 
-上面那条命令**普通权限就能跑**，可以直接调脚本、空跑、看识图日志。
+上面那条命令**普通权限就能跑**，可以直接开界面、调脚本、空跑。
 
 但**要让点击和全局快捷键真的对游戏生效**，进程级别必须够 —— 原因见下面 §1。
 
 | 你要干的事 | 要不要管理员 |
 |---|---|
-| 改代码、跑 `pytest`、`games check` / `describe` | 不用 |
-| 干跑看识别结果（`games run --dry-run`） | 不用 |
+| 改代码、跑 `pytest` | 不用 |
+| 开界面、选脚本、检查、空跑 | 不用 |
 | **真跑（会点游戏）** | **要** |
 | 失焦后按 F5 / F9 / F1 | 要 |
 
@@ -32,7 +60,7 @@ uv run python -m gamebot ui
 ```
 
 > 界面上如果出现"权限不够"的弹框，就是这件事 —— 关掉重开即可。
-> 弹框只在**真的不够**时出现，不会打扰你。
+> 弹框只在**真的不够**时出现，不会打扰你；勾了「空跑」也不会弹（它不发输入）。
 
 ---
 
@@ -72,54 +100,32 @@ uv sync --extra windows --extra ui
 ### 装完怎么确认
 
 ```powershell
-uv run python -m games check mingjiangsha/jingji     # 定义对不对
-uv run python -m games doctor mingjiangsha/jingji    # 权限 / 前台 / 模板 / 抓屏
+uv run python -m gamebot            # 能开出界面就说明装对了
+uv run pytest -q                    # 框架自检（不需要管理员、不需要游戏）
 ```
-
-`doctor` 全绿就可以开跑了。
 
 ---
 
-## 3. 常用命令
+## 3. 常用命令（就这几条）
 
 ```powershell
-# 界面
-uv run python -m gamebot ui
-uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
-uv run python -m gamebot ui --snapshot logs/ui.png         # 不开窗口，渲张截图就退
-
-# 脚本（这五个够用了）
-uv run python -m games list                              # 有哪些脚本
-uv run python -m games describe mingjiangsha/jingji      # 看状态树 + 流程图（不连游戏）
-uv run python -m games check    mingjiangsha/jingji      # 校验定义和模板
-uv run python -m games doctor   mingjiangsha/jingji      # 环境自检，跑真机之前先看
-uv run python -m games run      mingjiangsha/jingji --dry-run   # 空跑：只识别、不动手
-uv run python -m games run      mingjiangsha/jingji              # 真跑
+# 开界面
+uv run python -m gamebot
+uv run python -m gamebot --script mingjiangsha/jingji   # 预选脚本
+uv run python -m gamebot --snapshot logs/ui.png         # 不开窗，渲张截图就退
 
 # 测试与静态检查
-uv run pytest tests/ -q      # 全部用例（不需要管理员）
-uv run ruff check .          # 风格
-uv run mypy src games        # 类型
+uv run pytest -q
+uv run ruff check .
+uv run mypy
+
+# 管理员开发终端（需要真点游戏时）
+.\dev.ps1
 ```
 
-`run` 的两个参数：
-
-| 参数 | 作用 |
-|---|---|
-| `--dry-run` | 只识别、不下发任何输入 —— 调脚本时的默认姿势 |
-| `--max-ticks N` | 最多跑 N 轮 |
-| `--param rounds=3` | 传运行参数（不写就用脚本声明的默认值） |
-
-框架自带的 CLI（调框架、看窗口、抓图）：
-
-```powershell
-uv run python -m gamebot windows      # 列出可见窗口（标题 + 客户区矩形）
-uv run python -m gamebot capture -o a.png   # 截全屏
-uv run python -m gamebot grab --region 1,2,3,4 -o region.png   # 只截一块（调 ROI）
-```
-
-> 早先的 `gamebot info` / `check` / `run` 已经**迁到业务入口** `python -m games`，
-> 旧名字还会留着，但只会打印一句"请改用 games"并退出 2。
+> 需要无界面跑一轮（自动化/CI）时，公开入口是
+> `gamebot.bootstrap.bootstrap_from_spec`；`tests/test_bootstrap_integration.py`
+> 就是那条路的样板。
 
 ---
 
@@ -143,11 +149,12 @@ uv run python packaging/build_exe.py
 
 | 症状 | 多半是 | 怎么查 |
 |---|---|---|
-| **点击没反应、失焦热键也不灵** | **权限不够（UIPI）** | `.\dev.ps1` 里重开；或 `uv run python -m games doctor <脚本>` |
+| **点击没反应、失焦热键也不灵** | **权限不够（UIPI）** | `.\dev.ps1` 里重开 |
 | 界面起不来 | 缺依赖 / 代码错 | 看 `logs/ui.log` |
 | "软件"下拉框是空的 | 没装 `pywin32` | `uv sync --extra windows --extra ui` |
 | `ModuleNotFoundError` | extras 没装齐 | 见 §2 那条警告 |
-| 识别一直 `unknown` | 模板对不上 / 没站在预期界面 | 空跑看「识图日志」的带框图 + 分数 |
+| 识别一直 `unknown` | 模板对不上 / 没站在预期界面 | 空跑，看「识图日志」的带框图 + 分数 |
+| 「检查输出」说缺模板 | 图没裁 / 路径写错 | 按它列出的文件名补图 |
 
 ### 目录在哪
 

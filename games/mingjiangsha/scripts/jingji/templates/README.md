@@ -204,8 +204,8 @@ uv run pytest tests/test_jingji_states.py -s -k Diagnostics
 # ③ 裁完了要当验收门（认错/误命中直接失败）
 JINGJI_CHECK_TEMPLATES=1 uv run pytest tests/test_jingji_states.py -v
 
-# ④ 真机干跑：真抓屏、真识别，但不下发点击
-uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 3
+# ④ 真机干跑：开界面、选脚本、勾「空跑」再点开始
+uv run python -m gamebot
 ```
 
 ④ 那一步看界面上的「识图日志」：每次匹配的**带框图 + 分数**，

@@ -20,7 +20,7 @@
 
 快速上手（业务脚本）::
 
-    python -m games run mingjiangsha/jingji --dry-run --max-ticks 3
+    python -m gamebot      # 开界面；选脚本、检查、空跑、真跑都在里面
 
 只做识图（不进流程）::
 

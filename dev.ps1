@@ -30,8 +30,7 @@
 #   .\dev.ps1
 #
 #   # 一条命令（跑完就退，适合 VS Code 的任务）
-#   .\dev.ps1 -Command "uv run python -m games doctor mingjiangsha/jingji"
-#   .\dev.ps1 -Command "uv run python -m games run mingjiangsha/jingji --max-ticks 20"
+#   .\dev.ps1 -Command "uv run python -m gamebot"
 #   .\dev.ps1 -Command "uv run pytest tests/ -q"
 #
 # ## 在 VS Code 里怎么用
@@ -45,7 +44,7 @@
 #      它会自己弹 UAC。
 #
 # 只在 VS Code 里改代码 / 跑单元测试的话，**不需要管理员** ——
-# 单元测试不碰真机输入。要碰真机（games run / games doctor）才需要。
+# 单元测试不碰真机输入。只有"真点游戏"才需要。
 
 param(
     [string]$Command = ''
@@ -117,7 +116,7 @@ if ($mine -and $mine -notin @('High', 'System')) {
     } catch {
         Write-Host ''
         Write-Host '提权被拒绝（或者这个账户提不了权）。' -ForegroundColor Red
-        Write-Host '真机操作（games run / poke）在这个级别下会静默失效：' -ForegroundColor Red
+        Write-Host '真机操作（会点游戏）在这个级别下会静默失效：' -ForegroundColor Red
         Write-Host '  鼠标会动，但点击不生效；失焦后热键也收不到。' -ForegroundColor Red
         Write-Host ''
         Write-Host '只跑单元测试 / 改代码的话不需要管理员，可以直接用普通终端。' -ForegroundColor DarkGray
@@ -169,14 +168,10 @@ if ($Command) {
 # 交互模式：给一段提示，然后进 PowerShell（venv 已激活）
 # ---------------------------------------------------------------------------
 Write-Host 'venv 已激活。常用命令：' -ForegroundColor Cyan
-Write-Host '  python -m games list                      # 有哪些脚本'
-Write-Host '  python -m games doctor mingjiangsha/jingji # **跑之前先自检**（权限/前台/模板/抓屏）'
-Write-Host '  python -m games run mingjiangsha/jingji --dry-run --max-ticks 5   # 空跑：只识别不动手'
-Write-Host '  python -m games run mingjiangsha/jingji    # 真跑'
-Write-Host '  python -m games describe mingjiangsha/jingji          # 看状态树 + 流程图'
+Write-Host '  python -m gamebot                         # **开界面**（写脚本、检查、空跑、真跑都在里面）'
 Write-Host '  pytest tests/ -q                          # 单元测试（不需要管理员）'
 Write-Host ''
-Write-Host '真机操作前请先跑 doctor：它会查权限级别、前台窗口、模板、抓屏。' -ForegroundColor DarkGray
+Write-Host '真机跑之前确认权限：界面会弹框提示；也可以直接看这个终端是不是管理员。' -ForegroundColor DarkGray
 Write-Host '这个项目有一类失败是彻底静默的（退出码 0、识别命中、动作成功，只有游戏没反应）。' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '输入 exit 退出。' -ForegroundColor DarkGray

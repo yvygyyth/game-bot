@@ -3,7 +3,7 @@
 ## 为什么需要它
 
 单元测试把每一层都测过了，但"**它们接起来还能不能用**"是另一件事。真实入口
-（``python -m games run`` / 界面上的「开始」）走的都是
+（界面上的「开始」）走的都是
 :func:`gamebot.bootstrap.bootstrap_from_spec`：
 
     读 SPEC -> 建路径 -> 建事件总线 -> 建仓库管理器 -> 建 Matcher/Session

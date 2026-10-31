@@ -561,3 +561,57 @@ class TestStopping:
 
         assert main._engine_running is False
         assert elapsed < 4.0, f"关窗花了 {elapsed:.2f}s，可能卡在等引擎退出"
+
+class TestDryRunAndChecks:
+    """界面替代命令行之后补上的两个入口：空跑、选脚本即检查。"""
+
+    def test_dry_run_is_off_by_default(self, ui) -> None:
+        main, _, _ = ui
+        assert main.controls.dry_run is False
+
+    def test_start_button_tooltip_follows_the_checkbox(self, ui) -> None:
+        """勾了空跑，"开始"必须说清"不会操作游戏" —— 不然容易误点真跑。"""
+        main, _, _ = ui
+        main.controls.dry_run_box.setChecked(True)
+        tip = main.controls.start_btn.toolTip()
+        assert "空跑" in tip or "不会操作" in tip
+
+    def test_dry_run_reaches_bootstrap(self, qt_app, ui, monkeypatch) -> None:
+        """勾上空跑 -> ``_on_start`` 真的把 ``dry_run=True`` 传下去。"""
+        from gamebot import bootstrap as bs
+
+        main, _, _ = ui
+        seen: dict[str, object] = {}
+        inner = bs.bootstrap_from_spec
+
+        def spy(feature, **kwargs):
+            seen.update(kwargs)
+            return inner(feature, **kwargs)
+
+        monkeypatch.setattr(bs, "bootstrap_from_spec", spy)
+        main.controls.dry_run_box.setChecked(True)
+
+        main._on_start()
+        assert seen.get("dry_run") is True, seen
+        _wait_until(qt_app, lambda: not main._engine_running)
+
+    def test_missing_template_is_reported_when_selecting_a_script(self, ui) -> None:
+        """假脚本的 ``home.png`` 没裁 —— 选脚本时就要在「检查输出」里说清。
+
+        以前这件事只有命令行 ``games check`` 查；命令行去掉之后，能力在这里。
+        """
+        main, _, _ = ui
+        text = main._check_view.toPlainText()
+        assert "缺模板" in text, text
+        assert "home.png" in text, text
+
+    def test_dry_run_does_not_warn_about_permissions(self, qt_app, ui, monkeypatch) -> None:
+        """空跑不发输入，就别弹 UIPI 警告 —— 否则每次调脚本都白弹一次。"""
+        main, _, _ = ui
+        calls: list[str] = []
+        monkeypatch.setattr(main, "_warn_about_integrity", lambda title: calls.append(title))
+        main.controls.dry_run_box.setChecked(True)
+
+        main._on_start()
+        assert calls == [], "空跑不该弹权限警告"
+        _wait_until(qt_app, lambda: not main._engine_running)

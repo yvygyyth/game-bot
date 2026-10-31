@@ -68,5 +68,5 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
 from gamebot.__main__ import main  # noqa: E402
 
 if __name__ == "__main__":
-    # 不带参数 = 开界面（双击 exe 的默认行为）
-    raise SystemExit(main(sys.argv[1:] or ["ui"]))
+    # 不带参数 = 开界面（双击 exe 的默认行为）—— 入口现在只有这一件事
+    raise SystemExit(main(sys.argv[1:]))

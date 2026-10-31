@@ -138,16 +138,6 @@ class TestBootstrapAndDiagnosticsUseIt:
         assert "check_integrity" in source
         assert "log.warning" in source
 
-    def test_doctor_reports_it(self):
-        """``games doctor`` 是跑真机前的自检入口，必须报出来。
-
-        （``poke`` / ``where`` 已经删了 —— 诊断命令留一个统一的就够。）
-        """
-        import pathlib
-
-        source = pathlib.Path("games/doctor.py").read_text(encoding="utf-8")
-        assert "check_integrity" in source
-
     def test_window_shows_it_in_the_log_panel(self):
         """界面「开始」之前把它写进日志面板（那里第一眼就能看到）。"""
         import pathlib

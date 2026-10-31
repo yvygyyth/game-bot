@@ -464,7 +464,7 @@ vision:
 |---|---|---|
 | ``match_*.png`` | 识图记录（本节） | ``vision.record_keep``，默认 20 |
 | ``fail_*.png`` | 执行器存的失败帧 | 跟识图记录走（它的 5 倍，至少 20） |
-| 其它 | 手工截图、界面快照、``gamebot capture`` | **永不自动删** |
+| 其它 | 手工截图、界面快照 | **永不自动删** |
 
 清理共用一个 ``vision.recorder.prune_old(directory, pattern, keep)``，
 **必须带 pattern** —— 这是这个函数唯一要紧的地方。不带 pattern 地"清最旧的几个"
@@ -598,14 +598,13 @@ ui = ["PySide6>=6.6"]
 | **5** | 多脚本队列（跑完一个接着下一个）；失败自动重试；托盘通知 | ⏳ 待做 |
 
 阶段 1 就能交付一个**真的有用**的工具：调脚本时，"图截到没有、截的是哪块"
-只能靠 `gamebot capture` 存盘再看 —— 有个实时画面 + 日志框会舒服很多。
+只能靠截图存盘再看 —— 有个实时画面 + 日志框会舒服很多。
 阶段 2 把它变成"能直接跑起来看"：不用切命令行，选完三步点开始就行。
 
 ```bash
-gamebot ui                    # 默认选中第一个脚本
-gamebot ui --script mingjiangsha/jingji  # 预选某个脚本
-gamebot ui --script none      # 不预选脚本，打开后自己选
-gamebot ui --snapshot a.png   # 不开窗口，渲染一张界面截图（无头自检 / 配图）
+uv run python -m gamebot                    # 默认选中第一个脚本
+uv run python -m gamebot --script mingjiangsha/jingji  # 预选某个脚本
+uv run python -m gamebot --snapshot a.png   # 不开窗口，渲染一张界面截图（无头自检 / 配图）
 ```
 
 ## 十、做完之后回填的几条经验

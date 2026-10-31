@@ -6,7 +6,7 @@
 games/
 ├── __init__.py            业务层入口（注册表）
 ├── _spec.py               脚本注册表：读各游戏 scripts/__all__
-├── __main__.py            python -m games list / check / describe / run
+├── _templates.py          模板审计（声明 vs 磁盘）
 └── <游戏>/
     ├── __init__.py        游戏包：导出脚本清单 + 跨脚本纯函数
     ├── utils/             跨脚本纯函数（如 go_back）

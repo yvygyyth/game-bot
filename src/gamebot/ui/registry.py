@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,7 +32,7 @@ __all__ = [
 #: 业务层的导入说明（列表为空时显示给人看）
 _FALLBACK_HINT = (
     "读不到脚本列表。业务层在项目根的 games/ 目录下，"
-    "请从项目根目录启动（python -m gamebot ui），或者用 --script 手写 key。"
+    "请从项目根目录启动（python -m gamebot），或者用 --script 手写 key。"
 )
 
 
@@ -124,7 +125,7 @@ def load_scripts() -> tuple[list[ScriptEntry], str]:
 def _import_games() -> tuple[Any, str]:
     """导入业务层。返回 ``(模块, 失败说明)``。
 
-    为什么要多试一次：``uv run gamebot ui`` 是通过 console script 启动的，
+    为什么要多试一次：``uv run python -m gamebot`` 是通过 console script 启动的，
     那种情况下 ``sys.path[0]`` 是虚拟环境的 ``Scripts/`` 目录，**不是当前目录** ——
     于是项目根下的 ``games/`` 不在导入路径里。补上 cwd 再试一次。
 
@@ -191,6 +192,11 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
     except Exception as exc:
         problems.append(f"解析模板根失败: {type(exc).__name__}: {exc}")
 
+    try:
+        problems.extend(_template_problems(entry, scenario))
+    except Exception as exc:
+        problems.append(f"模板检查失败: {type(exc).__name__}: {exc}")
+
     return ScriptDetails(
         pages=len(scenario.tree),
         nodes=len(scenario.graph.nodes),
@@ -202,3 +208,32 @@ def load_details(entry: ScriptEntry) -> ScriptDetails:
         template_roots=roots,
         problems=tuple(problems),
     )
+
+
+def _template_problems(entry: ScriptEntry, scenario: Any) -> list[str]:
+    """声明了但两个模板根里都没有的图。
+
+    **在"选脚本"这一刻就说**，不要等点了开始才在装配期炸 —— 缺图是最常见的
+    故障，而它的报错（`TemplateNotFoundError`）离"我改了个路径"很远。
+    以前只有命令行 ``games check`` 查这件事；命令行去掉了，能力搬到这里。
+    """
+    from ..bootstrap import project_root
+
+    templates = importlib.import_module("games._templates")
+    feature = entry.spec.feature
+    game = feature.name.split("/", 1)[0]
+    root = project_root()
+
+    declared = templates.declared_from_tree(scenario.tree)
+    declared.update(
+        templates.declared_from_module(f"games.{game}.scripts.{feature.slug}.templates")
+    )
+    declared.update(templates.declared_from_module(f"games.{game}.templates"))
+
+    roots = [root / feature.templates_dir]
+    game_dir = getattr(feature, "game_templates_dir", "")
+    if game_dir:
+        roots.append(root / game_dir)
+
+    missing, _unused = templates.audit(tuple(roots), declared)
+    return [f"缺模板: {path}  <- {declared[path]}" for path in missing]

@@ -200,7 +200,7 @@ class Scenario:
     # 状态 ↔ 节点
     # ------------------------------------------------------------------ #
     def binding(self) -> StateBinding:
-        """这份脚本的"状态 ↔ 节点"关联表（引擎和 ``gamebot check`` 用它）。"""
+        """这份脚本的"状态 ↔ 节点"关联表（引擎和界面检查用它）。"""
         from .state_binding import StateBinding
 
         return StateBinding(self.bindings, self.graph)
@@ -224,7 +224,7 @@ class Scenario:
         "终态不需要动作"不等于"不需要节点"。
 
         剩下的未认领状态**不是警告而是错误**（由 :func:`validate_binding`
-        在启动期拦下）。这个方法留给 ``gamebot check`` 做
+        在启动期拦下）。这个方法留给界面检查做
         "把整棵树摊开看一眼"的展示。
         """
         claimed = set(self.bindings.table().values())
@@ -235,7 +235,7 @@ class Scenario:
         )
 
     def describe(self) -> str:
-        """可读的完整描述，给日志和 ``gamebot check`` 用。"""
+        """可读的完整描述，给日志和界面检查用。"""
         return "\n".join(
             [
                 f"Scenario({self.name!r})",

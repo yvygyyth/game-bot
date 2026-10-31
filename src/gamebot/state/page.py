@@ -1410,7 +1410,7 @@ class PageTree:
 
     # ------------------------------------------------------------------ #
     def describe(self) -> str:
-        """打印成一棵树，给日志和 ``gamebot check`` 用。"""
+        """打印成一棵树，给日志和界面检查用。"""
         lines: list[str] = []
 
         def render(page_id: PageId, prefix: str, is_last: bool) -> None:

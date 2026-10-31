@@ -282,6 +282,10 @@ class MainWindow(QMainWindow):
         self._details = details
         self.params.set_form(entry.spec.form if entry.spec is not None else None)
         self.info.set_details(entry, details)
+        if details.problems:
+            # 选完脚本就等于做了一次检查：有问题直接摊在「检查输出」页上，
+            # 而不是只在状态栏留一句"定义有问题"（那等于让人自己去猜）。
+            self._show_check_output(f"检查：{entry.key}", list(details.problems))
 
         # 左边那两个图要的是 Scenario 对象（不是文字），所以在这里真的构造一次。
         # 静态构造不碰游戏窗口，出错也不影响选择 —— 出错就画空白图 + 记日志。
@@ -459,7 +463,12 @@ class MainWindow(QMainWindow):
         from ..execution.journal import JsonlJournal
 
         window_title = self.controls.window_title or entry.spec.feature.window_title
-        self._warn_about_integrity(window_title)
+        dry_run = self.controls.dry_run
+        if dry_run:
+            # 空跑不下发任何输入，UIPI 那套"点不生效"的警告在这里没有意义。
+            log.info("空跑模式：只识别与决策，不会向游戏发送任何输入")
+        else:
+            self._warn_about_integrity(window_title)
 
         # 表单值在这里**读一次**（数据单向：表单是唯一的改值处）。
         try:
@@ -483,6 +492,7 @@ class MainWindow(QMainWindow):
                 journal=journal,
                 recorder=self._recorder,
                 record=self._recorder is None,
+                dry_run=dry_run,
             )
             scenario = engine.scenario
             scenario.validate()
@@ -496,7 +506,7 @@ class MainWindow(QMainWindow):
         self._run_journal = journal
         self._engine_running = True
         self.controls.set_running(True)
-        self._status.setText(f"运行中：{entry.key}")
+        self._status.setText(f"{'空跑中' if dry_run else '运行中'}：{entry.key}")
         self.info.set_run_state(None)
 
         self._engine_worker.configure(ctx, engine, node_id)

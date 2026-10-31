@@ -354,7 +354,7 @@ BINDINGS = NodeBindings(pairs=(Binding("jingji", "home/jingji/battle"),))
 
 **状态 id 是路径形式**，所以改父节点的 key 会连带改掉所有子节点的 id ——
 那时关联表里的状态 id 也得跟着改。只改一半时 `Scenario.validate()` 会拦下
-悬空引用（`games check` 会把它们列出来），不会等到跑起来才炸。
+悬空引用（界面选脚本时的检查会把它们列出来），不会等到跑起来才炸。
 
 ## 八、还没定的两件事
 

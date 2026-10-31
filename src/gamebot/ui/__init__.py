@@ -9,7 +9,7 @@
     from gamebot.ui import run_ui
     run_ui()
 
-或者命令行：``gamebot ui``。
+或者命令行：``python -m gamebot``。
 """
 
 from __future__ import annotations

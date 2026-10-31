@@ -30,6 +30,7 @@ from typing import Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QGroupBox,
@@ -47,13 +48,13 @@ log = logging.getLogger(__name__)
 __all__ = ["ControlsBar"]
 
 _ALL_GAMES = "（全部游戏）"
-_NO_SCRIPT = "（不选脚本 —— 只用配置文件看画面）"
+_NO_SCRIPT = "（不选脚本 —— 只看窗口画面）"
 
 #: 下拉框里标题和尺寸之间的分隔符（只用于显示，传出去之前会剥掉）
 _SIZE_SUFFIX = "  @ "
 
 #: 软件没选时坐标栏的占位文字（说清"现在按什么抓"，别让人以为坏了）
-_NO_WINDOW = "（没选软件 —— 按配置文件抓）"
+_NO_WINDOW = "（没选软件 —— 抓整个屏幕）"
 
 #: 选过、但**现在枚举不到**它时的提示。窗口标题是会变的（浏览器换标签页、
 #: 最小化），这时**保留用户的选择**，但必须让人看出来"现在抓不到它" ——
@@ -135,6 +136,16 @@ class ControlsBar(QWidget):
         self.stop_btn.clicked.connect(self.stopRequested.emit)
         self.stop_btn.setEnabled(False)
 
+        # 空跑：以前只有命令行 ``--dry-run`` 有，而"只会用界面"的人就够不着它。
+        # 它是调脚本时最安全的姿势（识别/决策/记账全走，只是不碰键鼠），
+        # 所以必须能在界面上勾。
+        self.dry_run_box = QCheckBox("空跑（只识别，不操作）", self)
+        self.dry_run_box.setToolTip(
+            "勾上：照常截图、识别、决策、记账，但**不下发任何点击/按键**。\n"
+            "调脚本先空跑，确认状态认得对、流程走得通，再取消勾选真跑。"
+        )
+        self.dry_run_box.toggled.connect(self._on_dry_run_toggled)
+
         self._build_layout()
         # 静态按钮的 tooltip 统一在这里设：留在各自的构造点上会和
         # ``set_shortcut_hints`` 的刷新顺序打架（谁会赢取决于调用时机）。
@@ -164,6 +175,8 @@ class ControlsBar(QWidget):
         step2.addWidget(self.node, 1)
 
         actions = QHBoxLayout()
+        actions.addWidget(self.dry_run_box)
+        actions.addSpacing(12)
         actions.addStretch(1)
         actions.addWidget(self.start_btn)
         actions.addWidget(self.stop_btn)
@@ -206,7 +219,7 @@ class ControlsBar(QWidget):
         """按 key 预选脚本。找不到返回 False。
 
         ``key`` 是 ``"none"`` / ``"-"`` / 空串时选"不选脚本"那一项 ——
-        命令行 ``gamebot ui --script none`` 就是只看画面。
+        不选脚本时就是只看窗口画面。
         """
         if key.strip().lower() in ("", "none", "-"):
             self.script.setCurrentIndex(0)
@@ -406,16 +419,35 @@ class ControlsBar(QWidget):
         """
         for widget in (self.game, self.script, self.node, self.software, self.detect):
             widget.setEnabled(not running)
+        self.dry_run_box.setEnabled(not running)
         if running:
             self.start_btn.setEnabled(False)
         else:
             # 解锁：只取决于"有没有选脚本"，不取决于上一次运行留下的记忆
             self.start_btn.setEnabled(self._has_script)
-            self.start_btn.setToolTip(
-                self._tip("start", "开始运行（会操作游戏）" if self._has_script else "先选一个脚本")
-            )
+            self._refresh_start_tip()
         self.stop_btn.setEnabled(running)
         self._running = running
+
+    @property
+    def dry_run(self) -> bool:
+        """这次「开始」要不要空跑（只识别，不操作）。"""
+        return self.dry_run_box.isChecked()
+
+    def _on_dry_run_toggled(self, _checked: bool) -> None:
+        """勾了空跑，"开始"的 tooltip 要跟着变 —— 别让人以为真会点游戏。"""
+        self._refresh_start_tip()
+
+    def _refresh_start_tip(self) -> None:
+        if not self._has_script:
+            self.start_btn.setToolTip(self._tip("start", "先选一个脚本"))
+            return
+        if self.dry_run:
+            self.start_btn.setToolTip(
+                self._tip("start", "开始空跑（只识别，不会操作游戏）")
+            )
+        else:
+            self.start_btn.setToolTip(self._tip("start", "开始运行（会操作游戏）"))
 
     def note_script_selected(self, ok: bool) -> None:
         """记住"有没有选脚本"。解锁时用它恢复开始按钮（见 :meth:`set_running`）。"""

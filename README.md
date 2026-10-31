@@ -7,25 +7,30 @@
 这三类修改互相不牵连。
 
 > **新会话 / 新协作者先读 [AGENTS.md](AGENTS.md)** —— 它是入口文件：
-> 命令、该读哪几份文档、现在卡在哪、以及几条容易违反的规矩。
+> 该读哪几份文档、代码在哪、几条容易违反的规矩。
 >
 > 当前状态：**框架里已经没有"忘了实现"的桩了**，"看图"到"动手"整条链的代码都在。
 > 原子层 L0~L5 + 视觉 + 平台后端全部实现并在真机验证过；
 > 状态层（`locate` 快路径 / `recover` 慢路径）、流程层（`tick` 的重定位语义）、
-> 执行层（`Executor.run` + 10 个 `Step.run()`）、YAML 加载与 journal 落盘都已实现；
+> 执行层（步骤函数 + `Executor` + journal 落盘）都已完成；
 > 业务层已有 `mingjiangsha/jingji`（名将杀 · 竞技场）跑通识别；
 > 结构化事件流（`events.py`）与跨运行的**状态仓库**（`store/`，落在 `data/stores/`）
 > 已实现 —— 见 [docs/store.md](docs/store.md)；
-> 还差的只有**UI 阶段 2 接线、OCR 实测，以及一轮真机端到端**。
+> 还差的只有**OCR 实测，以及一轮真机端到端**。
 > 详见下方[进度](#进度)与[下一步](#下一步)。
 
 ---
 
 ## 怎么启动（**先读这一节**）
 
-> **装依赖、启动方式、命令速查、出问题怎么办** —— 完整版在
-> **[docs/getting-started.md](docs/getting-started.md)**。
-> 下面是精简版。
+**整个项目只有一条命令**：
+
+```powershell
+uv run python -m gamebot
+```
+
+> 装依赖、界面每一步怎么看、出问题怎么办 —— 完整版在
+> **[docs/getting-started.md](docs/getting-started.md)**。下面是精简版。
 
 ### 装依赖
 
@@ -39,8 +44,22 @@ uv sync --extra windows --extra ui
 ### 启动界面
 
 ```powershell
-uv run python -m gamebot ui
+uv run python -m gamebot
 ```
+
+界面里**三步选完就能跑**：
+
+```
+① 选软件（下拉框列出可见窗口，并显示客户区坐标）
+② 选游戏
+③ 选脚本（再挑一个起始节点，调试用）
+   → 勾不勾「空跑」→ ▶ 开始 / ■ 停止
+```
+
+* **选完脚本就自动检查**：定义对不对、模板图缺不缺，结论进「检查输出」页；
+* **「空跑（只识别，不操作）」**：识别、决策、记账全走，唯独不碰键鼠 ——
+  调脚本先勾它；
+* 跑起来看「状态 / 流程」和「识图日志」（带框的图 + 分数表）。
 
 **改代码立刻生效**，不用重新打包。
 
@@ -53,7 +72,7 @@ uv run python -m gamebot ui
 > **为什么**：游戏是提权运行的，而 Windows 的 UIPI 要求"发送方级别 >=
 > 目标窗口级别"。级别不够时点击和快捷键会**静默失效**（程序照跑、
 > 日志正常，只有游戏没反应），详见 [docs/getting-started.md](docs/getting-started.md)。
-> 界面上会弹一个框告诉你这件事。
+> 界面上会弹一个框告诉你这件事（勾了「空跑」则不弹 —— 它不发输入）。
 
 ### 打包成 exe（可选）
 
@@ -69,14 +88,13 @@ uv run python packaging/build_exe.py
 ### 开发环境
 
 **以管理员身份启动 VS Code** 最省事 —— 之后集成终端里跑什么都够权限。
-顺序是：先在这里跑 `uv run python -m gamebot ui` 调脚本，
-需要真机操作了再提权重启。
+顺序是：先在这里跑 `uv run python -m gamebot` 调脚本，需要真机操作了再提权重启。
 
 不想提权 VS Code 的话，用这个（自动提权 + venv 已激活）：
 
 ```powershell
-.\dev.ps1                                              # 管理员开发终端
-.\dev.ps1 -Command "python -m games doctor mingjiangsha/jingji"
+.\dev.ps1                                    # 管理员开发终端
+.\dev.ps1 -Command "uv run python -m gamebot" # 提权后直接开界面
 ```
 
 ### ⚠️ 为什么真机操作要管理员：UIPI
@@ -100,19 +118,10 @@ Windows 有一条硬规则：**发送方进程的完整性级别必须 >= 目标
 表现和"坐标算错了""模板裁错了"一模一样，所以极易查错方向
 （这个项目在这上面绕了很久）。界面会在开跑前弹框告诉你这件事。
 
-**但日常开发不用管它** —— 改代码、跑测试、`check` / `describe`、
-`run --dry-run` 都不碰真机输入，普通权限就行。只有"真点游戏"才需要提权。
+**但日常开发不用管它** —— 改代码、跑测试、开界面、勾「空跑」都不碰真机输入，
+普通权限就行。只有"真点游戏"才需要提权。
 
-### 跑真机操作前先自检
-
-```bash
-uv run python -m games doctor mingjiangsha/jingji
-```
-
-一次查完：**权限级别 / 前台窗口 / 模板能不能读到 / 抓屏通不通**，
-有问题就非零退出并说清是哪一条。
-
-> 单元测试（`pytest tests/`）**不需要管理员** —— 它不碰真机输入。
+> 单元测试（`pytest`）**不需要管理员** —— 它不碰真机输入。
 
 ---
 
@@ -143,7 +152,7 @@ game-bot/
 │   ├── scenario_spec.py         #   状态树 + 流程图 + 关联表的**纯数据**声明
 │   ├── context.py               # RunContext：三层共享的唯一对象
 │   ├── bootstrap.py             # 装配：SPEC -> 事件流 / 仓库 / 对象图 -> 引擎
-│   ├── __main__.py              # CLI
+│   ├── __main__.py              # 唯一入口：开界面（--script / --snapshot）
 │   ├── atomic/                  # ★ 原子化方法层
 │   │   ├── session.py           #   L1 截图 + 坐标换算 + 输入通道
 │   │   ├── frame.py             #   L2 一帧 + 12 个查询方法
@@ -167,10 +176,9 @@ game-bot/
 │   │   ├── graph.py             #   Node / Edge / Graph / GraphCursor
 │   │   ├── state_binding.py     #   ★ 关联表 StateBinding：两层唯一的桥（运行期查表）
 │   │   ├── node_bindings.py     #   关联表的声明容器 NodeBindings（装配期校验）
-│   │   ├── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）+ 发事件
-│   │   └── loader.py            #   YAML -> Scenario
+│   │   └── engine.py            #   FlowEngine 主循环 + RunReport（含 Recovery）+ 发事件
 │   ├── vision/                  # 视觉算法实现（opencv / OCR）
-│   ├── config/                  # 配置模型与加载
+│   ├── config/                  # 运行期路径 / 后端种类
 │   └── utils/                   # 日志、计时
 ├── tests/                       # 框架的结构测试 + 单元测试
 ├── gamebot.exe                  # 打包好的界面：双击它（见 docs/getting-started.md）
@@ -193,14 +201,14 @@ game-bot/
 
 ```bash
 uv sync --extra windows --extra ui    # 第一次：装依赖（顺便建好 .venv）
-uv run gamebot ui                     # 以后每条命令都在前面加 uv run
-uv run python -m games list
+uv run python -m gamebot              # 唯一那条命令
+uv run pytest                         # 测试（不需要管理员、不需要游戏）
 ```
 
 ### 为什么特意说这件事
 
 `uv run` 的设计就是**省掉激活那一步**，但它有个前提：**所有命令都得走它**。
-少写了 `uv run`、直接敲 `python -m games ...` 的话，用的是 PATH 里那个
+少写了 `uv run`、直接敲 `python -m gamebot` 的话，用的是 PATH 里那个
 `python` —— 而本机它是 **3.10.8**、项目要求 **>=3.11**，于是崩在一个
 `runpy` 的堆栈里，报错内容跟你想跑的东西毫无关系。
 
@@ -212,7 +220,7 @@ uv run python -m games list
 # macOS / Linux
 source .venv/bin/activate
 
-python -m games list      # 激活之后才这么写
+python -m gamebot      # 激活之后才这么写
 ```
 
 激活之后不带 `uv run` 是对的；**没激活就是错的**。文档里统一用 `uv run`
@@ -220,46 +228,33 @@ python -m games list      # 激活之后才这么写
 
 ## 快速开始
 
-**每条命令都走 `uv run`** —— 它自动用 `.venv`，不需要先激活，也不会
-用错解释器（原因见下面"虚拟环境"那一节）。
-
 ```bash
 cd game-bot
-uv sync --extra windows --extra ui    # 装依赖（第一次）
-
-# 先确认能看到窗口、能截到图 —— 这一步能省掉后面 80% 的瞎猜
-uv run python -m gamebot windows
-uv run python -m gamebot capture -o logs/screenshots/first.png
-
-# 然后检查、空跑、真跑（拿唯一那个真脚本举例）
-uv run python -m games check mingjiangsha/jingji            # 定义 + 逐张对模板文件
-uv run python -m games run   mingjiangsha/jingji --dry-run  # 空跑：只识别，不动手
-uv run python -m games run   mingjiangsha/jingji            # 真跑（要管理员，见上）
+uv sync --extra windows --extra ui    # 第一次装依赖
+uv run python -m gamebot              # 开界面，后面全在界面里
 ```
 
-> `games check` 会**逐张**对账：状态树和 `T_*` 常量里声明的图，磁盘上有没有。
-> 缺了就非零退出并指出"哪一页要它" —— 这是写脚本时最该反复跑的一条。
+界面里按顺序做五件事（细节见 [docs/getting-started.md](docs/getting-started.md)）：
+
+1. **① 软件** 选游戏窗口（下拉框里带客户区坐标，坐标错了点击会整体偏）；
+2. **② 游戏 / ③ 脚本** 选脚本（可以另挑一个起始节点，调试某条分支用）；
+3. **选完自动检查** —— 定义对不对、模板缺不缺，结论在「检查输出」页；
+4. **勾上「空跑」点开始** —— 只识别、不碰键鼠，先确认状态和流程对不对；
+5. **取消勾选，用管理员终端（`.\dev.ps1`）再开界面**，真跑。
+
+跑完在「检查输出」里看三样最该看的东西：**停止原因**、**每次重定位**
+（`expected -> actual => node`）、**失败的步骤**。逐步骤的记录在
+`logs/journals/<功能>.jsonl` 里，运行流水在 `logs/events/<功能>.jsonl`。
 
 ### 写脚本（业务层）
 
-```bash
-uv run python -m games list                          # 有哪些脚本
-uv run python -m games describe mingjiangsha/jingji  # 状态树 + 流程图（不连游戏）
-uv run python -m games check    mingjiangsha/jingji  # 定义对不对、缺哪些图
-uv run python -m games doctor   mingjiangsha/jingji  # 跑真机之前先自检（权限/前台/模板/抓屏）
+写脚本时你会反复看三样东西，全在界面上：
 
-# 真的跑起来。建议按 doctor -> --dry-run -> 真跑 的顺序来
-uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20   # 空跑：不碰键鼠
-uv run python -m games run mingjiangsha/jingji                            # 真跑
-uv run python -m games run mingjiangsha/jingji --param rounds=3           # 传运行参数
-```
-
-`run` 跑完会打三样最该看的东西：**停止原因**、**每次重定位**
-（`expected -> actual => node`）、**失败的步骤**。
-逐步骤的记录在 `logs/journals/<功能>.jsonl` 里。
-
-> 退出码有意义：预算跑完算成功（0），而"一个步骤都没执行、从头到尾 unknown"
-> 算失败（1）—— 那基本就是窗口标题不对 / 游戏没开 / 没站在预期界面上。
+| 要看什么 | 在界面哪里 |
+|---|---|
+| 这个脚本有哪些状态、怎么连的 | 「状态 / 流程」页（自动画成图，当前状态/节点描红） |
+| 识别得准不准、框偏没偏 | 「识图日志」页（红=命中、橙=未命中、蓝=搜索范围 + 分数表） |
+| 定义 / 模板有没有问题 | 「检查输出」页（选脚本时自动跑，缺图会逐张列出来） |
 
 业务层按**游戏 → scripts → 功能**组织，脚本永远在 `scripts/<功能>/` 里
 （`games/<游戏>/scripts/<功能>/`）。约定见 [games/README.md](games/README.md)；
@@ -271,8 +266,8 @@ uv run python -m games run mingjiangsha/jingji --param rounds=3           # 传�
 
 ```bash
 uv sync --extra ui         # 界面依赖（PySide6，约 150MB，可选）
-uv run python -m gamebot ui                 # 打开本地控制台
-uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
+uv run python -m gamebot                    # 打开本地控制台
+uv run python -m gamebot --script mingjiangsha/jingji   # 预选脚本
 ```
 
 现在的界面能 **按三步选完就把脚本跑起来**：
@@ -281,12 +276,18 @@ uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
 ① 选软件（下拉框列出可见窗口，并显示它的客户区坐标）
 ② 选游戏
 ③ 选脚本（再挑一个起始节点，调试用）
-   → 检查 / ▶ 开始 / ■ 停止
+   → 勾不勾「空跑」/ ▶ 开始 / ■ 停止
 ```
 
 **为什么"选软件"排第一**：坐标是从窗口来的 —— 截图和点击都以那个窗口的客户区
 左上角为原点。窗口没定，后面两步选什么都换算不到屏幕坐标。选完立刻把坐标显示
 出来，是因为它错了的表现是"每次点击都偏一个窗口位置"，而大目标看不出来。
+
+**选完脚本就自动检查**（定义 + 逐张对模板文件），结论写进「检查输出」——
+缺图会直接列 `缺模板: jj/xxx.png <- 状态 xxx`，不用等开跑才炸。
+
+**「空跑（只识别，不操作）」**：识别、决策、记账全走，唯独不下发输入。
+调脚本先勾它；勾着的时候也不弹 UIPI 警告（不发输入就没有这个问题）。
 
 跑起来之后：**引擎在工作线程**（界面不卡），右侧实时显示当前/期望状态、当前节点、
 轮次、以及**每次重定位**（"我以为在 A，实际在 B，已落到节点 C"）。「停止」是毫秒级的。
@@ -305,17 +306,6 @@ uv run python -m gamebot ui --script mingjiangsha/jingji   # 预选脚本
 > （`vision.record_keep`），只清理框架自己写的 `match_*.png`。
 
 设计、线程模型、以及做完之后回填的坑见 [docs/ui.md](docs/ui.md)。
-
-### CLI 子命令
-
-| 命令 | 用途 |
-|---|---|
-| `gamebot info` | 打印本次生效的完整配置（排查"配置到底读了没"） |
-| `gamebot check` | 校验配置 / 流程定义 / 模板文件是否存在 |
-| `gamebot windows` | 列出可见窗口（确定 `window_title` 填什么） |
-| `gamebot capture` | 截一张全屏图存盘（验证后端与 DPI） |
-| `gamebot grab --region x,y,w,h` | 只截一个区域存盘（调 ROI 用） |
-| `gamebot run [--dry-run]` | 跑流程 |
 
 ## 用法示例
 
@@ -348,7 +338,7 @@ result = find_any_of(frame, [
 ], short_circuit=True)
 ```
 
-跑流程并拿到报告（和 CLI / 界面走**同一条**装配路径）：
+跑流程并拿到报告（和界面走**同一条**装配路径）：
 
 ```python
 from gamebot.bootstrap import bootstrap_from_spec
@@ -372,7 +362,7 @@ flow (流程层)  ──  做什么、何时换  有向图 + 主循环 + 节奏�
   ↑
 state (状态层) ──  我在哪个状态    状态树（单帧定位）+ 跟踪层（跨帧）+ 黑板
   ↑
-execution (执行层) ── 可靠地做一次  步骤 + 重试 + 失败代价 + 记账
+execution (执行层) ── 可靠地做一次  步骤 + 记账 + 失败留痕（不重试）
   ↑
 atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 ```
@@ -385,11 +375,11 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 1. 状态层**只回答"是什么"**，认不出来也要如实说，不猜、不做决定；
 2. 流程层**只回答"去哪儿"**，不直接碰键鼠；
 3. 状态是**树**、流程是**图**，两者不能合并 —— 树管空间，图管时间；
-4. 节点声明的 `page` 和实测状态不符时，**本轮一个动作都不做**，而是走重定位
+4. 绑定给节点的状态和实测不符时，**本轮一个动作都不做**，而是走重定位
    （慢路径找回真实状态 → 关联表查出该去哪个节点 → 游标落过去，下一轮才执行），
    并且**每次都记进 `RunReport.recoveries`** —— 自动跳可以，隐形不行
    （这条推翻了早期的"只拦不跳"，见 [docs/state-and-flow.md](docs/state-and-flow.md)）；
-5. 不写 `page` 的节点**不校验状态**（"流程图只写正常流程"），但状态侧反过来是硬的：
+5. 没绑状态的节点**不校验状态**（"流程图只写正常流程"），但状态侧反过来是硬的：
    每个记录信息的状态都必须有节点认领，否则启动期就 `ConfigError`；
 6. 执行层**只回答"怎么可靠地做一次"**，不决定做不做。
 
@@ -397,45 +387,42 @@ atomic (原子层) ── 怎么做        L0~L5 共 50 个原子方法
 
 **这个项目没有"启动"这一步** —— 它不是 web 服务，没有 dev server、没有构建、
 没有热重载。`src/gamebot/` 是纯 Python 包，改完存盘，下一条命令就是新代码。
-所以"起环境"只有三件事：**依赖装好、自检绿、想跑的入口跑得起来**。
+所以"起环境"只有三件事：**依赖装好、自检绿、界面起得来**。
 
 ```bash
 cd game-bot
 uv sync --extra windows --extra ui    # ① 依赖（已齐时约 1 秒，纯校验）
-uv run ruff check . && uv run pytest  # ② 自检：必须全绿（实测约 5 秒 / 664 用例）
-uv run gamebot ui                     # ③ 起界面（约 2 秒起来，然后常驻）
+uv run ruff check . && uv run pytest  # ② 自检：必须全绿
+uv run python -m gamebot              # ③ 起界面（约 2 秒起来，然后常驻）
 ```
 
 **这三步都不需要游戏开着**（`uv sync` / 测试用假后端 / 界面不管游戏在不在），
 所以即使手头没游戏也能确认环境是好的。第 ③ 步的无头版本：
 
 ```bash
-QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张就退出
+uv run python -m gamebot --snapshot out.png   # 渲染一张就退出
 ```
 
 ### 按你要做的事选入口
 
-| 要做什么 | 命令 | 要游戏开着吗 |
+| 要做什么 | 怎么做 | 要游戏开着吗 |
 |---|---|---|
 | **写一个步骤函数** | 先读 [docs/run-context.md](docs/run-context.md)（`ctx` 上有什么） | 不用 |
-| 改界面 | `uv run gamebot ui`（可加 `--script mingjiangsha/jingji` 预选） | **不用** |
+| 改界面 | `uv run python -m gamebot` | **不用** |
 | 跑测试 | `uv run pytest` | **不用**（假后端） |
-| 改识图/流程 | `uv run python -m games run mingjiangsha/jingji --dry-run --max-ticks 20` | **要** |
-| 只跑某一条分支 | 界面上选「从哪个节点开始」；命令行没有这个开关（那是调试用的少数派场景） | **要** |
-| 看定义对不对 | `uv run python -m games check mingjiangsha/jingji` | 不用 |
-| 调真机识别 | 起来跑一次，看界面的「识图日志」（带红框的图 + 分数表） | **要** |
-| 无头环境（CI / 没显示器） | `QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png` | 不用 |
+| 改识图/流程 | 界面勾「空跑」跑一轮，看「识图日志」 | **要**（窗口得存在） |
+| 只跑某一条分支 | 界面上选「起始节点」 | **要** |
+| 看定义/模板对不对 | 选脚本即自动检查，看「检查输出」 | 不用 |
+| 调真机识别 | 跑一轮，看「识图日志」的带框图 + 分数表 | **要** |
+| 无头环境（CI / 没显示器） | `uv run python -m gamebot --snapshot out.png` | 不用 |
 
-**"要游戏开着"的意思是"那个窗口得存在"**：连 `--dry-run` 和
-`gamebot capture` 都会先去抓屏，所以窗口不在时它们报的是
+**"要游戏开着"的意思是"那个窗口得存在"**：空跑也会先抓屏，所以窗口不在时界面里报
 
 ```
-✗ BackendError: 未找到标题包含 '名将杀' 的窗口        （退出码 2）
+✗ BackendError: 未找到标题包含 '名将杀' 的窗口
 ```
 
-**这不是环境坏了**，是没开游戏。先 `uv run gamebot windows` 看当前有哪些窗口，
-用 `--window <标题片段>` 覆盖。**没有游戏时能验证的东西仍然不少**：界面能起来、
-测试能全过、`check` 能过、`describe` 能看状态树和流程图。
+**这不是环境坏了**，是没开游戏。窗口下拉框旁边的「重新检测」可以刷新列表。
 
 ### 需要知道的几件事
 
@@ -447,7 +434,7 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
   唯一例外是**已经开着的界面** —— Python 只在启动时加载模块，所以改完
   界面代码要**关掉重开**（曾经以为是 bug：界面上还留着已经删掉的按钮）。
 * **真机上有环境可能拦掉鼠标注入**（连 `SetCursorPos` 都返回 0 且无错误码）。
-  遇到别怀疑代码，先 `uv run gamebot capture -o a.png` 看截屏通不通。
+  遇到别怀疑代码，先看「识图日志」里的图是不是正常画面（全黑 = 截屏就不通）。
 
 ## 进度
 
@@ -466,12 +453,12 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 | 流程层 | ✅ 完整 | ★ 流程图（`Graph`/`Node`/`Edge`/`GraphCursor`）、关联表（`StateBinding`）、`Scenario` 跨树图校验、`FlowEngine.tick` 的重定位全部实现 |
 | 执行层 | ✅ 完整 | 步骤是函数 / 结果记录 / `Executor.run` / journal JSONL 落盘全部实现（重试策略已按"上层重定位"模型删掉） |
 | 装配 | ✅ 完整 | `bootstrap_from_spec` 是**唯一**装配入口：SPEC → 事件流 / 仓库 / Matcher / Session / Context / Executor / Engine；有集成测试整条走一遍 |
-| 业务层 | 🟡 部分 | ★ 游戏 → scripts → 功能，注册表自动发现，`check`/`describe`/`run` 已实现；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
+| 业务层 | 🟡 部分 | ★ 游戏 → scripts → 功能，注册表自动发现；界面里选脚本即检查（定义 + 逐张对模板文件）；`mingjiangsha/jingji`（名将杀 · 竞技场）是真机样板 |
 | 状态仓库 | ✅ 完整 | ★ 跨运行的记忆：一个脚本可用多个仓库，`games/…/store/` 一个仓库一个文件，落 `data/stores/<游戏>/<id>.json`；原子写、坏文件留证据不挡开跑；见 [docs/store.md](docs/store.md) |
 | 事件流 | ✅ 完整 | ★ `events.py`：`run_started` / `tick` / `page_changed` / `node_changed` / `step_started` / `step_finished` / `recovery` / `store_changed` / `run_finished`，落 `logs/events/<功能>.jsonl`；监听器出错不影响流程 |
 | 日志 | 🟡 部分 | 控制台 + 文件 handler、内存环形缓冲、界面回调桥、journal JSONL、事件流已实现；每次运行独立日志待实现 |
-| UI | ✅ 阶段 2 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、开始/停止真的能跑、运行状态面板（含每次重定位）、实时画面（跑起来时复用引擎那一帧）、日志大框、检查。设计见 [docs/ui.md](docs/ui.md)；`gamebot ui` 打开 |
-| 测试 | ✅ 892 个用例 | 框架的结构契约与单元测试（含 16 个跳过：依赖 UI/OCR 的可选环境） |
+| UI | ✅ 完成 | PySide6 本地控制台：**① 软件（含客户区坐标）→ ② 游戏 → ③ 脚本**、选脚本即检查、**「空跑」勾选框**、开始/停止真的能跑、运行状态面板（含每次重定位）、识图日志（带框图）、检查输出。设计见 [docs/ui.md](docs/ui.md)；`python -m gamebot` 打开 |
+| 测试 | ✅ 950+ 用例 | 框架的结构契约与单元测试（含 16 个跳过：依赖 UI/OCR 的可选环境） |
 
 > **原子化方法层（L0~L5 + 视觉 + 平台后端）已全部实现并在真机上验证过**
 > （真实截图 2560x1440、窗口枚举、模板匹配坐标、坐标换算、组合子调度、动作下发）。
@@ -490,13 +477,12 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 按依赖顺序还剩：
 
 1. **UI 接事件流** —— 状态面板改成订阅 `EventBus`（现在还在用回调），
-   加一页「记忆」按仓库分组显示 `ctx.stores`；顺手把窗口里那几句
-   "尚未实现"的 tooltip 改成事实
+   加一页「记忆」按仓库分组显示 `ctx.stores`
 2. **OCR 实测** —— 装 `--extra ocr-rapid` 后跑一遍 `find_text`
 3. **真机端到端** —— 现在只验到识别；拿 `mingjiangsha/jingji` 真跑一轮，
    看 `RunReport` 的轨迹（含 `recoveries`）和 `logs/events/jingji.jsonl` 是不是符合预期
-4. **拆大文件** —— `state/page.py`（69KB）、`flow/engine.py`（51KB）、
-   `flow/graph.py`（33KB）按概念拆开；纯搬迁，靠测试兜底
+4. **拆大文件** —— `state/page.py`（约 1450 行）、`flow/engine.py`（约 1150 行）、
+   `flow/graph.py`（约 810 行）按概念拆开；纯搬迁，靠测试兜底
 
 ## 开发约定
 
@@ -505,8 +491,8 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
 - **唯一例外是 `Cancelled`**：它表示"别再继续了"，不是"失败了"。
   它继承 `BaseException` 而不是 `Exception` —— 这样它不会被
   `except Exception` 的兜底逻辑吞掉。**永远不要写裸 `except:`**。
-- **中止不能被重试**。`RetryPolicy.retry_on` 是枚举而不是"非成功即可重试"，
-  请保持这个写法。
+- **失败了不重试**：失败（多半是识图没命中）由流程层拿实测状态**重定位**，
+  不在步骤里补重试循环。
 - **不要在另一个线程里 `close()` session**。停止只设标志（`request_stop`），
   等工作线程自己退出后再关。
 - **不要绕过 `ctx.frame()` 直接截图**。同一 tick 内的步骤必须看同一张图。
@@ -516,11 +502,11 @@ QT_QPA_PLATFORM=offscreen uv run gamebot ui --snapshot out.png   # 渲染一张�
   `ctx.param(...)`（表单校验）。三者混用是这里最容易犯的错。
 - **仓库的 `get` 拿到的是副本**。改复合值要用 `set` / `patch` / `append`，
   不要指望"就地改一下就存下来了"。
-- **新增 Query / Step 类型必须登记注册表**，否则 YAML 里写不出来。
-- **状态树里父节点一律 `kind: group`（分类节点），只有末梢状态节点写 `queries`** ——
+- **新增 Query 类型要登记**（`atomic/query.py` 的注册表），否则 `query_from_dict`
+  认不出它。
+- **状态树里父节点一律是分类节点（`PageGroup`），只有末梢状态节点写 `queries`** ——
   分类节点自己不记录信息、不参与匹配；给它写 `queries` 或让它空着，校验都会报出来。
-- **YAML 里那一节叫 `states:`**（旧键 `pages:` 仍兼容，但新配置别再写）。
-- 提交前跑：`uv run ruff check . && uv run pytest`
+- 提交前跑：`uv run ruff check . && uv run mypy && uv run pytest`
 
 ## 依赖
 

@@ -7,14 +7,13 @@
 ```
 
 ```bash
-uv run python -m games check    mingjiangsha/jingji   # 定义对不对、缺哪些图
-uv run python -m games describe mingjiangsha/jingji   # 状态树 + 流程图长什么样
-uv run python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
+uv run python -m gamebot        # 开界面，选 mingjiangsha/jingji（选完自动检查）
+                                #   勾「空跑」跑一轮：只识别、不动手
 ```
 
 ## 怎么确认"现在认得出哪一页"
 
-**跑一次**（`games run <脚本> --dry-run --max-ticks 20`），然后看界面上的
+**跑一次**（界面上勾「空跑」再点开始），然后看界面上的
 「**识图日志**」：记录器把每次匹配的框画在真机的截图上
 （**红=命中、橙=未命中、蓝=搜索范围**），旁边还有一张结构化表格
 （查了什么、在哪块搜、几分、中没中）。认没认出来、认的是哪一块、位置偏没偏，
@@ -63,7 +62,7 @@ uv run python -m games run      mingjiangsha/jingji --dry-run --max-ticks 20
 界面上是右上角那块（四个控件 + 重置按钮）。命令行同样能覆盖：
 
 ```bash
-uv run python -m games run mingjiangsha/jingji --param jingji.rounds=3 --param jingji.strict=true
+界面右上角的参数表单里改「刷几局」「严格模式」即可（同一份 `FORM` 校验）
 ```
 
 两条路走**同一个** `FORM.fill()` 做校验 —— 所以不会出现"界面拦得住的、

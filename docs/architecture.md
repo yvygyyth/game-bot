@@ -134,8 +134,8 @@ while True:
 要等到点开始才知道。没有入参，这些值只能写死在脚本里。
 
 ```python
-# 命令行
-uv run python -m games run mingjiangsha/jingji --param rounds=5 --param target=battle
+# 开跑前传（界面表单 / bootstrap_from_spec(params=...)）
+params = {"rounds": 5}
 
 # 步骤里读（给了默认值就是"可选参数"）
 rounds = ctx.param("rounds", 3)
@@ -215,7 +215,7 @@ Windows（mss + pydirectinput）和 Android（adb）的差异被压到
 ### 10. 每步都记账（journal 已实现）
 
 `execution/journal.py` 定义了落盘格式，`JsonlJournal` 已经按 JSONL 写盘
-（`gamebot run` 默认落在 `paths.journals/run.jsonl`）。原因：
+（界面开跑时落在 `logs/journals/<功能>.jsonl`）。原因：
 **每步记录"看到什么 + 做了什么 + 结果如何"，攒够了就是模仿学习的样本。**
 第一天就让格式带上帧路径、坐标、置信度，比事后补要便宜得多。
 
@@ -330,16 +330,12 @@ FlowEngine.tick()
 ## 五、调试方法论（重要）
 
 写识图脚本 80% 的时间花在"我截到的到底是不是我以为的画面"上。
-所以最省时间的三个命令是：
+所以最省时间的是界面上的三件事：
 
-```bash
-gamebot windows                 # 窗口标题该填什么
-gamebot capture -o a.png        # 全屏截一张，看后端对不对、DPI 有没有问题
-gamebot grab --region 100,50,80,30 -o roi.png   # 调 ROI 的时候反复用
-gamebot check                   # 模板文件齐不齐、配置有没有拼错
-```
-
-流程跑通之前先 `--dry-run`：只识别状态、不走动作，看流程走向对不对。
+* **「识图日志」** —— 每次匹配的框画在真机截图上（红=命中、橙=未命中、蓝=搜索范围）
+  + 分数表：认没认出来、认的是哪一块、位置偏没偏，一眼就看出来；
+* **选脚本即检查** —— 定义 + 逐张模板文件，缺图直接列出来；
+* **「空跑」勾选框** —— 只识别、不走动作，看流程走向对不对。
 
 ## 六、当前进度
 

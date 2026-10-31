@@ -666,7 +666,7 @@ class Graph:
 
     # ------------------------------------------------------------------ #
     def describe(self) -> str:
-        """打印成可读的清单，给日志和 ``gamebot check`` 用。"""
+        """打印成可读的清单，给日志和界面检查用。"""
         lines = [f"Graph(initial={self.initial!r}, {len(self.nodes)} 节点, {len(self.edges)} 边)"]
         for node in self.nodes.values():
             lines.append(f"  [{node.id}]  steps={len(node.steps)}")

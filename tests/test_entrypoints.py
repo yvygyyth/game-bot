@@ -1,4 +1,4 @@
-"""开发/使用入口：``dev.ps1``、打包好的 ``gamebot.exe``、``games doctor``。
+"""开发/使用入口：``dev.ps1``、打包好的 ``gamebot.exe``、界面启动。
 
 ## 为什么值得有测试
 
@@ -50,43 +50,6 @@ def _code_lines(relative: str) -> str:
     return "\n".join(out)
 
 
-class TestDoctorCommandIsWired:
-    """``games doctor`` —— 跑真机脚本前的环境自检。"""
-
-    def test_the_module_exists(self):
-        assert (ROOT / "games" / "doctor.py").is_file()
-
-    def test_it_is_registered_in_the_cli(self):
-        source = _source("games/__main__.py")
-        assert "register_doctor" in source, "子命令没挂上"
-        assert '"doctor": cmd_doctor' in source, "处理器没注册"
-
-    def test_the_parser_accepts_the_script_key(self):
-        """``doctor <脚本>`` —— 和 check / describe 一样收一个脚本 key。"""
-        from games.__main__ import build_parser
-
-        args = build_parser().parse_args(["doctor", "mingjiangsha/jingji"])
-        assert args.command == "doctor"
-        assert args.script == "mingjiangsha/jingji"
-
-    def test_it_checks_the_things_that_fail_silently(self):
-        """它必须覆盖那几件"静默失效"的事 —— 否则等于没查。"""
-        source = _source("games/doctor.py")
-        for needed in (
-            "check_integrity",       # 权限级别（UIPI）
-            "GetForegroundWindow",   # 窗口在不在前台
-            "templates_dir",         # 模板读不读得到
-            "capture",               # 抓屏通不通
-        ):
-            assert needed in source, f"doctor 没有检查 {needed}"
-
-    def test_it_returns_non_zero_when_there_are_problems(self):
-        """有问题要**非零退出** —— 否则 CI / 脚本里看不出来。"""
-        source = _source("games/doctor.py")
-        assert "return 1" in source
-        assert "return 0" in source
-
-
 class TestDevLauncher:
     """``dev.ps1`` —— 开发终端（自动提权 + 装好环境）。"""
 
@@ -114,10 +77,10 @@ class TestDevLauncher:
         assert "exit 1" in source
         assert "exit 0" in source
 
-    def test_it_points_at_doctor(self):
-        """开发终端里要提示"跑真机前先 doctor"。"""
+    def test_it_points_at_the_gui(self):
+        """开发终端里要提示"怎么开界面"。"""
         source = _source("dev.ps1")
-        assert "doctor" in source
+        assert "python -m gamebot" in source
 
     def test_it_does_not_use_the_ps7_only_api(self):
         """``ArgumentList`` 在 Windows PowerShell 5.1 上不存在。
@@ -194,9 +157,9 @@ class TestGuiLauncher:
         assert "pyproject.toml" in source, "找项目根要看标志文件"
 
     def test_the_entry_defaults_to_the_ui(self):
-        """双击不带参数 = 开界面。"""
+        """双击不带参数 = 开界面（入口现在只有这一件事）。"""
         source = _source("packaging/entry.py")
-        assert 'or ["ui"]' in source
+        assert 'main(sys.argv[1:])' in source
 
     def test_it_does_not_use_powershell_or_cmd_launchers(self):
         """**不许再引入控制台子系统的启动器。**
@@ -222,13 +185,10 @@ class TestIntegrityModuleIsUsed:
         source = _source("src/gamebot/bootstrap.py")
         assert "check_integrity" in source
 
-    def test_cli_reports_it(self):
-        """命令行那边由 ``doctor`` 报。
-
-        （``poke`` / ``where`` 已经删了 —— 诊断命令不该有一堆，
-        留一个 ``doctor`` 把权限 / 前台 / 模板 / 抓屏全查了。）
-        """
-        source = _source("games/doctor.py")
+    def test_the_gui_warns_before_a_real_run(self):
+        """界面里"真跑"之前要提醒权限（空跑不提醒 —— 它不发输入）。"""
+        source = _source("src/gamebot/ui/window.py")
+        assert "dry_run" in source
         assert "check_integrity" in source
 
     def test_gui_shows_it_in_the_log_panel(self):

@@ -199,7 +199,7 @@ class NodeBindings:
     # 描述
     # ------------------------------------------------------------------ #
     def table(self) -> dict[str, PageId]:
-        """``节点 -> 状态``。给 ``gamebot check`` 和日志看。"""
+        """``节点 -> 状态``。给界面检查和日志看。"""
         return dict(sorted(self._to_state.items()))
 
     def state_to_node(self) -> dict[PageId, str]:
