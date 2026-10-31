@@ -65,11 +65,13 @@ def click_image(
     region: Region | None = None,
     confidence: float = 0.9,
     settle: float = 0.0,
+    mask: Any = None,
 ) -> ActionResult[Any]:
     """找到 ``template`` 并点它。找不到就 ``not_found``（上层会去重定位）。
 
     :param region: 搜索区域（客户区坐标）。**收窄它往往比多做一个模板有效。**
     :param settle: 点完等多久。界面有过渡动画时给一点，别让下一步看旧画面。
+    :param mask: 只比较遮罩内的像素（数组或 ``"gold"``）；半透明底的文字用 ``"gold"``。
     """
     found = ctx.frame().find_image(template, region=region, confidence=confidence)
     if not found.ok or found.value is None:

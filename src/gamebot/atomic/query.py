@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
 
 from ..types import ActionResult, Point, Region
@@ -65,13 +65,19 @@ class Query(Protocol):
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True, slots=True)
 class ImageQuery:
-    """查找单张模板图。"""
+    """查找单张模板图。
+
+    :param mask: 只比较遮罩内的像素。数组 = 现成的 0/1 遮罩；
+        ``"gold"`` = 按模板的金色笔画自动生成（半透明底的提示字用这个）。
+        见 :mod:`gamebot.vision.masks`。``compare=False``：数组比较会炸。
+    """
 
     template: str
     region: Region | None = None
     confidence: float = 0.85
     use_pyramid: bool = True
     grayscale: bool = True
+    mask: Any = field(default=None, compare=False, repr=False)
 
     def run(self, frame: Frame) -> ActionResult[Point]:
         return frame.find_image(
@@ -80,6 +86,7 @@ class ImageQuery:
             confidence=self.confidence,
             use_pyramid=self.use_pyramid,
             grayscale=self.grayscale,
+            mask=self.mask,
         )
 
 

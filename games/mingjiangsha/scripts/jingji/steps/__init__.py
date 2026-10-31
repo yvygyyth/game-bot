@@ -12,7 +12,7 @@
 | `tip/checked` | :func:`confirm_tip` | 点「确定」，关掉提示框 |
 | `select` | :func:`pick_general` | 点第 1 张武将卡 + 点「确定」 |
 | `fight/hand` | :func:`advance_fight` | 取消换牌 → 麻花结 → 投降 → 确认 |
-| `fight/done` | :func:`finish_round` | 点空白区 → 下一步 → 确认（+ 记一局） |
+| `fight/victory` | :func:`finish_round` | 点空白区 → 下一步 → 确认（+ 记一局） |
 
 > 按钮点击走**四种家族方法**（``click_shadow_confirm`` / ``click_pattern_confirm``
 > / ``click_shadow_cancel`` / ``click_qj_next``），只比**边框环**、不认文字，

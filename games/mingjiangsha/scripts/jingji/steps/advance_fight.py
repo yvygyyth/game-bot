@@ -12,7 +12,7 @@
 | 3 | `zhandou3` | 「投降」 | `fight/fight_surrender.png` |
 | 4 | `zhandou4` | 投降弹窗的「确认」 | `clicks/fight_confirm.png` |
 
-走完这四步画面就到结算页（``fight/done``），剩下的交给 :mod:`.finish_round`。
+走完这四步画面就到**完胜**（``fight/victory``），剩下的交给 :mod:`.finish_round`。
 
 ## 第 1 步为什么用固定坐标
 
@@ -49,7 +49,13 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import wait_for
 from gamebot.types import ActionResult, Point
 
-from ..templates import T_CLICK_FIGHT_CONFIRM, T_FIGHT_MENU, T_FIGHT_SURRENDER
+from ..templates import (
+    T_CLICK_FIGHT_CONFIRM,
+    T_FIGHT_MENU,
+    T_FIGHT_SPACE,
+    T_FIGHT_SURRENDER,
+)
+from .finish_round import VICTORY_ROI
 
 if TYPE_CHECKING:
     from gamebot.context import RunContext
@@ -78,8 +84,23 @@ def advance_fight(ctx: RunContext) -> ActionResult[Any]:
         if not step.ok:
             return step
 
+    # ---- 5. 等完胜画面出现 ----
+    # 投降之后到「点击空白区域到下一步」可能要等 10s（网络/结算动画）。
+    # 这一步**在步骤里等**，而不是让引擎把它当成"认不出来"去 5s 重定位 ——
+    # 那会在画面还没出来时就判"不在这套状态里"。
+    victory = wait_for(
+        ctx,
+        ImageQuery(T_FIGHT_SPACE, mask="gold", region=VICTORY_ROI, confidence=0.9),
+        timeout=15.0,
+    )
+    if not victory.ok or victory.value is None:
+        return ActionResult.not_found(
+            "投降后 15s 内没等到完胜画面（点击空白区域到下一步）",
+            template=T_FIGHT_SPACE,
+        )
+
     return ActionResult.success(
-        FIGHT_HAND_CANCEL, action="sequence", message="已发起投降，等结算"
+        FIGHT_HAND_CANCEL, action="sequence", message="已发起投降，等到完胜画面"
     )
 
 

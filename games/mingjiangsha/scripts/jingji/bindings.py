@@ -20,7 +20,7 @@
 | ``tip_confirm`` | ``tip/checked`` | 点「确定」关掉提示框 |
 | ``pick_general`` | ``select`` | 点第 1 张武将卡 + 「确定」 |
 | ``fight`` | ``fight/hand`` | 取消换牌 → 麻花结 → 投降 → 确认 |
-| ``settle`` | ``fight/done`` | 结算三步 + 记一局 |
+| ``victory`` | ``fight/victory`` | 点空白 → 下一步 → 确认（记一局） |
 | ``finish`` | ``over`` | 刷够局数的终态 |
 
 ## 一个流程节点只关联**一个**状态
@@ -52,7 +52,7 @@ BINDINGS = NodeBindings(
         Binding("tip_confirm", "tip/checked"),
         Binding("pick_general", "select"),
         Binding("fight", "fight/hand"),
-        Binding("settle", "fight/done"),
+        Binding("victory", "fight/victory"),
         # 终态也要有节点认领 —— 否则重定位到它就无处可去。
         # "进了就结束"不等于"不需要节点"。
         Binding("finish", "over"),

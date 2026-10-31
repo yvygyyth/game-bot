@@ -73,7 +73,7 @@ Session **只负责截图、坐标换算、持有输入后端**，不做任何�
 
 | # | 方法 | 返回 | 状态 |
 |---|---|---|---|
-| 4 | `find_image(template, region, confidence, use_pyramid, grayscale)` | `success(value=Point, score=...)` | ✅ |
+| 4 | `find_image(template, region, confidence, use_pyramid, grayscale, mask)` | `success(value=Point, score=...)` | ✅ |
 | 5 | `find_all_images(template, region, confidence, max_count, min_distance)` | `success(value=list[Point])` | ✅ |
 | 6 | `find_text(text, region, lang, confidence, exact_match)` | `success(value=Point, text=...)` | ✅ |
 | 7 | `find_all_texts(text, region, lang, confidence)` | `success(value=list[Point])` | ✅ |

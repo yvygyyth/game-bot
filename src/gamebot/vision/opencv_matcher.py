@@ -36,6 +36,7 @@ import numpy as np
 from ..atomic.vision import MatchResult
 from ..exceptions import BackendError, TemplateNotFoundError
 from ..types import Point, Region
+from .masks import gold_mask
 
 __all__ = ["OpenCvMatcher"]
 
@@ -101,6 +102,8 @@ class OpenCvMatcher:
         self.scales = tuple(scales)
         self._raw: dict[str, np.ndarray] = {}
         self._prepared: dict[tuple[str, float, bool], np.ndarray] = {}
+        #: ``mask="gold"`` 时按模板算出来的遮罩（模板名 -> 0/1 数组，原尺寸）
+        self._mask_cache: dict[str, np.ndarray] = {}
         self.preloaded = 0
         if preload:
             self.preloaded = self.preload()
@@ -307,6 +310,29 @@ class OpenCvMatcher:
     # ------------------------------------------------------------------ #
     # Matcher 协议
     # ------------------------------------------------------------------ #
+    def _resolve_mask(
+        self, template: str, mask: Any, prepared: np.ndarray
+    ) -> np.ndarray | None:
+        """把 ``mask`` 变成和 ``prepared`` 同尺寸的遮罩。
+
+        * ``None`` -> None（整块比）；
+        * 数组 -> 原样；
+        * ``"gold"`` -> 按模板原图的金色笔画生成（灰度图算不了颜色），
+          按模板名缓存，金字塔缩放到当前模板尺寸。
+        """
+        if mask is None or not isinstance(mask, str):
+            return mask
+        if mask != "gold":
+            raise BackendError(f"不认识的遮罩名 {mask!r}（可选 'gold' 或传数组）")
+        base = self._mask_cache.get(template)
+        if base is None:
+            base = gold_mask(self._prepare(template, scale=1.0, grayscale=False))
+            self._mask_cache[template] = base
+        height, width = prepared.shape[:2]
+        if base.shape[:2] == (height, width):
+            return base
+        return cv2.resize(base, (width, height), interpolation=cv2.INTER_NEAREST)
+
     def match(
         self,
         image: np.ndarray,
@@ -328,7 +354,7 @@ class OpenCvMatcher:
 
         for scale in self._scales(use_pyramid):
             prepared = self._prepare(template, scale=scale, grayscale=gray)
-            scaled_mask = _scaled_mask(mask, prepared)
+            scaled_mask = self._resolve_mask(template, mask, prepared)
             found = self._raw_result(probe, prepared, scaled_mask)
             if found is None:
                 continue
@@ -375,7 +401,7 @@ class OpenCvMatcher:
         gray = grayscale and self.grayscale
         probe = self._to_gray(search) if gray else search
         prepared = self._prepare(template, scale=1.0, grayscale=gray)
-        found = self._raw_result(probe, prepared, _scaled_mask(mask, prepared))
+        found = self._raw_result(probe, prepared, self._resolve_mask(template, mask, prepared))
         if found is None:
             return []
         matrix, (tw, th) = found

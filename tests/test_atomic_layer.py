@@ -184,7 +184,9 @@ class RecordingFrame:
         self.calls.append((name, kwargs))
         return self._result
 
-    def find_image(self, template, region=None, confidence=None, use_pyramid=True, grayscale=True):
+    def find_image(
+        self, template, region=None, confidence=None, use_pyramid=True, grayscale=True, mask=None
+    ):
         return self._record(
             "find_image",
             template=template,
@@ -192,6 +194,7 @@ class RecordingFrame:
             confidence=confidence,
             use_pyramid=use_pyramid,
             grayscale=grayscale,
+            mask=mask,
         )
 
     def find_all_images(self, template, region=None, confidence=0.9, max_count=0, min_distance=10):
@@ -230,6 +233,13 @@ class TestQueries:
         assert kwargs["confidence"] == 0.8
         assert kwargs["use_pyramid"] is False
         assert kwargs["grayscale"] is False
+        assert kwargs["mask"] is None
+
+    def test_image_query_passes_mask(self) -> None:
+        """mask 要一路传到 frame —— 半透明底的文字靠它只比笔画。"""
+        frame = RecordingFrame()
+        ImageQuery("a.png", mask="gold").run(frame)
+        assert frame.calls[0][1]["mask"] == "gold"
 
     def test_all_images_query(self) -> None:
         frame = RecordingFrame()

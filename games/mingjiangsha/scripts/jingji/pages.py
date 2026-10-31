@@ -10,7 +10,7 @@ home
     ├── select              选将界面（点卡 + 确定）
     └── fight（分类）
         ├── fight/hand     换牌弹窗
-        └── fight/done     结算「确认」
+        └── fight/victory 完胜「点击空白区域」
 ```
 
 `fight` 是分类节点：同一界面的先后时刻（换牌 / 结算）各挂独立叶子。
@@ -43,8 +43,8 @@ from .templates import (
     T_AFTER_ADD,
     T_AFTER_CREATE,
     T_BEFORE_CREATE,
-    T_FIGHT_DONE,
     T_FIGHT_HAND,
+    T_FIGHT_SPACE,
     T_LOBBY,
     T_SELECT_SCREEN,
     T_TIP,
@@ -148,7 +148,7 @@ FEATURE_TREE = PageGroup(
         PageGroup(
             "fight",
             name="战斗",
-            description="战斗：换牌开头 + 结算收尾两个锚点",
+            description="战斗：换牌开头 + 完胜收尾两个锚点",
             children=(
                 PageLeaf(
                     "fight/hand",
@@ -158,11 +158,13 @@ FEATURE_TREE = PageGroup(
                     description="「是否需要更换初始手牌？」（每局开头）",
                 ),
                 PageLeaf(
-                    "fight/done",
-                    name="战斗 · 结算",
-                    roi=Region(1020, 1150, 520, 260),
-                    queries=(ImageQuery(T_FIGHT_DONE),),
-                    description="结算页的「确认」",
+                    "fight/victory",
+                    name="战斗 · 完胜",
+                    roi=Region(1000, 1120, 560, 160),
+                    # 这行字是金色笔画 + 半透明底，底下的卡牌每局都不一样 ——
+                    # 只比金色笔画（mask="gold"），背景完全不参与。
+                    queries=(ImageQuery(T_FIGHT_SPACE, mask="gold", confidence=0.9),),
+                    description="「点击空白区域到下一步」",
                 ),
             ),
         ),

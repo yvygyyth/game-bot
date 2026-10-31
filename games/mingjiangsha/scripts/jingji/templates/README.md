@@ -13,7 +13,7 @@ jj/tip_checked.png         提示框 · 复选框（已勾，60×60）
 select/screen.png          选将界面锚点（「换座」按钮；灰/金两态都长这样）
 select/select_first.png    选将 · 血条勾玉那一列（每张卡都有）
 fight/hand.png             战斗 · 换牌（「是否需要更换初始手牌？」）
-fight/done.png             战斗 · 结算（结算页「确认」）
+fight/space.png            战斗 · 完胜「点击空白区域到下一步」（金色笔画 mask）
 fight/space.png            「点击空白区域到下一步」那行提示文字
 fight/fight_menu.png       右上角金色圆结（展开投降菜单）
 fight/fight_surrender.png  菜单里的「投降」
@@ -84,7 +84,7 @@ rawMaterial/                ← 你的原始截图，别动
 | `jj/tip_checked.png` | `tip2.png` | 复选框（已勾） | 同上 | 60×60 |
 | `select/screen.png` | 真机选将截图 | 「**换座**」按钮（灰/金两态都在） | **(320, 730, 470, 810)** | 150×80 |
 | `fight/hand.png` | `zhandou1.png` | 弹窗里「**是否需要更换初始手牌？**」那行字 | 你自己定（现 440×177 偏大，可只留文字那一行） | ~380×50 |
-| `fight/done.png` | `zhandou7.png` | 结算页「**确认**」按钮本体 | **(1147, 1205, 1452, 1304)** | 305×99 |
+| `fight/space.png` | `zhandou5.png` | 「**点击空白区域到下一步**」（金色笔画 + 半透明底，用 `mask="gold"`） | 已裁好 | 394×37 |
 
 > 上面那几个精确框是**从截图里量出来的**（找金色像素的包围盒，见
 > `logs/tools/measure_buttons.py`），不是估的。

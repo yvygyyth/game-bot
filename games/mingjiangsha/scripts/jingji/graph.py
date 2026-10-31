@@ -30,12 +30,12 @@ lobby --(进竞技场)--> create_team --(建队后)--> add_pet --(加伙伴后)-
 
 ## 回边与两处未亲眼见过的过渡
 
-**循环就是最后那条回边**：``settle`` → ``match``。下面是两处"不知道实际界面
+**循环就是最后那条回边**：``victory`` → ``match``。下面是两处"不知道实际界面
 长什么样"的假设，结构上就是普通边：
 
-1. **``settle`` → ``match``** —— 结算页点完「确认」之后回到哪？玩家没给那张截图。
+1. **``victory`` → ``match``** —— 完胜页点完「确认」之后回到哪？玩家没给那张截图。
    这里假设**回到竞技场界面**（加过伙伴、能看到「开始匹配」那个）。
-   若实际不是，脚本会卡在 ``settle`` 反复确认，日志里表现为"重定位不到目标" ——
+   若实际不是，脚本会卡在 ``victory`` 反复确认，日志里表现为"重定位不到目标" ——
    那时把这条边改成实际去向即可（改一个字符串）。
 
 2. **``pick_general`` → ``fight``** —— 点完确定到进战斗之间有加载。
@@ -151,15 +151,15 @@ SCENARIO = ScenarioSpec(
             steps=[advance_fight],
             description="战斗：取消换牌 → 投降 → 确认",
             transitions=[
-                Transition("settle", on_page("fight/done"), 10, "投降完成（结算页）"),
+                Transition("victory", on_page("fight/victory"), 10, "投降后完胜画面"),
             ],
         ),
         Node(
-            "settle",
+            "victory",
             steps=[finish_round],
-            description="结算：点空白区 → 下一步 → 确认（记一局）",
+            description="完胜：点空白 → 下一步 → 确认（记一局）",
             transitions=[
-                # **两条出边，按 priority 分胜负** —— 这就是"循环次数到了就结束"。
+                # **多条出边，按 priority 分胜负** —— 这就是"循环次数到了就结束"。
                 #
                 # 优先判"刷够了"：条件看的是黑板里已完成的局数。
                 # 用 priority 而不是"先判断再决定"的代码，是因为条件本身
@@ -173,6 +173,8 @@ SCENARIO = ScenarioSpec(
                 ),
                 # **回边** —— 没刷够就回竞技场又点一次「开始匹配」
                 Transition("match", on_page("jj/after_add"), 10, "还没刷够，再来一局"),
+                # 也见过点完确认回首页的（那就在首页再点一次竞技入口）。
+                Transition("lobby", on_page("lobby"), 5, "回到首页"),
             ],
         ),
         # ---------------- 收工 ----------------

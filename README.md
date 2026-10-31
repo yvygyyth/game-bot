@@ -324,6 +324,21 @@ with session:
         print("按钮在", btn.value, "相似度", btn.meta.get("score"))
 ```
 
+图片里读文字（**纯函数**，不需要 session / frame）：
+
+```python
+from gamebot.vision import locate_text, ocr_available, read_text
+
+if ocr_available():
+    text = read_text(frame.to_numpy())                    # 整图
+    text = read_text(frame.to_numpy(), Region(100, 50, 300, 60))  # 只读一块
+    hits = locate_text(frame.to_numpy(), "确定")           # 找位置（TextBox 列表）
+```
+
+> 没装 OCR 时**不会抛异常**：`read_text` 返回 `""`、`locate_text` 返回 `[]`，
+> `ocr_available()` 返回 False。要装：
+> `uv sync --extra windows --extra ui --extra ocr-rapid`（装完自动启用）。
+
 一次判断多个目标（1 次截图 + N 次匹配）：
 
 ```python

@@ -16,4 +16,12 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .text import clear_cache, locate_text, ocr_available, ocr_backend, read_text
+
+__all__ = [
+    "clear_cache",
+    "locate_text",
+    "ocr_available",
+    "ocr_backend",
+    "read_text",
+]

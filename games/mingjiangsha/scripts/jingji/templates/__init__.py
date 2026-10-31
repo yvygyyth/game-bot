@@ -14,7 +14,6 @@ __all__ = [
     "T_AFTER_CREATE",
     "T_BEFORE_CREATE",
     "T_CLICK_FIGHT_CONFIRM",
-    "T_FIGHT_DONE",
     "T_FIGHT_HAND",
     "T_FIGHT_MENU",
     "T_FIGHT_NEXT",
@@ -35,7 +34,6 @@ T_AFTER_CREATE = "jj/after_create.png"
 T_AFTER_ADD = "jj/after_add.png"
 T_SELECT_SCREEN = "select/screen.png"
 T_FIGHT_HAND = "fight/hand.png"
-T_FIGHT_DONE = "fight/done.png"
 # 提示框：框体（证明是这个弹窗）+ 复选框两态（未勾 / 已勾，证明勾没勾）。
 T_TIP = "jj/tip.png"
 T_TIP_CHECK = "jj/tip_check.png"

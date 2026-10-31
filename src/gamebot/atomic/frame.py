@@ -144,6 +144,16 @@ class Frame:
     # ------------------------------------------------------------------ #
     # 查询类
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _mask_key(mask: Any) -> Any:
+        """遮罩的缓存键：数组取摘要、字符串直接当标记。"""
+        if mask is None:
+            return None
+        if isinstance(mask, str):
+            return ("str", mask)
+        raw = mask.tobytes() if hasattr(mask, "tobytes") else bytes(mask)
+        return hashlib.blake2b(raw, digest_size=8).hexdigest()
+
     def find_image(
         self,
         template: str,
@@ -151,12 +161,15 @@ class Frame:
         confidence: float | None = None,
         use_pyramid: bool = True,
         grayscale: bool = True,
+        mask: Any = None,
     ) -> ActionResult[Point]:
         """查找单张图像，返回最佳命中中心点。
 
         :param template: 模板名（相对 ``vision.templates_dir``）或绝对路径。
         :param region: 源分辨率下的搜索范围；None = 整帧。
         :param confidence: 相似度阈值；None 时取 Session 的 ``default_confidence``。
+        :param mask: 只比较遮罩内的像素（数组或 ``"gold"``，见
+            :mod:`gamebot.vision.masks`）；None = 整块比。
         :return: ``success(value=Point, score=0.93, rect=命中矩形)`` /
                  ``not_found("xxx.png 未命中")`` / ``error(...)``。
 
@@ -164,8 +177,16 @@ class Frame:
         """
         threshold = self._confidence(confidence)
         return self.cached(
-            ("find_image", template, region, threshold, use_pyramid, grayscale),
-            lambda: self._find_image(template, region, threshold, use_pyramid, grayscale),
+            (
+                "find_image",
+                template,
+                region,
+                threshold,
+                use_pyramid,
+                grayscale,
+                self._mask_key(mask),
+            ),
+            lambda: self._find_image(template, region, threshold, use_pyramid, grayscale, mask),
         )
 
     def _find_image(
@@ -175,6 +196,7 @@ class Frame:
         confidence: float,
         use_pyramid: bool,
         grayscale: bool,
+        mask: Any = None,
     ) -> ActionResult[Point]:
         matcher = self._matcher()
         if matcher is None:
@@ -199,6 +221,7 @@ class Frame:
                 confidence=confidence,
                 use_pyramid=use_pyramid,
                 grayscale=grayscale,
+                **({"mask": mask} if mask is not None else {}),
             )
         except Exception as exc:
             return ActionResult.error(
@@ -242,10 +265,7 @@ class Frame:
         threshold = self._confidence(confidence)
         # 缓存键要带上遮罩 —— 同一个模板、不同遮罩是两个不同的查询。
         # 用内容摘要：遮罩本身很小，算一次摘要比"每次都真的重算匹配"便宜得多。
-        mask_key = None
-        if mask is not None:
-            raw = mask.tobytes() if hasattr(mask, "tobytes") else bytes(mask)
-            mask_key = hashlib.blake2b(raw, digest_size=8).hexdigest()
+        mask_key = self._mask_key(mask)
         return self.cached(
             ("find_all_images", template, region, threshold, max_count, min_distance, mask_key),
             lambda: self._find_all_images(

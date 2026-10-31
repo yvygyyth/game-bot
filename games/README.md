@@ -494,7 +494,7 @@ games/mingjiangsha/scripts/jingji/templates/
 ├── jj/after_add.png
 ├── select/screen.png        选将（单个叶子）
 ├── fight/hand.png           fight 下两个叶子
-├── fight/done.png
+├── fight/space.png
 ├── clicks/…                 只用来**点**、不对应状态
 └── rawMaterial/             原始截图（供重裁）
 ```

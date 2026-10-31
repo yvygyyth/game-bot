@@ -144,7 +144,16 @@ class TestKeySignatures:
         from gamebot.atomic.frame import Frame
 
         params = list(inspect.signature(Frame.find_image).parameters)
-        assert params == ["self", "template", "region", "confidence", "use_pyramid", "grayscale"]
+        assert params == [
+            "self",
+            "template",
+            "region",
+            "confidence",
+            "use_pyramid",
+            "grayscale",
+            # 只比遮罩内像素（半透明底的提示字用 "gold"）；普通找图不传它。
+            "mask",
+        ]
 
     def test_find_all_images_signature(self) -> None:
         from gamebot.atomic.frame import Frame
@@ -188,6 +197,7 @@ class TestKeySignatures:
             "confidence",
             "use_pyramid",
             "grayscale",
+            "mask",
         ]
         assert "comparator" in [f.name for f in fields(NumberQuery)]
         assert [f.name for f in fields(PixelQuery)] == ["point", "expected_color", "tolerance"]

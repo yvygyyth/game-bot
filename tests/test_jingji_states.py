@@ -85,7 +85,7 @@ CASES: tuple[tuple[str, str], ...] = (
     ("tip/checked", "tip2.png"),
     ("select", "select1.png"),
     ("fight/hand", "zhandou1.png"),
-    ("fight/done", "zhandou7.png"),
+    ("fight/victory", "zhandou5.png"),
 )
 
 #: ``状态 id -> 它那张模板的**相对路径**``（和 ``templates`` 包里的常量一一对应）。
@@ -102,7 +102,7 @@ TEMPLATE_OF: dict[str, str] = {
     "tip/checked": "jj/tip_checked.png",
     "select": "select/screen.png",
     "fight/hand": "fight/hand.png",
-    "fight/done": "fight/done.png",
+    "fight/victory": "fight/space.png",
 }
 
 

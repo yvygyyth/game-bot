@@ -72,6 +72,9 @@ ROUNDS_KEY = "fight.rounds"
 #: 结算页「确认」按钮区（源坐标，2560x1369 客户区实测位置 + 余量）。
 CONFIRM_REGION = Region(1070, 1200, 430, 150)
 
+#: 完胜画面「点击空白区域到下一步」的位置（源坐标）。文字位置固定。
+VICTORY_ROI = Region(1000, 1120, 560, 160)
+
 #: 点完空白区 / 「确认」后等界面跟上的时间（秒）。结算面板是滑入的。
 FIGHT_NEXT_SETTLE = 1.2
 
@@ -82,7 +85,10 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
     # 结算面板是**滑入**的，所以是"等它出现"而不是"假定它已经在"。
     # 找图命中的是**中心点**（matcher 返回 top_left + 模板一半），
     # 所以直接点它就是点在那行字上。
-    blank = click_image(ctx, T_FIGHT_SPACE, settle=FIGHT_NEXT_SETTLE)
+    # mask="gold"：这行字是半透明底，只比金色笔画（见 pages.py 的同名状态）。
+    blank = click_image(
+        ctx, T_FIGHT_SPACE, region=VICTORY_ROI, mask="gold", settle=FIGHT_NEXT_SETTLE
+    )
     if not blank.ok:
         return blank
 
