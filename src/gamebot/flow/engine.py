@@ -607,18 +607,8 @@ class FlowEngine:
             #
             # 现在先按边的语义判一次：能对上的边就正常走（和 ``_note_advance``
             # 同一套条件与优先级）；对不上才说明"真跑偏了"，那时才恢复定位。
-            if anchor != UNKNOWN_PAGE:
-                decision = self.cursor.evaluate(self.ctx, now=now)
-                if decision.target is not None:
-                    log.info(
-                        "按画面推进：节点 %r -> %r（实测状态 %r）",
-                        node.id,
-                        decision.target,
-                        anchor,
-                    )
-                    self.cursor.advance(decision.target, now=now)
-                    self._note_decision(decision)
-                    return None
+            if anchor != UNKNOWN_PAGE and self._advance_if_edge_matches(now=now):
+                return None
             return self._realign(frame, node, bound, anchor, now=now)
 
         # 没关联状态：只要锚点没有被**别的**节点认领，就继续待着（让位给认领它的）
@@ -665,6 +655,27 @@ class FlowEngine:
         self._note_advance(now=now)
         return last
 
+    def _advance_if_edge_matches(self, *, now: float) -> bool:
+        """画面已经明确变了：如果某条出边等的就是它，**正常推进**（不记重定位）。
+
+        这是"流程正常一路往前，重定位只留给意外"的落点：边的条件本来就写成
+        ``on_page(下一页)``，画面到了下一页就是**这条边的事**，不是异常。
+
+        :return: 推进了返回 True；没有边接得住返回 False（调用方去重定位）。
+        """
+        decision = self.cursor.evaluate(self.ctx, now=now)
+        if decision.target is None:
+            return False
+        log.info(
+            "按画面推进：节点 %r -> %r（实测状态 %r）",
+            self.cursor.current,
+            decision.target,
+            self.tracker.current_id,
+        )
+        self.cursor.advance(decision.target, now=now)
+        self._note_decision(decision)
+        return True
+
     def _relocate_after_failure(
         self, node: Node, failure: StepOutcome, *, now: float
     ) -> None:
@@ -680,9 +691,18 @@ class FlowEngine:
         而失败的那一步很可能已经点了按钮 —— 那张图过期了。
         不作废帧的话，这里会得出"位置没变"的错误结论。
         """
-        # 作废缓存 -> `_locate_now` 会真的抓一张新的
+        # 作废缓存 -> 真的抓一张新的
         self.ctx.invalidate_frame()
-        anchor = self._locate_now(now=now)
+        frame = self.ctx.frame()
+        found = self.scenario.tree.locate(
+            frame, self.tracker.current_id, expected=self.binding.state_of(node.id), now=now
+        )
+        if not found.ok or found.value is None:
+            # 底层定位出错：不猜，交给下一轮（它有自己的错误处理）。
+            log.debug("节点 %r 步骤失败后重新定位出错: %s", node.id, found.message)
+            return
+        self.tracker.update(found.value, now=now, reason="失败后重新定位")
+        anchor = self.tracker.current_id
 
         bound = self.binding.state_of(node.id)
         if bound is None:
@@ -703,9 +723,20 @@ class FlowEngine:
             )
             return
 
-        # 位置确实变了：交给和自检不符时**同一套**重定位逻辑
+        # 画面确实变了：如果某条出边等的就是新画面，那是**正常推进**
+        # （点了按钮、进了下一屏），不该记成重定位。
+        if anchor != UNKNOWN_PAGE and self._advance_if_edge_matches(now=now):
+            log.info(
+                "节点 %r 的步骤 %r 失败（%s），但画面已到下一页 -> 按边推进",
+                node.id,
+                failure.step,
+                failure.message,
+            )
+            return
+
+        # 位置确实变了、又没有边接得住：交给和自检不符时**同一套**重定位逻辑
         # （慢路径确认 + 关联表反查 + 记 Recovery）
-        self._realign(self.ctx.frame(), node, bound, anchor, now=now, cause="步骤失败")
+        self._realign(frame, node, bound, anchor, now=now, cause="步骤失败")
 
     #: 重定位时先查"最近待过的状态"队列，查几个。
     #:
@@ -982,6 +1013,15 @@ class FlowEngine:
         if found is not None and found.id != UNKNOWN_PAGE and found.id != expected:
             self.tracker.update(found, now=now, reason="重定位")
             anchor = self.tracker.current_id
+            # 慢路径找回的画面如果正好是某条出边等的下一页，那是正常推进
+            # （画面只是慢了一拍），不该记成重定位。
+            if self._advance_if_edge_matches(now=now):
+                log.info(
+                    "%s：画面恢复为 %r，正好是某条出边等的下一页 -> 按边推进",
+                    cause,
+                    anchor,
+                )
+                return
             target = self.binding.node_for(anchor)
             node_id = self.cursor.current
             if target is None:

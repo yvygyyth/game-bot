@@ -866,6 +866,31 @@ class TestEngineRealign:
         assert engine.cursor.current == "battle"
         assert engine.report.recoveries == [], "有边可走就不是异常，别记重定位"
 
+    def test_step_failure_after_the_screen_moved_is_a_normal_advance(
+        self, ctx, matcher
+    ) -> None:
+        """步骤失败、但画面已经到"边在等的下一页" -> 正常推进，不记重定位。"""
+        from gamebot.execution.executor import Executor
+
+        scenario, _tree = build_live()
+        ctx.executor = Executor(ctx)
+
+        def failing_step(c):
+            # 点了按钮但没等到目标（或者找到的是旧的），画面已经翻页
+            matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+            return ActionResult.not_found("没找到要点的东西")
+
+        scenario.graph.nodes["lobby"].steps = [failing_step]
+        engine = FlowEngine(scenario, ctx)
+        engine.tracker.set_initial("home/lobby", now=0.0)
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+
+        engine.tracker.advance_tick()
+        engine.tick()
+
+        assert engine.cursor.current == "battle"
+        assert engine.report.recoveries == []
+
     def test_unexpected_state_re_anchors_the_cursor(self, ctx, matcher) -> None:
         """**核心语义**：状态层说"其实在 arena"，引擎把游标挪到 arena 节点。"""
         scenario, _tree = build_live()
@@ -949,11 +974,14 @@ class TestRelocateAfterStepFailure:
     "失败"和"重定位"会分成两轮、看不出因果。
     """
 
-    def _engine(self, ctx, matcher, step) -> tuple[Any, Any]:
+    def _engine(self, ctx, matcher, step, *, screen: str = "battle.png") -> tuple[Any, Any]:
         """先让 lobby **确认进入**（连续帧数够了），再换上要测的步骤。
 
         为什么不能一开始就挂上：确认之前引擎根本不执行步骤，而确认需要两帧。
         所以 warm-up 那一轮用一个空步骤跑过去，然后才换成被测的那个。
+
+        :param screen: 步骤失败后画面变成什么（默认 battle —— 它**有边接**；
+            要测"真跑偏"就传 arena）。
         """
         from gamebot.execution.executor import Executor
 
@@ -966,28 +994,28 @@ class TestRelocateAfterStepFailure:
         engine.tick()  # 第 1 帧：确认进入，还没动作
 
         scenario.graph.nodes["lobby"].steps = [step]
-        matcher.matches = {"battle.png": (Point(1, 1), 0.99)}
+        matcher.matches = {screen: (Point(1, 1), 0.99)}
         engine.tracker.advance_tick()
         return engine, scenario
 
     def test_screen_moved_so_it_relocates_this_tick(self, ctx, matcher) -> None:
-        """画面已经变了：**同一轮里**游标就挪到新状态下对应的节点。"""
+        """画面变了、而且**没有边接得住**：同一轮里游标就挪到对应的节点。"""
         calls: list[str] = []
 
         def step(c):
             calls.append("lobby")
             return ActionResult.not_found("按钮没找到")
 
-        engine, _ = self._engine(ctx, matcher, step)
+        engine, _ = self._engine(ctx, matcher, step, screen="arena.png")
         engine.tick()
 
         assert calls == ["lobby"], "步骤该跑一次（然后失败）"
-        assert engine.cursor.current == "battle", "失败后立刻重定位到 battle"
+        assert engine.cursor.current == "arena", "失败后立刻重定位到 arena"
         assert len(engine.report.recoveries) == 1
         record = engine.report.recoveries[0]
         assert record.expected == "home/lobby"
-        assert record.actual == "home/battle"
-        assert record.to_node == "battle"
+        assert record.actual == "home/arena"
+        assert record.to_node == "arena"
 
     def test_screen_did_not_move_so_it_stays(self, ctx, matcher) -> None:
         """画面**还在原地**：失败是"这一步没命中"，不是"位置跑了" —— 不挪。
@@ -995,10 +1023,8 @@ class TestRelocateAfterStepFailure:
         挪了等于把游标从一个正确的位置上踢开。
         """
         engine, _ = self._engine(
-            ctx, matcher, lambda c: ActionResult.not_found("按钮没找到")
+            ctx, matcher, lambda c: ActionResult.not_found("按钮没找到"), screen="lobby.png"
         )
-        # 这一轮画面还是 lobby（步骤失败了，但界面没变）
-        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
         engine.tick()
 
         assert engine.cursor.current == "lobby", "位置没变就不该挪"
