@@ -156,3 +156,28 @@ class TestJingjiIsClean:
         for folder in BUTTON_FOLDERS:
             assert (game_root / folder).is_dir(), f"家族目录不存在: {folder}"
             assert list((game_root / folder).glob("*.png")), f"家族 {folder} 里没有图"
+
+    def test_no_unreferenced_feature_templates(self) -> None:
+        """功能级模板目录里**不该有没人引用**的图。
+
+        判据（用户定的设计）：**没被状态树引用 = 不是状态识别图**；
+        再加上模块里 ``T_*`` 声明（步骤识别用）。两个都不沾的，
+        就是"裁了但没接进流程"的图，应当删掉，而不是留在目录里误导人。
+        """
+        from gamebot.bootstrap import project_root
+        from games import get_script
+
+        spec = get_script("mingjiangsha/jingji")
+        scenario = spec.build_scenario()
+        declared = declared_from_tree(scenario.tree)
+        declared.update(
+            declared_from_module("games.mingjiangsha.scripts.jingji.templates")
+        )
+        root = project_root()
+        missing, unused = audit(root / spec.feature.templates_dir, declared)
+
+        assert missing == [], f"声明的模板在磁盘上找不到: {missing}"
+        assert unused == [], (
+            f"功能级模板目录里有没被引用的图（不进状态树、也没 T_* 声明）: {unused}"
+        )
+
