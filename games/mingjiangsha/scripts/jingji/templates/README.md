@@ -8,8 +8,6 @@ jj/before_create.png       竞技场 · 建队前（右下角「创建队伍」�
 jj/after_create.png        竞技场 · 建队后（右下角「添加伙伴」）
 jj/after_add.png           竞技场 · 加完伙伴（右下角「开始匹配」）
 jj/tip.png                 匹配后可能弹的提示框本体
-jj/check.png               那个框里的复选框（空态）
-jj/check_yes.png           复选框勾上之后
 select/idle.png            选将 · 未选（「确定」灰的）
 select/picked.png          选将 · 已选（「确定」金的）
 select/select_first.png    选将 · 血条勾玉那一列（每张卡都有）
@@ -19,8 +17,6 @@ fight/space.png            「点击空白区域到下一步」那行提示文�
 fight/fight_menu.png       右上角金色圆结（展开投降菜单）
 fight/fight_surrender.png  菜单里的「投降」
 fight/fight_next.png       结算中间底部「下一步」
-fight/close.png            「取消」（换牌弹窗里那个）
-fight/faQiTouXiang.png     「发起投降」
 
 clicks/fight_confirm.png    ← 只用来**点**、不对应状态
 
@@ -127,17 +123,13 @@ rawMaterial/                ← 你的原始截图，别动
 挑最左而不是"第一个命中的"，因为 `find_all_images` 按分数降序返回，
 分数会浮动 —— 按 x 挑才是确定的。
 
-### 还没接进流程的
+### 只有"被状态树 / 步骤引用"的图才留
 
-| 模板 | 是什么 | 打算怎么用 |
-|---|---|---|
-| `fight/close.png` | 「**取消**」按钮（换牌弹窗里那个） | 它和投降弹窗的「确认」**长得一模一样**，不能单独拿去找。**先用状态确认**（走到这一步时已经是 `fight/hand`），再点 |
-| `fight/faQiTouXiang.png` | 「**发起投降**」 | 投降链：`fight_menu`（金色圆结）→ `faQiTouXiang` → `fight_confirm`。现在这条链用的是 `fight/fight_surrender.png` |
-| `jj/check.png` / `jj/check_yes.png` | 复选框的**空**态 / **勾上**态 | 见下面「提示弹窗」—— 现在是照偏移点一下，没判"勾了没有" |
+没被 `pages.py` 引用的图（原来的 `fight/close.png`、`fight/faQiTouXiang.png`、
+`jj/check.png`、`jj/check_yes.png`）已经删了 —— 按设计，**没进状态树就不是状态识别图**，
+点击也早就不用它们了。以后裁了图但没接进流程，先别放进这个目录。
 
-> **`FIGHT_HAND_CANCEL`**（固定坐标）暂时保留：状态已经保证"我在换牌弹窗里"，
-> 所以点固定坐标是安全的。`close.png` 是配合状态使用的备选。
-
+---
 
 ---
 
@@ -149,22 +141,10 @@ rawMaterial/                ← 你的原始截图，别动
 | 模板 | 是什么 | 怎么用 |
 |---|---|---|
 | `jj/tip.png` | **提示框本体**（897×284） | 判"弹了没有" —— ``find_image`` 认它 |
-| `jj/check.png` | 「本次登录不再提示」的**空**复选框（67×63） | *没用上*，见下 |
-| `jj/check_yes.png` | **勾上之后**（金对勾 + 文字，406×76） | *没用上*，见下 |
 
-> ⚠️ **这两张判不了"已经勾上了没有"**，实测（`logs/tools/check_tip_checkboxes.py`）：
->
-> ```
-> 模板                 tip1(未勾)   tip2(已勾)   其余最高
-> jj/check.png(空)       0.999       0.780       0.802
-> jj/check_yes.png(勾)   0.970       0.998       0.455
-> ```
->
-> `check_yes.png` 在**未勾**的 tip1 上也有 **0.970** —— 因为它主要匹配的是
-> **文字**「本次登录不再提示」（两态一样），勾本身只占一小块。
->
-> 本来想用它避免"已经勾上了又点一下、把勾取消掉"，现在做不到。
-> 实际流程里只点一次（勾上之后游戏就不再弹这个框了），所以先没接。
+> 试过用复选框的"空 / 勾上"两态做判据，区分度不够（勾本身太小，
+> 空态模板在勾上时也有 0.97），所以没接。实际流程只点一次
+> （勾上之后游戏就不再弹这个框），靠"只执行一次"保证。
 
 **两个可点位置是相对偏移**（写在 `steps/start_match.py`）：
 
