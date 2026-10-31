@@ -33,6 +33,7 @@ CASES = (
     ("qianli/select2", "select2.png"),
     ("qianli/select3", "select3.png"),
     ("qianli/select4", "select4.png"),
+    ("qianli/select5", "select5.png"),
     ("qianli/flow", "flow1.png"),
 )
 
@@ -77,20 +78,6 @@ def test_select2_and_select3_differ_by_the_placeholder(scenario, matcher) -> Non
     """两个面板只差"占位卡在不在" —— 这就是 exclude 的作用，单独钉一下。"""
     assert _locate(scenario, matcher, "select2.png") == "qianli/select2"
     assert _locate(scenario, matcher, "select3.png") == "qianli/select3"
-
-
-def test_select5_is_continue_challenge(scenario, matcher) -> None:
-    """「继续挑战」和「开始挑战」是同一块按钮，只差文字。
-
-    没有真机 select5 截图，就把 nextt 贴到 select4 的按钮位置合成一张：
-    nextt 应该 1.0 命中、本状态是 select5，而不是 select4。
-    """
-    image = cv2.imread(str(RAW_DIR / "select4.png"))[:1369].copy()
-    button = cv2.imread(str(TEMPLATES_DIR / "select/nextt.png"))
-    height, width = button.shape[:2]
-    image[1213 : 1213 + height, 2001 : 2001 + width] = button
-
-    assert _locate_image(scenario, matcher, image) == "qianli/select5"
 
 
 def test_all_templates_are_declared() -> None:

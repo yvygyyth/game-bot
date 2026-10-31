@@ -31,7 +31,7 @@
 | `select/search-wujiang.png` | `rawMaterial/select2.png` | 「搜索」按钮 | 2327,944,139,56 | 1.000 |
 | `select/start.png` | `rawMaterial/select4.png` | 红色「开始挑战」（可开局） | 1999,1208,391,91 | 1.000 |
 | `select/status-start-disable.png` | `rawMaterial/select1.png` | 灰色「开始挑战」（没选将） | 2004,1210,391,84 | 1.000 |
-| `select/nextt.png` | 用户裁图 | 红色「继续挑战」（已有进行中的局） | 2001,1213,388,82 | 1.000（select4 上只有 0.83） |
+| `select/nextt.png` | `rawMaterial/select5.png` | 红色「继续挑战」（已有进行中的局） | 2001,1213,388,82 | 1.000（select4 上只有 0.83） |
 | `flow/status-1.png` | `rawMaterial/flow1.png` | 局内标题「千里单骑 · 无尽」 | 18,28,501,92 | 1.000 |
 
 ## 固定坐标（步骤里用）
