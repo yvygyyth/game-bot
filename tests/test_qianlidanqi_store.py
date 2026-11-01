@@ -20,6 +20,7 @@ from games.mingjiangsha.scripts.qianlidanqi.store import (
     pick_reward_kind,
     pick_reward_slot,
     pick_token_slot,
+    rank_token_slots,
     reset_run_state,
     resolve_general_priority,
 )
@@ -153,3 +154,20 @@ class TestPickTokenSlot:
 
     def test_none_when_nothing_matches(self) -> None:
         assert pick_token_slot(["飞仙髻", "白狼之魔", "虞姬"]) is None
+
+
+class TestRankTokenSlots:
+    def test_ocra_half_names_still_match(self) -> None:
+        # 飞仙髻不在优先表；行囊在；白狼之魔不在
+        assert rank_token_slots(["飞", "行囊", "白狼"]) == [(1, "行囊")]
+
+    def test_multiple_priority_items_sorted(self) -> None:
+        # 麻衣 > 行囊 > 铃铛（TOKEN_PRIORITY 顺序）
+        assert rank_token_slots(["铃铛", "行囊", "麻衣"]) == [
+            (2, "麻衣"),
+            (1, "行囊"),
+            (0, "铃铛"),
+        ]
+
+    def test_empty_or_unknown(self) -> None:
+        assert rank_token_slots(["", "飞仙髻", "虞姬"]) == []

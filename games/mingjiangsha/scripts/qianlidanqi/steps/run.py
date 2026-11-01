@@ -20,7 +20,7 @@ from ..store import (
     parse_general_name,
     pick_reward_kind,
     pick_reward_slot,
-    pick_token_slot,
+    rank_token_slots,
     resolve_general_priority,
 )
 from ..templates import (
@@ -257,14 +257,27 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
 
 
 def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
-    """巴清商店：按 TOKEN_PRIORITY 买一个信物 → 退出 → 确认结束购买。"""
-    titles: list[str] = []
-    for region in SHOP_TOKEN_TITLE_REGIONS:
-        read = ctx.frame().read_text(region)
-        titles.append(read.value if read.ok and read.value is not None else "")
+    """巴清商店：按 TOKEN_PRIORITY 买**所有**够钱/在优先表里的信物，再退出。
 
-    slot = pick_token_slot(titles)
-    if slot is not None:
+    商品是随机的，一屏可能 0~3 个在优先表里；所以每买一个就重新 OCR 一次，
+    最多买 3 个。钱不够（灰的）点了不弹「购买」，跳过继续看下一个。
+    """
+    bought: list[str] = []
+    tried: set[int] = set()
+
+    for _ in range(3):
+        titles: list[str] = []
+        for region in SHOP_TOKEN_TITLE_REGIONS:
+            read = ctx.frame().read_text(region)
+            titles.append(read.value if read.ok and read.value is not None else "")
+
+        ranked = rank_token_slots(titles)
+        candidate = next(((slot, name) for slot, name in ranked if slot not in tried), None)
+        if candidate is None:
+            break
+        slot, name = candidate
+        tried.add(slot)
+
         point = SHOP_TOKEN_POINTS[min(slot, len(SHOP_TOKEN_POINTS) - 1)]
         picked = actions.click_source_point(ctx.session, point)
         if not picked.ok:
@@ -272,14 +285,16 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         ctx.sleep(0.6)
 
-        # 钱够才会弹「购买」；钱不够是灰的，点完什么都没发生。
+        # 钱够才会弹「购买」；钱不够/已售罄，点完什么都没发生。
         buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
-        if buy.ok:
-            clicked = actions.click_source_point(ctx.session, SHOP_BUY_POINT)
-            if not clicked.ok:
-                return clicked
-            ctx.invalidate_frame()
-            ctx.sleep(0.8)
+        if not buy.ok:
+            continue
+        clicked = actions.click_source_point(ctx.session, SHOP_BUY_POINT)
+        if not clicked.ok:
+            return clicked
+        bought.append(name)
+        ctx.invalidate_frame()
+        ctx.sleep(0.8)
 
     # ---- 退出商店：右上角箭头 → 是否结束购买？→ 确认 ----
     exit_btn = ctx.frame().find_image(T_SHOP_EXIT)
@@ -297,7 +312,7 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
             ctx.sleep(0.8)
 
     return ActionResult.success(
-        "巴清商店处理完成", action="sequence", slot=slot, titles=titles
+        "巴清商店处理完成", action="sequence", bought=bought, count=len(bought)
     )
 
 

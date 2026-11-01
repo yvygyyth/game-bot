@@ -29,6 +29,7 @@ from .rewards import (
     pick_reward_kind,
     pick_reward_slot,
     pick_token_slot,
+    rank_token_slots,
     resolve_general_priority,
 )
 from .run import RUN_STATE_KEY, BattleState, get_run_state, reset_run_state
@@ -50,6 +51,7 @@ __all__ = [
     "pick_reward_kind",
     "pick_reward_slot",
     "pick_token_slot",
+    "rank_token_slots",
     "read_copper_coins",
     "refresh_copper_coins",
     "reset_run_state",

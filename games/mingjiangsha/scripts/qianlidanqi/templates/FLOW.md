@@ -14,7 +14,7 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 | 状态 | 靠什么认 | 步骤 |
 |---|---|---|
 | `qianli/skill_panel` | 「武将技能」弹窗（旧 `up.png`） | `close_skill_panel`：点空白 (1300,1127) 回地图 |
-| `qianli/shop/ba_qing` | 「巴清小铺子」标题 | `buy_ba_qing`：OCR 三信物 → `pick_token_slot` → 点商品 → 有「购买」弹窗就点购买 → 右上箭头 → 确认结束 |
+| `qianli/shop/ba_qing` | 「巴清小铺子」标题 | `buy_ba_qing`：OCR 三信物 → `rank_token_slots` 按优先表排序 → 逐个点、能买就买（最多 3 个）→ 右上箭头 → 确认结束 |
 | `qianli/map` | 标题「千里单骑 · 无尽」+ 右侧小图标 | `choose_node`：在 `NODE_REGION` 里找战斗节点（剑），点最上面那个 |
 | `qianli/pre_battle` | 「开始对局」 | `start_battle`：点开始对局 |
 | `qianli/fight` | 取消 / 设置 / 托管 任一 | `run_battle`：点「取消」关换牌 → 点「托管」→ 等「点击空白区域到下一步」（最多 1200s）→ 点它 → 点「下一步」≤5 次 |

@@ -28,6 +28,7 @@ __all__ = [
     "pick_reward_kind",
     "pick_reward_slot",
     "pick_token_slot",
+    "rank_token_slots",
     "resolve_general_priority",
 ]
 
@@ -120,23 +121,44 @@ def parse_general_name(ocr_text: str) -> str:
     return text.strip()
 
 
+def _token_match(text: str, name: str) -> bool:
+    """OCR 经常只读出半截（飞仙髻→飞、白狼之魔→白狼）。"""
+    if not text or not name:
+        return False
+    if name in text:
+        return True
+    return len(text) >= 2 and text in name
+
+
+def rank_token_slots(
+    titles: list[str] | tuple[str, ...],
+    priority: list[str] | None = None,
+) -> list[tuple[int, str]]:
+    """按 :data:`TOKEN_PRIORITY` 排序本屏可买的信物：``[(槽位, 命中名), ...]``。
+
+    只返回在优先表里的；OCR 半截也算（行囊 / 白狼 这种）。
+    """
+    table = priority if priority is not None else TOKEN_PRIORITY
+    ranked: list[tuple[int, int, str]] = []
+    for slot, raw in enumerate(titles):
+        text = (raw or "").strip()
+        if not text:
+            continue
+        for order, name in enumerate(table):
+            if _token_match(text, name):
+                ranked.append((order, slot, name))
+                break
+    ranked.sort()
+    return [(slot, name) for _, slot, name in ranked]
+
+
 def pick_token_slot(
     titles: list[str] | tuple[str, ...],
     priority: list[str] | None = None,
 ) -> int | None:
-    """按 :data:`TOKEN_PRIORITY` 找本屏第一个命中的信物槽位；都没有返回 None。
-
-    老代码里就是"名字包含在 OCR 文本里"，这里保持同一套，不引入新的匹配规则。
-    """
-    table = priority if priority is not None else TOKEN_PRIORITY
-    cleaned = [(i, (t or "").strip()) for i, t in enumerate(titles)]
-    for name in table:
-        if not name:
-            continue
-        for i, text in cleaned:
-            if name in text:
-                return i
-    return None
+    """按 :data:`TOKEN_PRIORITY` 找本屏第一个命中的信物槽位；都没有返回 None。"""
+    ranked = rank_token_slots(titles, priority)
+    return ranked[0][0] if ranked else None
 
 
 def _entry_by_name(name: str) -> GeneralPriority | None:
