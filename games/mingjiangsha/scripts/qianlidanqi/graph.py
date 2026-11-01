@@ -32,6 +32,7 @@ from .bindings import BINDINGS
 from .pages import FEATURE_TREE
 from .steps import (
     buy_ba_qing,
+    choose_event_option,
     choose_node,
     choose_pocket,
     choose_rest,
@@ -41,6 +42,7 @@ from .steps import (
     confirm_pocket,
     continue_run,
     enter_campaign,
+    enter_event,
     enter_qianli,
     leave_pick,
     open_pick,
@@ -143,6 +145,7 @@ SCENARIO = ScenarioSpec(
                 Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
                 Transition("pocket_choice", on_page("qianli/pocket/choice"), 16, "进锦囊"),
                 Transition("rest", on_page("qianli/rest"), 15, "进休息"),
+                Transition("event_intro", on_page("qianli/event/intro"), 12, "进奇遇"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
         ),
@@ -190,6 +193,24 @@ SCENARIO = ScenarioSpec(
             "shop_ba_qing",
             steps=[buy_ba_qing],
             description="巴清商店：买信物 → 退出 → 确认结束购买",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "event_intro",
+            steps=[enter_event],
+            description="奇遇介绍：点金色「选择事件/选择武将」",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("event_choice", on_page("qianli/event/choice"), 20, "进选择页"),
+            ],
+        ),
+        Node(
+            "event_choice",
+            steps=[choose_event_option],
+            description="奇遇选择：按妃妃优先级选一项",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),

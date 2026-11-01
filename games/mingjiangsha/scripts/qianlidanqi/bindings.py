@@ -26,6 +26,8 @@ BINDINGS = NodeBindings(
         Binding("rest", "qianli/rest"),
         Binding("pocket_choice", "qianli/pocket/choice"),
         Binding("pocket_confirm", "qianli/pocket/confirm"),
+        Binding("event_intro", "qianli/event/intro"),
+        Binding("event_choice", "qianli/event/choice"),
         Binding("end", "qianli/end"),
         Binding("end2", "qianli/end2"),
     )

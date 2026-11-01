@@ -43,6 +43,8 @@ from .templates import (
     T_CAMPAIGN,
     T_CLAIM_REWARD,
     T_CONGRATS,
+    T_EVENT_CHOICE_FEIFEI,
+    T_EVENT_INTRO_BACK,
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
@@ -127,6 +129,15 @@ POCKET_TITLE_ROI = Region(1550, 120, 430, 150)
 #: 锦囊确认按钮「确认」。
 POCKET_CONFIRM_ROI = Region(930, 1040, 700, 180)
 
+#: 奇遇介绍页的「再想一想」按钮。
+EVENT_BACK_ROI = Region(1400, 1130, 470, 200)
+
+#: 奇遇选择页的「请选择一项赠礼」。
+EVENT_GIFT_ROI = Region(1050, 1190, 460, 140)
+
+#: 妃妃选择页顶部标题「偶遇朏朏」。
+EVENT_CHOICE_ROI = Region(1170, 110, 340, 140)
+
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -186,6 +197,22 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_START_BATTLE, region=START_BATTLE_ROI),
                             ),
                             description="点节点后的战斗预览：开始对局 / 再想一想",
+                        ),
+                        PageLeaf(
+                            "qianli/event/intro",
+                            name="局内 · 奇遇介绍",
+                            queries=(
+                                ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
+                            ),
+                            description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/choice",
+                            name="局内 · 奇遇选择",
+                            queries=(
+                                ImageQuery(T_EVENT_CHOICE_FEIFEI, region=EVENT_CHOICE_ROI),
+                            ),
+                            description="妃妃选择页：选一个回地图（目前只认这一种）",
                         ),
                         PageLeaf(
                             "qianli/fight",

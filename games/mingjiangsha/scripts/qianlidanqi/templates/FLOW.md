@@ -8,6 +8,7 @@ qianli/map --战斗节点--> qianli/pre_battle --开始对局--> qianli/fight
 qianli/map --巴清商店节点(点两次)--> qianli/shop/ba_qing --买/退出--> qianli/map
 qianli/map --休息节点(点两次)--> qianli/rest --点一个选项--> qianli/map
 qianli/map --锦囊节点(点两次)--> qianli/pocket/choice --点选项--> 可能还是选/确认/直接战斗
+qianli/map --奇遇节点(点一次)--> qianli/event/intro --金色按钮--> qianli/event/choice --选一项--> qianli/map
 fight --打完--> qianli/gift --选武将--> qianli/gift_kind --选类别--> qianli/map
 fight --无赠礼--> qianli/map
 fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc--> qianli/select1（下一轮）
@@ -20,6 +21,8 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 | `qianli/rest` | 「安营驻寨」标题 | `choose_rest`：随便点一个选项（457,1150）→ 回地图 |
 | `qianli/pocket/choice` | 「三顾茅庐」标题 | `choose_pocket`：三个选项随机点一个；可能还在本屏/到确认/直接进战斗 |
 | `qianli/pocket/confirm` | 确认按钮 | `confirm_pocket`：点确认 → 地图/战斗/下一个锦囊 |
+| `qianli/event/intro` | 「再想一想」按钮 | `enter_event`：点金色「选择事件/选择武将」（`click_pattern_confirm`，只认边框） |
+| `qianli/event/choice` | 顶部「偶遇朏朏」 | `choose_event_option`：按妃妃优先级选一行（我来帮你 > 讨价还价） |
 | `qianli/map` | 标题「千里单骑 · 无尽」+ 右侧小图标 | `choose_node`：在 `NODE_REGION` 里找战斗节点（剑），点最上面那个 |
 | `qianli/pre_battle` | 「开始对局」 | `start_battle`：点开始对局 |
 | `qianli/fight` | 取消 / 设置 / 托管 任一 | `run_battle`：点「取消」关换牌 → 点「托管」→ 等「点击空白区域到下一步」（最多 1200s）→ 点它 → 点「下一步」≤5 次 |
@@ -51,7 +54,7 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 ## 还没做（缺图）
 
 * 商店界面：吕不韦（巴清、休息、锦囊已做）；
-* 奇遇界面：妃妃 / 十常侍 / 墨子 / 诸葛亮 / 左慈 / 卡卡；
+* 奇遇：妃妃已全做；左慈/卡卡的**选择页**、十常侍/诸葛亮节点图还没给；
 * 武将技能弹窗真机图（现在用旧 `up.png`）；
 * 意外战斗（`qianli/surprise` 已注释占位）。
 

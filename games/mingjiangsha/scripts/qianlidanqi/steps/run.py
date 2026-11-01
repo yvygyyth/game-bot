@@ -13,6 +13,7 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
+from games.mingjiangsha.utils import click_pattern_confirm
 
 from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
@@ -33,9 +34,12 @@ from ..templates import (
     T_FIGHT_END,
     T_FIGHT_NEXT,
     T_NODE_BATTLE,
+    T_NODE_FEI_FEI,
+    T_NODE_KA_KA,
     T_NODE_POCKET,
     T_NODE_REST,
     T_NODE_SHOP_BA_QING,
+    T_NODE_ZUO_CI,
     T_POCKET_CONFIRM,
     T_REWARD_BUFF,
     T_REWARD_CARD,
@@ -54,6 +58,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BATTLE_END_TIMEOUT",
+    "EVENT_ENTER_REGION",
+    "EVENT_OPTION_POINTS",
+    "EVENT_OPTION_PRIORITY",
+    "EVENT_OPTION_REGIONS",
     "PENDING_GENERAL_KEY",
     "POCKET_OPTION_POINTS",
     "REST_OPTION_POINT",
@@ -63,6 +71,7 @@ __all__ = [
     "SHOP_TOKEN_TITLE_REGIONS",
     "SKILL_PANEL_CLOSE",
     "buy_ba_qing",
+    "choose_event_option",
     "choose_node",
     "choose_pocket",
     "choose_rest",
@@ -70,6 +79,7 @@ __all__ = [
     "close_congrats",
     "close_skill_panel",
     "confirm_pocket",
+    "enter_event",
     "pick_gift",
     "pick_kind",
     "run_battle",
@@ -129,6 +139,17 @@ REST_OPTION_POINT = Point(457, 1150)
 
 #: 锦囊三选一的三个选项中心（随便点一个）。
 POCKET_OPTION_POINTS = (Point(457, 1150), Point(1317, 1150), Point(2155, 1150))
+
+# ---- 奇遇 ----
+#: 奇遇介绍页左下角的金色按钮（选择事件/选择武将）。
+EVENT_ENTER_REGION = Region(680, 1180, 520, 160)
+
+#: 奇遇选择页两行选项的 OCR 区域与点击点。
+EVENT_OPTION_REGIONS = (Region(1000, 450, 900, 140), Region(1000, 700, 900, 140))
+EVENT_OPTION_POINTS = (Point(1300, 530), Point(1300, 775))
+
+#: 妃妃选项优先级（老代码：我来帮你 > 讨价还价）。
+EVENT_OPTION_PRIORITY = ("我来帮你", "讨价还价")
 
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
@@ -198,8 +219,23 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
         ctx.sleep(0.9)
         return second.with_meta(point=(point.x, point.y), kind="rest")
 
+    for template, kind in (
+        (T_NODE_FEI_FEI, "fei_fei"),
+        (T_NODE_ZUO_CI, "zuo_ci"),
+        (T_NODE_KA_KA, "ka_ka"),
+    ):
+        node = ctx.frame().find_image(template, region=NODE_REGION, confidence=0.9)
+        if node.ok and node.value is not None:
+            point = node.value
+            clicked = actions.click_source_point(ctx.session, point)
+            if not clicked.ok:
+                return clicked
+            ctx.invalidate_frame()
+            ctx.sleep(0.8)
+            return clicked.with_meta(point=(point.x, point.y), kind=f"event_{kind}")
+
     return ActionResult.not_found(
-        "地图上没有可点的战斗/巴清商店/休息节点（其他节点后续再支持）",
+        "地图上没有可点的战斗/商店/休息/奇遇节点（其他节点后续再支持）",
         template=T_NODE_BATTLE,
     )
 
@@ -392,6 +428,37 @@ def choose_pocket(ctx: RunContext) -> ActionResult[Any]:
 def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
     """锦囊确认页：点「确认」。"""
     return click_image(ctx, T_POCKET_CONFIRM, region=POCKET_CONFIRM_ROI, settle=1.0)
+
+
+def enter_event(ctx: RunContext) -> ActionResult[Any]:
+    """奇遇介绍页：点左边金色按钮（选择事件/选择武将，按边框认，不认文字）。"""
+    return click_pattern_confirm(ctx, EVENT_ENTER_REGION, settle=0.8)
+
+
+def choose_event_option(ctx: RunContext) -> ActionResult[Any]:
+    """奇遇选择页：按妃妃优先级选一行；其他事件先选第一行。"""
+    texts: list[str] = []
+    for region in EVENT_OPTION_REGIONS:
+        read = ctx.frame().read_text(region)
+        texts.append(read.value if read.ok and read.value is not None else "")
+
+    slot = 0
+    for name in EVENT_OPTION_PRIORITY:
+        for i, text in enumerate(texts):
+            if name in text:
+                slot = i
+                break
+        else:
+            continue
+        break
+
+    point = EVENT_OPTION_POINTS[min(slot, len(EVENT_OPTION_POINTS) - 1)]
+    clicked = actions.click_source_point(ctx.session, point)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.8)
+    return clicked.with_meta(slot=slot, texts=texts)
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:
