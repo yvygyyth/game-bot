@@ -34,8 +34,10 @@ __all__ = [
     "T_NODE_BATTLE_HELP",
     "T_NODE_FEI_FEI",
     "T_NODE_KA_KA",
+    "T_NODE_MO_ZI",
     "T_NODE_POCKET",
     "T_NODE_REST",
+    "T_NODE_SHI_CHANG",
     "T_NODE_SHOP_BA_QING",
     "T_NODE_SURPRISE",
     "T_NODE_ZUO_CI",
@@ -52,6 +54,8 @@ __all__ = [
     "T_REWARD_TOKEN",
     "T_SEARCH",
     "T_SELECT_TITLE",
+    "T_SHI_ATTACK",
+    "T_SHI_CHOICE",
     "T_SHOP_BUY_TITLE",
     "T_SHOP_CONFIRM",
     "T_SHOP_EXIT",
@@ -109,6 +113,12 @@ T_EVENT_GIFT = "flow/event_gift.png"
 #: 妃妃选择页顶部标题「偶遇朏朏」（和赠礼类别屏区分）。
 T_EVENT_CHOICE_FEIFEI = "flow/event_choice_feifei.png"
 
+# ---- 十常侍 ----
+#: 十常侍选择页「请选择一项蛊惑」。
+T_SHI_CHOICE = "flow/shi_choice.png"
+#: 十常侍左边人物插画（点 5 次进战斗彩蛋）。
+T_SHI_ATTACK = "flow/shi_attack.png"
+
 # ---- 锦囊（奇遇） ----
 #: 「三顾茅庐」标题（锦囊当前这一种）。
 T_POCKET_TITLE = "flow/pocket_title.png"
@@ -148,10 +158,12 @@ T_NODE_SHOP_BA_QING = "flow/node_ba_qing.png"
 T_NODE_REST = "flow/node_rest.png"
 #: 地图上的锦囊节点。
 T_NODE_POCKET = "flow/node_pocket.png"
-#: 地图上的奇遇节点：妃妃 / 左慈 / 卡卡。
+#: 地图上的奇遇节点：妃妃 / 十常侍 / 墨子 / 左慈 / 卡卡。
 T_NODE_FEI_FEI = "flow/node_feifei.png"
 T_NODE_ZUO_CI = "flow/node_zuoci.png"
 T_NODE_KA_KA = "flow/node_kaka.png"
+T_NODE_MO_ZI = "flow/node_mozi.png"
+T_NODE_SHI_CHANG = "flow/node_shichang.png"
 
 #: 战斗界面「取消」。
 T_FIGHT_CANCEL = "flow/cancel.png"

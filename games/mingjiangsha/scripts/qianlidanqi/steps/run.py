@@ -36,8 +36,10 @@ from ..templates import (
     T_NODE_BATTLE,
     T_NODE_FEI_FEI,
     T_NODE_KA_KA,
+    T_NODE_MO_ZI,
     T_NODE_POCKET,
     T_NODE_REST,
+    T_NODE_SHI_CHANG,
     T_NODE_SHOP_BA_QING,
     T_NODE_ZUO_CI,
     T_POCKET_CONFIRM,
@@ -46,6 +48,7 @@ from ..templates import (
     T_REWARD_HELP,
     T_REWARD_JOINT,
     T_REWARD_TOKEN,
+    T_SHI_ATTACK,
     T_SHOP_BUY_TITLE,
     T_SHOP_CONFIRM,
     T_SHOP_EXIT,
@@ -84,6 +87,7 @@ __all__ = [
     "pick_kind",
     "run_battle",
     "start_battle",
+    "trigger_shi_battle",
 ]
 
 #: 选赠礼武将时，暂存在黑板里的名字（给第二屏选类别用）。
@@ -221,6 +225,8 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
 
     for template, kind in (
         (T_NODE_FEI_FEI, "fei_fei"),
+        (T_NODE_SHI_CHANG, "shi_chang"),
+        (T_NODE_MO_ZI, "mo_zi"),
         (T_NODE_ZUO_CI, "zuo_ci"),
         (T_NODE_KA_KA, "ka_ka"),
     ):
@@ -459,6 +465,21 @@ def choose_event_option(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
     ctx.sleep(0.8)
     return clicked.with_meta(slot=slot, texts=texts)
+
+
+def trigger_shi_battle(ctx: RunContext) -> ActionResult[Any]:
+    """十常侍：点左边人物插画 5 次，触发战斗彩蛋。"""
+    click = ctx.frame().find_image(T_SHI_ATTACK)
+    if not click.ok or click.value is None:
+        return ActionResult.not_found("十常侍界面没找到左边人物插画", template=T_SHI_ATTACK)
+    for _ in range(5):
+        actions.click_source_point(ctx.session, click.value)
+        ctx.sleep(0.2)
+    ctx.invalidate_frame()
+    ctx.sleep(0.8)
+    return ActionResult.success(
+        "十常侍插画点了 5 次", action="sequence", point=(click.value.x, click.value.y)
+    )
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

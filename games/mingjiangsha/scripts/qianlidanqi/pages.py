@@ -63,6 +63,7 @@ from .templates import (
     T_REST_TITLE,
     T_SEARCH,
     T_SELECT_TITLE,
+    T_SHI_CHOICE,
     T_SHOP_TITLE,
     T_START,
     T_START_BATTLE,
@@ -138,6 +139,9 @@ EVENT_GIFT_ROI = Region(1050, 1190, 460, 140)
 #: 妃妃选择页顶部标题「偶遇朏朏」。
 EVENT_CHOICE_ROI = Region(1170, 110, 340, 140)
 
+#: 十常侍选择页「请选择一项蛊惑」。
+SHI_CHOICE_ROI = Region(1050, 1190, 460, 140)
+
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -205,6 +209,16 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
                             ),
                             description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/shi_chang",
+                            name="局内 · 十常侍",
+                            queries=(
+                                ImageQuery(
+                                    T_SHI_CHOICE, region=SHI_CHOICE_ROI, confidence=0.99
+                                ),
+                            ),
+                            description="十二阉人：点左边人物插画 5 次进战斗彩蛋",
                         ),
                         PageLeaf(
                             "qianli/event/choice",

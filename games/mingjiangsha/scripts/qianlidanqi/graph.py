@@ -52,6 +52,7 @@ from .steps import (
     run_battle,
     start_battle,
     start_run,
+    trigger_shi_battle,
 )
 
 __all__ = ["SCENARIO"]
@@ -204,7 +205,9 @@ SCENARIO = ScenarioSpec(
             description="奇遇介绍：点金色「选择事件/选择武将」",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("shi_chang", on_page("qianli/event/shi_chang"), 20, "十常侍选择页"),
                 Transition("event_choice", on_page("qianli/event/choice"), 20, "进选择页"),
+                Transition("map", on_page("qianli/map"), 5, "直接回地图"),
             ],
         ),
         Node(
@@ -214,6 +217,17 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "shi_chang",
+            steps=[trigger_shi_battle],
+            description="十常侍：点左边插画 5 次触发战斗",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("fight", on_page("qianli/fight"), 20, "进战斗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+                Transition("end", on_page("qianli/end"), 5, "本局结束"),
             ],
         ),
         Node(

@@ -20,6 +20,7 @@
 | `qianli/pocket/confirm` | :func:`confirm_pocket` | 锦囊确认页点「确认」 |
 | `qianli/event/intro` | :func:`enter_event` | 点金色「选择事件/选择武将」按钮 |
 | `qianli/event/choice` | :func:`choose_event_option` | 按妃妃优先级选一项 |
+| `qianli/event/shi_chang` | :func:`trigger_shi_battle` | 点左边插画 5 次进战斗彩蛋 |
 | `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
 | `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
@@ -47,6 +48,7 @@ from .run import (
     pick_kind,
     run_battle,
     start_battle,
+    trigger_shi_battle,
 )
 
 __all__ = [
@@ -71,4 +73,5 @@ __all__ = [
     "run_battle",
     "start_battle",
     "start_run",
+    "trigger_shi_battle",
 ]
