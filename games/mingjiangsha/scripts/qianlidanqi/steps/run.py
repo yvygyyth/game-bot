@@ -41,6 +41,7 @@ from ..templates import (
     T_NODE_REST,
     T_NODE_SHI_CHANG,
     T_NODE_SHOP_BA_QING,
+    T_NODE_ZHUGE,
     T_NODE_ZUO_CI,
     T_POCKET_CONFIRM,
     T_REWARD_BUFF,
@@ -54,6 +55,7 @@ from ..templates import (
     T_SHOP_EXIT,
     T_SHOP_EXIT_PROMPT,
     T_START_BATTLE,
+    T_ZHUGE_CONTINUE,
 )
 
 if TYPE_CHECKING:
@@ -73,6 +75,7 @@ __all__ = [
     "SHOP_TOKEN_POINTS",
     "SHOP_TOKEN_TITLE_REGIONS",
     "SKILL_PANEL_CLOSE",
+    "ZHUGE_CARD_POINT",
     "buy_ba_qing",
     "choose_event_option",
     "choose_node",
@@ -82,6 +85,7 @@ __all__ = [
     "close_congrats",
     "close_skill_panel",
     "confirm_pocket",
+    "do_zhuge",
     "enter_event",
     "pick_gift",
     "pick_kind",
@@ -140,6 +144,11 @@ SHOP_MIN_COINS = 30
 
 #: 休息界面随便点一个选项（第一个）。
 REST_OPTION_POINT = Point(457, 1150)
+
+#: 诸葛亮：上卦/下卦中间那张卡的位置（外观随机、位置固定）。
+ZHUGE_CARD_POINT = Point(1935, 690)
+#: 出现「请点击继续」后点界面任意处。
+ZHUGE_CONTINUE_POINT = Point(1300, 600)
 
 #: 锦囊三选一的三个选项中心（随便点一个）。
 POCKET_OPTION_POINTS = (Point(457, 1150), Point(1317, 1150), Point(2155, 1150))
@@ -227,6 +236,7 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
         (T_NODE_FEI_FEI, "fei_fei"),
         (T_NODE_SHI_CHANG, "shi_chang"),
         (T_NODE_MO_ZI, "mo_zi"),
+        (T_NODE_ZHUGE, "zhuge"),
         (T_NODE_ZUO_CI, "zuo_ci"),
         (T_NODE_KA_KA, "ka_ka"),
     ):
@@ -479,6 +489,25 @@ def trigger_shi_battle(ctx: RunContext) -> ActionResult[Any]:
     ctx.sleep(0.8)
     return ActionResult.success(
         "十常侍插画点了 5 次", action="sequence", point=(click.value.x, click.value.y)
+    )
+
+
+def do_zhuge(ctx: RunContext) -> ActionResult[Any]:
+    """诸葛亮占星：中间卡点两次（间隔 2s）→ 出现请点击继续 → 点任意处回地图。"""
+    for i in range(2):
+        actions.click_source_point(ctx.session, ZHUGE_CARD_POINT)
+        if i == 0:
+            ctx.sleep(2.0)
+    ctx.invalidate_frame()
+    ctx.sleep(0.6)
+
+    cont = ctx.frame().find_image(T_ZHUGE_CONTINUE, confidence=0.99)
+    if cont.ok:
+        actions.click_source_point(ctx.session, ZHUGE_CONTINUE_POINT)
+        ctx.invalidate_frame()
+        ctx.sleep(0.8)
+    return ActionResult.success(
+        "诸葛亮占星完成", action="sequence", continued=bool(cont.ok)
     )
 
 

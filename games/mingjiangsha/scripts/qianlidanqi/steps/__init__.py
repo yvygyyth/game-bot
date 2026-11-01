@@ -21,6 +21,7 @@
 | `qianli/event/intro` | :func:`enter_event` | 点金色「选择事件/选择武将」按钮 |
 | `qianli/event/choice` | :func:`choose_event_option` | 按妃妃优先级选一项 |
 | `qianli/event/shi_chang` | :func:`trigger_shi_battle` | 点左边插画 5 次进战斗彩蛋 |
+| `qianli/event/zhuge` | :func:`do_zhuge` | 中间卡点两次 → 请点击继续 → 点任意处 |
 | `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
 | `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
@@ -43,6 +44,7 @@ from .run import (
     close_congrats,
     close_skill_panel,
     confirm_pocket,
+    do_zhuge,
     enter_event,
     pick_gift,
     pick_kind,
@@ -62,6 +64,7 @@ __all__ = [
     "close_skill_panel",
     "confirm_pocket",
     "continue_run",
+    "do_zhuge",
     "enter_campaign",
     "enter_event",
     "enter_qianli",

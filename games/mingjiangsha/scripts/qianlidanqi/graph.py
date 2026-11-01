@@ -41,6 +41,7 @@ from .steps import (
     close_skill_panel,
     confirm_pocket,
     continue_run,
+    do_zhuge,
     enter_campaign,
     enter_event,
     enter_qianli,
@@ -146,6 +147,7 @@ SCENARIO = ScenarioSpec(
                 Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
                 Transition("pocket_choice", on_page("qianli/pocket/choice"), 16, "进锦囊"),
                 Transition("rest", on_page("qianli/rest"), 15, "进休息"),
+                Transition("zhuge", on_page("qianli/event/zhuge"), 13, "进诸葛亮"),
                 Transition("event_intro", on_page("qianli/event/intro"), 12, "进奇遇"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
@@ -214,6 +216,15 @@ SCENARIO = ScenarioSpec(
             "event_choice",
             steps=[choose_event_option],
             description="奇遇选择：按妃妃优先级选一项",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "zhuge",
+            steps=[do_zhuge],
+            description="诸葛亮占星：中间卡点两次 → 点继续 → 回地图",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),

@@ -40,6 +40,7 @@ __all__ = [
     "T_NODE_SHI_CHANG",
     "T_NODE_SHOP_BA_QING",
     "T_NODE_SURPRISE",
+    "T_NODE_ZHUGE",
     "T_NODE_ZUO_CI",
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
@@ -64,6 +65,8 @@ __all__ = [
     "T_START",
     "T_START_BATTLE",
     "T_START_DISABLED",
+    "T_ZHUGE_CONTINUE",
+    "T_ZHUGE_TITLE",
 ]
 
 # ---- 状态锚点 ----
@@ -112,6 +115,12 @@ T_EVENT_INTRO_BACK = "flow/event_back.png"
 T_EVENT_GIFT = "flow/event_gift.png"
 #: 妃妃选择页顶部标题「偶遇朏朏」（和赠礼类别屏区分）。
 T_EVENT_CHOICE_FEIFEI = "flow/event_choice_feifei.png"
+
+# ---- 诸葛亮（占星术士） ----
+#: 「占星术士」标题。
+T_ZHUGE_TITLE = "flow/zhuge_title.png"
+#: 「请点击继续」（第二张牌翻开后出现）。
+T_ZHUGE_CONTINUE = "flow/zhuge_continue.png"
 
 # ---- 十常侍 ----
 #: 十常侍选择页「请选择一项蛊惑」。
@@ -164,6 +173,7 @@ T_NODE_ZUO_CI = "flow/node_zuoci.png"
 T_NODE_KA_KA = "flow/node_kaka.png"
 T_NODE_MO_ZI = "flow/node_mozi.png"
 T_NODE_SHI_CHANG = "flow/node_shichang.png"
+T_NODE_ZHUGE = "flow/node_zhuge.png"
 
 #: 战斗界面「取消」。
 T_FIGHT_CANCEL = "flow/cancel.png"

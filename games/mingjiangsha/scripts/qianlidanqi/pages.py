@@ -68,6 +68,7 @@ from .templates import (
     T_START,
     T_START_BATTLE,
     T_START_DISABLED,
+    T_ZHUGE_TITLE,
 )
 
 #: 首页右上角那个小图标（状态锚点）。
@@ -142,6 +143,9 @@ EVENT_CHOICE_ROI = Region(1170, 110, 340, 140)
 #: 十常侍选择页「请选择一项蛊惑」。
 SHI_CHOICE_ROI = Region(1050, 1190, 460, 140)
 
+#: 诸葛亮「占星术士」标题。
+ZHUGE_TITLE_ROI = Region(1660, 180, 380, 130)
+
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -209,6 +213,14 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
                             ),
                             description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/zhuge",
+                            name="局内 · 诸葛亮",
+                            queries=(
+                                ImageQuery(T_ZHUGE_TITLE, region=ZHUGE_TITLE_ROI),
+                            ),
+                            description="占星术士：点中间卡牌两次 → 出现请点击继续 → 点任意处",
                         ),
                         PageLeaf(
                             "qianli/event/shi_chang",
