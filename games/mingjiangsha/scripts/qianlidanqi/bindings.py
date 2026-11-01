@@ -16,6 +16,7 @@ BINDINGS = NodeBindings(
         Binding("start_run", "qianli/select4"),
         Binding("continue_run", "qianli/select5"),
         # ---- 局内 ----
+        Binding("skill_panel", "qianli/skill_panel"),
         Binding("map", "qianli/map"),
         Binding("pre_battle", "qianli/pre_battle"),
         Binding("fight", "qianli/fight"),

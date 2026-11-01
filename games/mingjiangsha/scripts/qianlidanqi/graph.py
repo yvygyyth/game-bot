@@ -34,6 +34,7 @@ from .steps import (
     choose_node,
     claim_reward,
     close_congrats,
+    close_skill_panel,
     continue_run,
     enter_campaign,
     enter_qianli,
@@ -116,10 +117,25 @@ SCENARIO = ScenarioSpec(
         ),
         # ---------------- 局内 ----------------
         Node(
+            "skill_panel",
+            steps=[close_skill_panel],
+            description="武将技能/属性变动弹窗：点一下关闭，回地图",
+            transitions=[
+                Transition("map", on_page("qianli/map"), 10, "关闭后回地图"),
+            ],
+        ),
+        # 意外战斗先占位，等用户给图后再启用（见 FLOW.md）
+        # Node(
+        #     "surprise",
+        #     steps=[],
+        #     description="意外战斗（待补图）",
+        # ),
+        Node(
             "map",
             steps=[choose_node],
             description="地图：找一个战斗节点点它",
             transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
         ),
@@ -136,6 +152,7 @@ SCENARIO = ScenarioSpec(
             steps=[run_battle],
             description="战斗：取消换牌 → 托管 → 等结束 → 下一步",
             transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 # 打完先弹赠礼；没有赠礼就回地图；本局结束则去领奖。
                 Transition("gift", on_page("qianli/gift"), 20, "弹赠礼（选武将）"),
                 Transition("gift_kind", on_page("qianli/gift_kind"), 15, "直接到赠礼类别"),
@@ -148,6 +165,7 @@ SCENARIO = ScenarioSpec(
             steps=[pick_gift],
             description="赠礼第一屏：按优先表选武将",
             transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("gift_kind", on_page("qianli/gift_kind"), 10, "进入类别选择"),
             ],
         ),
@@ -156,6 +174,7 @@ SCENARIO = ScenarioSpec(
             steps=[pick_kind],
             description="赠礼第二屏：按优先表选类别",
             transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图继续"),
                 Transition("end", on_page("qianli/end"), 5, "本局结束"),
             ],

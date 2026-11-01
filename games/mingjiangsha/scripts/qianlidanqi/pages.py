@@ -49,6 +49,7 @@ from .templates import (
     T_FIGHT_SETTING,
     T_FLOW,
     T_FLOW_MAP,
+    T_FLOW_UP,
     T_GIFT_KIND_TITLE,
     T_GIFT_TITLE,
     T_HOME,
@@ -140,6 +141,19 @@ FEATURE_TREE = PageGroup(
                     name="局内",
                     description="千里单骑一局：地图 → 战斗 → 赠礼 → 地图/结束",
                     children=(
+                        PageLeaf(
+                            "qianli/skill_panel",
+                            name="局内 · 武将技能弹窗",
+                            queries=(ImageQuery(T_FLOW_UP),),
+                            description="角色属性变动/武将技能弹窗；点一下回地图",
+                        ),
+                        # 意外战斗先占位，等用户给图后再启用（见 FLOW.md）
+                        # PageLeaf(
+                        #     "qianli/surprise",
+                        #     name="局内 · 意外战斗",
+                        #     queries=(ImageQuery(T_NODE_SURPRISE),),
+                        #     description="意外战斗事件（待补图）",
+                        # ),
                         PageLeaf(
                             "qianli/map",
                             name="局内 · 地图",

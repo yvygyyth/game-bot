@@ -44,9 +44,11 @@ if TYPE_CHECKING:
 __all__ = [
     "BATTLE_END_TIMEOUT",
     "PENDING_GENERAL_KEY",
+    "SKILL_PANEL_CLOSE",
     "choose_node",
     "claim_reward",
     "close_congrats",
+    "close_skill_panel",
     "pick_gift",
     "pick_kind",
     "run_battle",
@@ -80,6 +82,9 @@ NODE_CONFIDENCE = 0.9
 
 #: 战斗最长等多久（秒）。自动战斗一局可能几分钟。
 BATTLE_END_TIMEOUT = 1200.0
+
+#: 关「武将技能」弹窗的点击位置（客户区坐标；旧代码点 1300,1150 窗口坐标）。
+SKILL_PANEL_CLOSE = Point(1300, 1127)
 
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
@@ -197,6 +202,16 @@ def pick_kind(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
     ctx.sleep(0.8)
     return clicked.with_meta(kind=kind.value, wu_jiang=name)
+
+
+def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
+    """武将技能/属性变动弹窗：点一下空白关闭，回地图。"""
+    clicked = actions.click_source_point(ctx.session, SKILL_PANEL_CLOSE)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.6)
+    return clicked
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:
