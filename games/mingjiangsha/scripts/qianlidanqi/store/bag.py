@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 #: 铜币数值区域（源坐标 2560x1369）。
-COPPER_REGION = Region(2250, 96, 110, 40)
+COPPER_REGION = Region(2250, 73, 110, 40)
 
 
 def parse_copper_text(text: str) -> int | None:

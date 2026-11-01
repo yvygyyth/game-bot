@@ -25,6 +25,7 @@ from ..store import (
 from ..templates import (
     T_CLAIM_REWARD,
     T_FIGHT_AUTO,
+    T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
     T_FIGHT_END,
     T_FIGHT_NEXT,
@@ -66,13 +67,13 @@ REWARD_KIND_IMAGES: dict[RewardKind, str] = {
 
 #: 赠礼第一屏三个武将标题的 OCR 区域（源坐标）。
 REWARD_TITLE_REGIONS = (
-    Region(390, 1075, 330, 55),
-    Region(1060, 1075, 340, 55),
-    Region(1780, 1075, 340, 55),
+    Region(390, 1052, 330, 55),
+    Region(1060, 1052, 340, 55),
+    Region(1780, 1052, 340, 55),
 )
 
 #: 三个标题的中心（OCR 不可用时默认点第一个）。
-REWARD_SLOT_POINTS = (Point(555, 1105), Point(1230, 1105), Point(1950, 1105))
+REWARD_SLOT_POINTS = (Point(555, 1082), Point(1230, 1082), Point(1950, 1082))
 
 #: 地图上节点的匹配阈值。
 NODE_CONFIDENCE = 0.9
@@ -118,12 +119,14 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         ctx.sleep(0.6)
 
-    # ---- 2. 点「托管」----
-    auto = ctx.frame().find_image(T_FIGHT_AUTO)
-    if auto.ok and auto.value is not None:
-        actions.click_source_point(ctx.session, auto.value)
-        ctx.invalidate_frame()
-        ctx.sleep(0.6)
+    # ---- 2. 点「托管」：已经托管（取消托管图标）就不点，免得点成取消 ----
+    already = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
+    if not already.ok:
+        auto = ctx.frame().find_image(T_FIGHT_AUTO)
+        if auto.ok and auto.value is not None:
+            actions.click_source_point(ctx.session, auto.value)
+            ctx.invalidate_frame()
+            ctx.sleep(0.6)
 
     # ---- 3. 等「点击空白区域到下一步」----
     ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)

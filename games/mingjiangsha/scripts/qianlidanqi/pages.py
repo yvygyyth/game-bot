@@ -44,6 +44,7 @@ from .templates import (
     T_CLAIM_REWARD,
     T_CONGRATS,
     T_FIGHT_AUTO,
+    T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
     T_FIGHT_SETTING,
     T_FLOW,
@@ -62,52 +63,52 @@ from .templates import (
 )
 
 #: 首页右上角那个小图标（状态锚点）。
-HOME_ROI = Region(2380, 210, 160, 160)
+HOME_ROI = Region(2380, 187, 160, 160)
 
 #: 战役界面的「战旗 + 战役商店」。
-CAMPAIGN_ROI = Region(0, 20, 540, 400)
+CAMPAIGN_ROI = Region(0, 0, 560, 400)
 
 #: 千里单骑标题。
-TITLE_ROI = Region(0, 20, 480, 110)
+TITLE_ROI = Region(0, 0, 480, 110)
 
 #: 灰色/红色「开始挑战」。
-START_ROI = Region(1980, 1180, 440, 140)
+START_ROI = Region(1980, 1157, 440, 140)
 
 #: 「武将选择」标题。
-PICK_TITLE_ROI = Region(1080, 810, 400, 120)
+PICK_TITLE_ROI = Region(1080, 787, 400, 120)
 
 #: 「搜索」按钮。
-SEARCH_ROI = Region(2300, 920, 190, 100)
+SEARCH_ROI = Region(2300, 897, 190, 100)
 
 #: 主界面上的「选择武将」占位卡。
-MAIN_PLACEHOLDER_ROI = Region(1980, 500, 440, 280)
+MAIN_PLACEHOLDER_ROI = Region(1980, 477, 440, 280)
 
 #: 选将面板里的「选择武将」占位卡（面板打开后它挪到了上面）。
-PICK_PLACEHOLDER_ROI = Region(1990, 240, 430, 260)
+PICK_PLACEHOLDER_ROI = Region(1990, 217, 430, 260)
 
 #: 局内标题「千里单骑 · 无尽」。
-FLOW_ROI = Region(0, 20, 600, 120)
+FLOW_ROI = Region(0, 0, 600, 120)
 
 #: 局内地图右侧的小图标（和标题一起认地图）。
-MAP_ICON_ROI = Region(2430, 530, 100, 110)
+MAP_ICON_ROI = Region(2430, 507, 100, 110)
 
 #: 地图上可以点的节点区域（旧脚本的 CHOICE_REGION）。
-NODE_REGION = Region(800, 350, 1630, 780)
+NODE_REGION = Region(800, 327, 1630, 780)
 
 #: 点节点后的「开始对局」。
-START_BATTLE_ROI = Region(700, 1090, 350, 110)
+START_BATTLE_ROI = Region(700, 1067, 350, 110)
 
 #: 赠礼第一屏标题。
-GIFT_TITLE_ROI = Region(950, 1165, 640, 95)
+GIFT_TITLE_ROI = Region(950, 1142, 640, 95)
 
 #: 赠礼第二屏标题。
-GIFT_KIND_TITLE_ROI = Region(1025, 1165, 480, 95)
+GIFT_KIND_TITLE_ROI = Region(1025, 1142, 480, 95)
 
 #: 本局结束「领取奖励」。
-CLAIM_ROI = Region(1080, 1180, 420, 120)
+CLAIM_ROI = Region(1080, 1157, 420, 120)
 
 #: 「恭喜获得」浮层。
-CONGRATS_ROI = Region(880, 275, 640, 140)
+CONGRATS_ROI = Region(880, 252, 640, 140)
 
 
 FEATURE_TREE = PageGroup(
@@ -164,6 +165,7 @@ FEATURE_TREE = PageGroup(
                                     T_FIGHT_CANCEL,
                                     T_FIGHT_SETTING,
                                     T_FIGHT_AUTO,
+                                    T_FIGHT_AUTO_OFF,
                                     confidence=0.9,
                                 ),
                             ),

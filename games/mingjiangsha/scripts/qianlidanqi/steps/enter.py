@@ -19,7 +19,7 @@ __all__ = ["continue_run", "enter_campaign", "enter_qianli", "open_pick", "start
 
 #: 首页「战役」卡的中心（源坐标）。这张卡在不同光照下分数只有 0.88 左右，
 #: 而位置是固定的 —— 直接点中心比卡在阈值上更稳。
-HOME_CAMPAIGN_POINT = Point(1995, 683)
+HOME_CAMPAIGN_POINT = Point(1995, 660)
 
 #: 点完按钮等界面切换（秒）。
 ENTER_SETTLE = 1.0

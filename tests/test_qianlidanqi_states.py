@@ -1,8 +1,8 @@
 """千里单骑：四个 select 状态 + 模板声明审计。
 
 状态图在 ``pages.py``，这里用 ``rawMaterial`` 里的真机截图把"认得出/认不错"钉住。
-截图是 2560x1440 的整屏（底部带任务栏），运行时客户区是 2560x1369 ——
-测试里裁掉任务栏再喂，和真机一致。
+截图是 2560x1440 / 2560x1392 的窗口图（顶部 23px 标题栏），运行时客户区是
+2560x1369 —— 测试里裁掉标题栏（和底部任务栏）再喂，和真机一致。
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _locate_image(scenario, matcher, image) -> str | None:
 def _locate(scenario, matcher, shot: str) -> str | None:
     image = cv2.imread(str(RAW_DIR / shot))
     assert image is not None, shot
-    return _locate_image(scenario, matcher, image[:1369, :])  # 客户区：去掉任务栏
+    return _locate_image(scenario, matcher, image[23:1392, :])  # 客户区：去掉 23px 标题栏和任务栏
 
 
 @pytest.mark.parametrize(("expected", "shot"), CASES)

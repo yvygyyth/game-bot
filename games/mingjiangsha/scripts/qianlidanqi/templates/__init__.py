@@ -13,6 +13,7 @@ __all__ = [
     "T_CONFIRM",
     "T_CONGRATS",
     "T_FIGHT_AUTO",
+    "T_FIGHT_AUTO_OFF",
     "T_FIGHT_CANCEL",
     "T_FIGHT_END",
     "T_FIGHT_NEXT",
@@ -103,8 +104,10 @@ T_FIGHT_SETTING = "flow/setting.png"
 T_FIGHT_END = "flow/challenge_end.png"
 #: 结算「下一步」条。
 T_FIGHT_NEXT = "flow/next_step.png"
-#: 战斗「自动」。
+#: 战斗「托管」（未托管，点了才托管）。
 T_FIGHT_AUTO = "flow/auto.png"
+#: 战斗「取消托管」（已经托管中，不要再点）。
+T_FIGHT_AUTO_OFF = "flow/auto_cancel.png"
 
 #: 赠礼类别：信物。
 T_REWARD_TOKEN = "flow/token.png"

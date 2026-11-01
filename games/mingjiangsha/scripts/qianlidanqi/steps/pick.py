@@ -33,7 +33,7 @@ __all__ = ["RESULT_POINT", "SEARCH_FOCUS_OFFSET", "pick_general"]
 SEARCH_FOCUS_OFFSET = -160
 
 #: 搜索结果第一张卡的中心（源坐标）。
-RESULT_POINT = Point(200, 1100)
+RESULT_POINT = Point(200, 1077)
 
 
 def pick_general(ctx: RunContext) -> ActionResult[Any]:
