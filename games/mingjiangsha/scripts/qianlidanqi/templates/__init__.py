@@ -29,11 +29,14 @@ __all__ = [
     "T_NEXT",
     "T_NODE_BATTLE",
     "T_NODE_BATTLE_HELP",
+    "T_NODE_POCKET",
     "T_NODE_REST",
     "T_NODE_SHOP_BA_QING",
     "T_NODE_SURPRISE",
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
+    "T_POCKET_CONFIRM",
+    "T_POCKET_TITLE",
     "T_QIANLI_CARD",
     "T_REST_TITLE",
     "T_REWARD_BUFF",
@@ -92,6 +95,12 @@ T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
 #: 本局结束「领取奖励」。
 T_CLAIM_REWARD = "flow/claim_reward.png"
 
+# ---- 锦囊（奇遇） ----
+#: 「三顾茅庐」标题（锦囊当前这一种）。
+T_POCKET_TITLE = "flow/pocket_title.png"
+#: 锦囊确认页的「确认」按钮。
+T_POCKET_CONFIRM = "flow/pocket_confirm.png"
+
 # ---- 休息 ----
 #: 「安营驻寨」标题。
 T_REST_TITLE = "flow/rest_title.png"
@@ -123,6 +132,8 @@ T_NODE_SURPRISE = "flow/yi_wai.png"
 T_NODE_SHOP_BA_QING = "flow/node_ba_qing.png"
 #: 地图上的休息（火堆）节点。
 T_NODE_REST = "flow/node_rest.png"
+#: 地图上的锦囊节点。
+T_NODE_POCKET = "flow/node_pocket.png"
 
 #: 战斗界面「取消」。
 T_FIGHT_CANCEL = "flow/cancel.png"

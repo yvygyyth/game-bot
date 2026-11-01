@@ -33,10 +33,12 @@ from .pages import FEATURE_TREE
 from .steps import (
     buy_ba_qing,
     choose_node,
+    choose_pocket,
     choose_rest,
     claim_reward,
     close_congrats,
     close_skill_panel,
+    confirm_pocket,
     continue_run,
     enter_campaign,
     enter_qianli,
@@ -139,6 +141,7 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
+                Transition("pocket_choice", on_page("qianli/pocket/choice"), 16, "进锦囊"),
                 Transition("rest", on_page("qianli/rest"), 15, "进休息"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
@@ -190,6 +193,29 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "pocket_choice",
+            steps=[choose_pocket],
+            description="锦囊三选一：随便点一个；可能还在这屏/到确认/直接进战斗",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("pocket_confirm", on_page("qianli/pocket/confirm"), 20, "到确认页"),
+                Transition("fight", on_page("qianli/fight"), 15, "直接进战斗"),
+                Transition("map", on_page("qianli/map"), 5, "回地图"),
+            ],
+        ),
+        Node(
+            "pocket_confirm",
+            steps=[confirm_pocket],
+            description="锦囊确认页：点确认",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("pocket_choice", on_page("qianli/pocket/choice"), 20, "又弹一个锦囊"),
+                Transition("fight", on_page("qianli/fight"), 15, "进战斗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+                Transition("end", on_page("qianli/end"), 5, "本局结束"),
             ],
         ),
         Node(

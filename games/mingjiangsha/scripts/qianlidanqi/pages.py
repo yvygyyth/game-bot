@@ -56,6 +56,8 @@ from .templates import (
     T_NEXT,
     T_PICK_TITLE,
     T_PLACEHOLDER,
+    T_POCKET_CONFIRM,
+    T_POCKET_TITLE,
     T_REST_TITLE,
     T_SEARCH,
     T_SELECT_TITLE,
@@ -118,6 +120,12 @@ SHOP_TITLE_ROI = Region(300, 10, 700, 140)
 
 #: 休息标题「安营驻寨」。
 REST_TITLE_ROI = Region(80, 130, 400, 140)
+
+#: 锦囊标题「三顾茅庐」。
+POCKET_TITLE_ROI = Region(1550, 120, 430, 150)
+
+#: 锦囊确认按钮「确认」。
+POCKET_CONFIRM_ROI = Region(930, 1040, 700, 180)
 
 
 FEATURE_TREE = PageGroup(
@@ -208,6 +216,22 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_GIFT_KIND_TITLE, region=GIFT_KIND_TITLE_ROI),
                             ),
                             description="请选择一项赠礼？信物 / 武将牌 / 并肩作战…",
+                        ),
+                        PageLeaf(
+                            "qianli/pocket/confirm",
+                            name="局内 · 锦囊 · 确认",
+                            queries=(
+                                ImageQuery(T_POCKET_CONFIRM, region=POCKET_CONFIRM_ROI),
+                            ),
+                            description="锦囊选完后的确认页：点确认",
+                        ),
+                        PageLeaf(
+                            "qianli/pocket/choice",
+                            name="局内 · 锦囊 · 三选一",
+                            queries=(
+                                ImageQuery(T_POCKET_TITLE, region=POCKET_TITLE_ROI),
+                            ),
+                            description="锦囊/奇遇三选一：点一个选项，可能再弹、确认或直接进战斗",
                         ),
                         PageLeaf(
                             "qianli/rest",

@@ -16,6 +16,8 @@
 | `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
 | `qianli/shop/ba_qing` | :func:`buy_ba_qing` | 按 TOKEN_PRIORITY 买信物 → 退出 → 确认 |
 | `qianli/rest` | :func:`choose_rest` | 随便点一个休息选项 → 回地图 |
+| `qianli/pocket/choice` | :func:`choose_pocket` | 锦囊三选一随便点一个 |
+| `qianli/pocket/confirm` | :func:`confirm_pocket` | 锦囊确认页点「确认」 |
 | `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
 | `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
@@ -31,10 +33,12 @@ from .pick import pick_general
 from .run import (
     buy_ba_qing,
     choose_node,
+    choose_pocket,
     choose_rest,
     claim_reward,
     close_congrats,
     close_skill_panel,
+    confirm_pocket,
     pick_gift,
     pick_kind,
     run_battle,
@@ -44,10 +48,12 @@ from .run import (
 __all__ = [
     "buy_ba_qing",
     "choose_node",
+    "choose_pocket",
     "choose_rest",
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
+    "confirm_pocket",
     "continue_run",
     "enter_campaign",
     "enter_qianli",

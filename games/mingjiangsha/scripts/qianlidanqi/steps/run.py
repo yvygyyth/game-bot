@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import random
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
@@ -13,7 +14,7 @@ from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
 
-from ..pages import CLAIM_ROI, NODE_REGION, START_BATTLE_ROI
+from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
     RewardKind,
     get_run_state,
@@ -32,8 +33,10 @@ from ..templates import (
     T_FIGHT_END,
     T_FIGHT_NEXT,
     T_NODE_BATTLE,
+    T_NODE_POCKET,
     T_NODE_REST,
     T_NODE_SHOP_BA_QING,
+    T_POCKET_CONFIRM,
     T_REWARD_BUFF,
     T_REWARD_CARD,
     T_REWARD_HELP,
@@ -52,6 +55,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BATTLE_END_TIMEOUT",
     "PENDING_GENERAL_KEY",
+    "POCKET_OPTION_POINTS",
     "REST_OPTION_POINT",
     "SHOP_BUY_POINT",
     "SHOP_MIN_COINS",
@@ -60,10 +64,12 @@ __all__ = [
     "SKILL_PANEL_CLOSE",
     "buy_ba_qing",
     "choose_node",
+    "choose_pocket",
     "choose_rest",
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
+    "confirm_pocket",
     "pick_gift",
     "pick_kind",
     "run_battle",
@@ -121,6 +127,9 @@ SHOP_MIN_COINS = 30
 #: 休息界面随便点一个选项（第一个）。
 REST_OPTION_POINT = Point(457, 1150)
 
+#: 锦囊三选一的三个选项中心（随便点一个）。
+POCKET_OPTION_POINTS = (Point(457, 1150), Point(1317, 1150), Point(2155, 1150))
+
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
     """地图上选一个节点：战斗优先，其次巴清商店（点两次）。"""
@@ -160,6 +169,20 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
             return second.with_meta(
                 point=(point.x, point.y), kind="shop_ba_qing", coins=coins
             )
+
+    pocket = ctx.frame().find_image(T_NODE_POCKET, region=NODE_REGION, confidence=0.9)
+    if pocket.ok and pocket.value is not None:
+        point = pocket.value
+        first = actions.click_source_point(ctx.session, point)
+        if not first.ok:
+            return first
+        ctx.sleep(0.4)
+        second = actions.click_source_point(ctx.session, point)
+        if not second.ok:
+            return second
+        ctx.invalidate_frame()
+        ctx.sleep(0.9)
+        return second.with_meta(point=(point.x, point.y), kind="pocket")
 
     rest = ctx.frame().find_image(T_NODE_REST, region=NODE_REGION, confidence=0.9)
     if rest.ok and rest.value is not None:
@@ -353,6 +376,22 @@ def choose_rest(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
     ctx.sleep(0.9)
     return clicked.with_meta(point=(REST_OPTION_POINT.x, REST_OPTION_POINT.y))
+
+
+def choose_pocket(ctx: RunContext) -> ActionResult[Any]:
+    """锦囊三选一：随便点一个。可能还是这屏、可能到确认、也可能直接进战斗。"""
+    point = random.choice(POCKET_OPTION_POINTS)
+    clicked = actions.click_source_point(ctx.session, point)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.8)
+    return clicked.with_meta(point=(point.x, point.y))
+
+
+def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
+    """锦囊确认页：点「确认」。"""
+    return click_image(ctx, T_POCKET_CONFIRM, region=POCKET_CONFIRM_ROI, settle=1.0)
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

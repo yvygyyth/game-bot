@@ -24,6 +24,8 @@ BINDINGS = NodeBindings(
         Binding("gift_kind", "qianli/gift_kind"),
         Binding("shop_ba_qing", "qianli/shop/ba_qing"),
         Binding("rest", "qianli/rest"),
+        Binding("pocket_choice", "qianli/pocket/choice"),
+        Binding("pocket_confirm", "qianli/pocket/confirm"),
         Binding("end", "qianli/end"),
         Binding("end2", "qianli/end2"),
     )
