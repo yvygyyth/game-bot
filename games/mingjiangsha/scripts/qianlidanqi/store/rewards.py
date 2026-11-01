@@ -27,6 +27,7 @@ __all__ = [
     "parse_general_name",
     "pick_reward_kind",
     "pick_reward_slot",
+    "pick_token_slot",
     "resolve_general_priority",
 ]
 
@@ -117,6 +118,25 @@ def parse_general_name(ocr_text: str) -> str:
         if text.endswith(suffix):
             text = text[: -len(suffix)]
     return text.strip()
+
+
+def pick_token_slot(
+    titles: list[str] | tuple[str, ...],
+    priority: list[str] | None = None,
+) -> int | None:
+    """按 :data:`TOKEN_PRIORITY` 找本屏第一个命中的信物槽位；都没有返回 None。
+
+    老代码里就是"名字包含在 OCR 文本里"，这里保持同一套，不引入新的匹配规则。
+    """
+    table = priority if priority is not None else TOKEN_PRIORITY
+    cleaned = [(i, (t or "").strip()) for i, t in enumerate(titles)]
+    for name in table:
+        if not name:
+            continue
+        for i, text in cleaned:
+            if name in text:
+                return i
+    return None
 
 
 def _entry_by_name(name: str) -> GeneralPriority | None:

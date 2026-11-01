@@ -5,6 +5,7 @@
 ```
 qianli/skill_panel --点空白--> qianli/map
 qianli/map --战斗节点--> qianli/pre_battle --开始对局--> qianli/fight
+qianli/map --巴清商店节点(点两次)--> qianli/shop/ba_qing --买/退出--> qianli/map
 fight --打完--> qianli/gift --选武将--> qianli/gift_kind --选类别--> qianli/map
 fight --无赠礼--> qianli/map
 fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc--> qianli/select1（下一轮）
@@ -13,6 +14,7 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 | 状态 | 靠什么认 | 步骤 |
 |---|---|---|
 | `qianli/skill_panel` | 「武将技能」弹窗（旧 `up.png`） | `close_skill_panel`：点空白 (1300,1127) 回地图 |
+| `qianli/shop/ba_qing` | 「巴清小铺子」标题 | `buy_ba_qing`：OCR 三信物 → `pick_token_slot` → 点商品 → 有「购买」弹窗就点购买 → 右上箭头 → 确认结束 |
 | `qianli/map` | 标题「千里单骑 · 无尽」+ 右侧小图标 | `choose_node`：在 `NODE_REGION` 里找战斗节点（剑），点最上面那个 |
 | `qianli/pre_battle` | 「开始对局」 | `start_battle`：点开始对局 |
 | `qianli/fight` | 取消 / 设置 / 托管 任一 | `run_battle`：点「取消」关换牌 → 点「托管」→ 等「点击空白区域到下一步」（最多 1200s）→ 点它 → 点「下一步」≤5 次 |
@@ -43,7 +45,7 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 
 ## 还没做（缺图）
 
-* 商店界面：巴清 / 吕不韦 / 锦囊 / 休息；
+* 商店界面：吕不韦 / 锦囊 / 休息（巴清已做）；
 * 奇遇界面：妃妃 / 十常侍 / 墨子 / 诸葛亮 / 左慈 / 卡卡；
 * 武将技能弹窗真机图（现在用旧 `up.png`）；
 * 意外战斗（`qianli/surprise` 已注释占位）。

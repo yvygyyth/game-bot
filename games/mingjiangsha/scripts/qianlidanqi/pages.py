@@ -58,6 +58,7 @@ from .templates import (
     T_PLACEHOLDER,
     T_SEARCH,
     T_SELECT_TITLE,
+    T_SHOP_TITLE,
     T_START,
     T_START_BATTLE,
     T_START_DISABLED,
@@ -110,6 +111,9 @@ CLAIM_ROI = Region(1080, 1157, 420, 120)
 
 #: 「恭喜获得」浮层。
 CONGRATS_ROI = Region(880, 252, 640, 140)
+
+#: 巴清商店标题「巴清小铺子」。
+SHOP_TITLE_ROI = Region(300, 10, 700, 140)
 
 
 FEATURE_TREE = PageGroup(
@@ -200,6 +204,14 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_GIFT_KIND_TITLE, region=GIFT_KIND_TITLE_ROI),
                             ),
                             description="请选择一项赠礼？信物 / 武将牌 / 并肩作战…",
+                        ),
+                        PageLeaf(
+                            "qianli/shop/ba_qing",
+                            name="局内 · 巴清商店",
+                            queries=(
+                                ImageQuery(T_SHOP_TITLE, region=SHOP_TITLE_ROI),
+                            ),
+                            description="巴清小铺子：信物专区 + 武将牌专区",
                         ),
                         PageLeaf(
                             "qianli/end",

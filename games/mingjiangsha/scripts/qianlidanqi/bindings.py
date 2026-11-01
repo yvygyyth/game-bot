@@ -22,6 +22,7 @@ BINDINGS = NodeBindings(
         Binding("fight", "qianli/fight"),
         Binding("gift", "qianli/gift"),
         Binding("gift_kind", "qianli/gift_kind"),
+        Binding("shop_ba_qing", "qianli/shop/ba_qing"),
         Binding("end", "qianli/end"),
         Binding("end2", "qianli/end2"),
     )

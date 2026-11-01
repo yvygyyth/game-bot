@@ -29,6 +29,7 @@ __all__ = [
     "T_NEXT",
     "T_NODE_BATTLE",
     "T_NODE_BATTLE_HELP",
+    "T_NODE_SHOP_BA_QING",
     "T_NODE_SURPRISE",
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
@@ -40,6 +41,11 @@ __all__ = [
     "T_REWARD_TOKEN",
     "T_SEARCH",
     "T_SELECT_TITLE",
+    "T_SHOP_BUY_TITLE",
+    "T_SHOP_CONFIRM",
+    "T_SHOP_EXIT",
+    "T_SHOP_EXIT_PROMPT",
+    "T_SHOP_TITLE",
     "T_START",
     "T_START_BATTLE",
     "T_START_DISABLED",
@@ -83,6 +89,18 @@ T_GIFT_TITLE = "flow/gift_title.png"
 T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
 #: 本局结束「领取奖励」。
 T_CLAIM_REWARD = "flow/claim_reward.png"
+
+# ---- 巴清商店 ----
+#: 「巴清小铺子」标题。
+T_SHOP_TITLE = "flow/shop_title.png"
+#: 购买弹窗标题「购买」。
+T_SHOP_BUY_TITLE = "flow/shop_buy_title.png"
+#: 商店右上角退出箭头。
+T_SHOP_EXIT = "flow/shop_exit.png"
+#: 退出提示「是否结束购买？」。
+T_SHOP_EXIT_PROMPT = "flow/shop_exit_prompt.png"
+#: 退出提示里的「确认」。
+T_SHOP_CONFIRM = "flow/shop_confirm.png"
 #: 领奖后的「恭喜获得」浮层。
 T_CONGRATS = "flow/congrats.png"
 
@@ -95,6 +113,8 @@ T_NODE_BATTLE = "flow/challenge.png"
 T_NODE_BATTLE_HELP = "flow/challenge_help.png"
 #: 地图上的「意外」节点。
 T_NODE_SURPRISE = "flow/yi_wai.png"
+#: 地图上的巴清商店节点。
+T_NODE_SHOP_BA_QING = "flow/node_ba_qing.png"
 
 #: 战斗界面「取消」。
 T_FIGHT_CANCEL = "flow/cancel.png"

@@ -20,6 +20,7 @@ from ..store import (
     parse_general_name,
     pick_reward_kind,
     pick_reward_slot,
+    pick_token_slot,
     resolve_general_priority,
 )
 from ..templates import (
@@ -30,11 +31,16 @@ from ..templates import (
     T_FIGHT_END,
     T_FIGHT_NEXT,
     T_NODE_BATTLE,
+    T_NODE_SHOP_BA_QING,
     T_REWARD_BUFF,
     T_REWARD_CARD,
     T_REWARD_HELP,
     T_REWARD_JOINT,
     T_REWARD_TOKEN,
+    T_SHOP_BUY_TITLE,
+    T_SHOP_CONFIRM,
+    T_SHOP_EXIT,
+    T_SHOP_EXIT_PROMPT,
     T_START_BATTLE,
 )
 
@@ -44,7 +50,11 @@ if TYPE_CHECKING:
 __all__ = [
     "BATTLE_END_TIMEOUT",
     "PENDING_GENERAL_KEY",
+    "SHOP_BUY_POINT",
+    "SHOP_TOKEN_POINTS",
+    "SHOP_TOKEN_TITLE_REGIONS",
     "SKILL_PANEL_CLOSE",
+    "buy_ba_qing",
     "choose_node",
     "claim_reward",
     "close_congrats",
@@ -86,28 +96,60 @@ BATTLE_END_TIMEOUT = 1200.0
 #: 关「武将技能」弹窗的点击位置（客户区坐标；旧代码点 1300,1150 窗口坐标）。
 SKILL_PANEL_CLOSE = Point(1300, 1127)
 
+# ---- 巴清商店 ----
+#: 三个信物标题的 OCR 区域（客户区）。
+SHOP_TOKEN_TITLE_REGIONS = (
+    Region(1276, 277, 280, 50),
+    Region(1730, 277, 280, 50),
+    Region(2186, 277, 280, 50),
+)
+
+#: 三个信物标题的中心（点它选中）。
+SHOP_TOKEN_POINTS = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
+
+#: 购买弹窗里「xx购买」按钮的中心（客户区固定）。
+SHOP_BUY_POINT = Point(842, 964)
+
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
-    """地图上找一个战斗节点（剑）并点它。"""
-    found = ctx.frame().find_all_images(
+    """地图上选一个节点：战斗优先，其次巴清商店（点两次）。"""
+    battle = ctx.frame().find_all_images(
         T_NODE_BATTLE,
         region=NODE_REGION,
         confidence=NODE_CONFIDENCE,
         max_count=10,
         min_distance=80,
     )
-    if not found.ok or not found.value:
-        return ActionResult.not_found(
-            "地图上没有可点的战斗节点（商店/事件节点后续再支持）",
-            template=T_NODE_BATTLE,
+    if battle.ok and battle.value:
+        point = min(battle.value, key=lambda p: p.y)
+        clicked = actions.click_source_point(ctx.session, point)
+        if not clicked.ok:
+            return clicked
+        ctx.invalidate_frame()
+        ctx.sleep(0.8)
+        return clicked.with_meta(
+            point=(point.x, point.y), count=len(battle.value), kind="battle"
         )
-    point = min(found.value, key=lambda p: p.y)
-    clicked = actions.click_source_point(ctx.session, point)
-    if not clicked.ok:
-        return clicked
-    ctx.invalidate_frame()
-    ctx.sleep(0.8)
-    return clicked.with_meta(point=(point.x, point.y), count=len(found.value))
+
+    # 没有战斗节点：看有没有巴清商店节点（地图上要点两次才进去）
+    shop = ctx.frame().find_image(T_NODE_SHOP_BA_QING, region=NODE_REGION, confidence=0.9)
+    if shop.ok and shop.value is not None:
+        point = shop.value
+        first = actions.click_source_point(ctx.session, point)
+        if not first.ok:
+            return first
+        ctx.sleep(0.4)
+        second = actions.click_source_point(ctx.session, point)
+        if not second.ok:
+            return second
+        ctx.invalidate_frame()
+        ctx.sleep(0.9)
+        return second.with_meta(point=(point.x, point.y), kind="shop_ba_qing")
+
+    return ActionResult.not_found(
+        "地图上没有可点的战斗/巴清商店节点（其他商店、奇遇节点后续再支持）",
+        template=T_NODE_BATTLE,
+    )
 
 
 def start_battle(ctx: RunContext) -> ActionResult[Any]:
@@ -212,6 +254,51 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
     ctx.sleep(0.6)
     return clicked
+
+
+def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
+    """巴清商店：按 TOKEN_PRIORITY 买一个信物 → 退出 → 确认结束购买。"""
+    titles: list[str] = []
+    for region in SHOP_TOKEN_TITLE_REGIONS:
+        read = ctx.frame().read_text(region)
+        titles.append(read.value if read.ok and read.value is not None else "")
+
+    slot = pick_token_slot(titles)
+    if slot is not None:
+        point = SHOP_TOKEN_POINTS[min(slot, len(SHOP_TOKEN_POINTS) - 1)]
+        picked = actions.click_source_point(ctx.session, point)
+        if not picked.ok:
+            return picked
+        ctx.invalidate_frame()
+        ctx.sleep(0.6)
+
+        # 钱够才会弹「购买」；钱不够是灰的，点完什么都没发生。
+        buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
+        if buy.ok:
+            clicked = actions.click_source_point(ctx.session, SHOP_BUY_POINT)
+            if not clicked.ok:
+                return clicked
+            ctx.invalidate_frame()
+            ctx.sleep(0.8)
+
+    # ---- 退出商店：右上角箭头 → 是否结束购买？→ 确认 ----
+    exit_btn = ctx.frame().find_image(T_SHOP_EXIT)
+    if exit_btn.ok and exit_btn.value is not None:
+        actions.click_source_point(ctx.session, exit_btn.value)
+        ctx.invalidate_frame()
+        ctx.sleep(0.7)
+
+    prompt = ctx.frame().find_image(T_SHOP_EXIT_PROMPT)
+    if prompt.ok:
+        confirm = ctx.frame().find_image(T_SHOP_CONFIRM)
+        if confirm.ok and confirm.value is not None:
+            actions.click_source_point(ctx.session, confirm.value)
+            ctx.invalidate_frame()
+            ctx.sleep(0.8)
+
+    return ActionResult.success(
+        "巴清商店处理完成", action="sequence", slot=slot, titles=titles
+    )
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

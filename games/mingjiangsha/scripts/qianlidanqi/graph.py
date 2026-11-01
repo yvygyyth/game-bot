@@ -31,6 +31,7 @@ from games import on_page
 from .bindings import BINDINGS
 from .pages import FEATURE_TREE
 from .steps import (
+    buy_ba_qing,
     choose_node,
     claim_reward,
     close_congrats,
@@ -136,6 +137,7 @@ SCENARIO = ScenarioSpec(
             description="地图：找一个战斗节点点它",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
         ),
@@ -177,6 +179,14 @@ SCENARIO = ScenarioSpec(
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图继续"),
                 Transition("end", on_page("qianli/end"), 5, "本局结束"),
+            ],
+        ),
+        Node(
+            "shop_ba_qing",
+            steps=[buy_ba_qing],
+            description="巴清商店：买信物 → 退出 → 确认结束购买",
+            transitions=[
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
             ],
         ),
         Node(

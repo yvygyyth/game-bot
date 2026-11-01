@@ -19,6 +19,7 @@ from games.mingjiangsha.scripts.qianlidanqi.store import (
     parse_general_name,
     pick_reward_kind,
     pick_reward_slot,
+    pick_token_slot,
     reset_run_state,
     resolve_general_priority,
 )
@@ -142,3 +143,13 @@ class TestRunState:
         assert state.has_general_reward("吕布", RewardKind.BUFF) is False
         assert state.has_reward(RewardKind.TOKEN) is True
         assert state.has_reward(RewardKind.BUFF) is False
+
+
+class TestPickTokenSlot:
+    def test_prefers_priority_order(self) -> None:
+        # TOKEN_PRIORITY 里 行囊 在 飞仙髻/白狼之魔 之前
+        titles = ["飞仙髻 9.0折", "行囊 9.0折", "白狼之魔 9.0折"]
+        assert pick_token_slot(titles) == 1
+
+    def test_none_when_nothing_matches(self) -> None:
+        assert pick_token_slot(["飞仙髻", "白狼之魔", "虞姬"]) is None

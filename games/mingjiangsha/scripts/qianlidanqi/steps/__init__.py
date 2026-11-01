@@ -14,6 +14,7 @@
 | `qianli/fight` | :func:`run_battle` | 取消换牌 → 托管 → 等结束 → 下一步 |
 | `qianli/gift` | :func:`pick_gift` | OCR 三个武将名 → 按优先表点一个 |
 | `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
+| `qianli/shop/ba_qing` | :func:`buy_ba_qing` | 按 TOKEN_PRIORITY 买信物 → 退出 → 确认 |
 | `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
 | `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
@@ -27,6 +28,7 @@ from .enter import continue_run, enter_campaign, enter_qianli, open_pick, start_
 from .leave import leave_pick
 from .pick import pick_general
 from .run import (
+    buy_ba_qing,
     choose_node,
     claim_reward,
     close_congrats,
@@ -38,6 +40,7 @@ from .run import (
 )
 
 __all__ = [
+    "buy_ba_qing",
     "choose_node",
     "claim_reward",
     "close_congrats",
