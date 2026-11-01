@@ -33,6 +33,7 @@ from .pages import FEATURE_TREE
 from .steps import (
     buy_ba_qing,
     choose_event_option,
+    choose_mozi,
     choose_node,
     choose_pocket,
     choose_rest,
@@ -208,6 +209,7 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("shi_chang", on_page("qianli/event/shi_chang"), 20, "十常侍选择页"),
+                Transition("mo_zi", on_page("qianli/event/mo_zi"), 20, "墨子选择页"),
                 Transition("event_choice", on_page("qianli/event/choice"), 20, "进选择页"),
                 Transition("map", on_page("qianli/map"), 5, "直接回地图"),
             ],
@@ -216,6 +218,15 @@ SCENARIO = ScenarioSpec(
             "event_choice",
             steps=[choose_event_option],
             description="奇遇选择：按妃妃优先级选一项",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "mo_zi",
+            steps=[choose_mozi],
+            description="墨子三选一：点一行制造，回地图",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),

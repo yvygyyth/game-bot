@@ -58,6 +58,8 @@ CASES = (
     ("qianli/event/zhuge", "zhuge1.png"),
     ("qianli/event/zhuge", "zhuge2.png"),
     ("qianli/event/zhuge", "zhuge3.png"),
+    ("qianli/event/mo_zi", "event_mozi_choice.png"),
+    ("qianli/skill_panel", "skill_panel.png"),
     ("qianli/fight", "event_shichang_battle.png"),
     ("qianli/gift_kind", "battle/zengli2.png"),
     ("qianli/end", "end.png"),
@@ -93,7 +95,9 @@ def _locate_image(scenario, matcher, image) -> str | None:
 def _locate(scenario, matcher, shot: str) -> str | None:
     image = cv2.imread(str(RAW_DIR / shot))
     assert image is not None, shot
-    return _locate_image(scenario, matcher, image[23:1392, :])  # 客户区：去掉 23px 标题栏和任务栏
+    # 截图标题栏有 23px（2560x1392/1440）和 32px（2560x1401）两种
+    top = 32 if image.shape[0] == 1401 else 23
+    return _locate_image(scenario, matcher, image[top:top + 1369, :])
 
 
 @pytest.mark.parametrize(("expected", "shot"), CASES)

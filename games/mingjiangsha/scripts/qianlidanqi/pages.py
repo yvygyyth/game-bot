@@ -51,10 +51,10 @@ from .templates import (
     T_FIGHT_SETTING,
     T_FLOW,
     T_FLOW_MAP,
-    T_FLOW_UP,
     T_GIFT_KIND_TITLE,
     T_GIFT_TITLE,
     T_HOME,
+    T_MOZI_CHOICE,
     T_NEXT,
     T_PICK_TITLE,
     T_PLACEHOLDER,
@@ -65,6 +65,8 @@ from .templates import (
     T_SELECT_TITLE,
     T_SHI_CHOICE,
     T_SHOP_TITLE,
+    T_SKILL_INFO,
+    T_SKILL_TITLE,
     T_START,
     T_START_BATTLE,
     T_START_DISABLED,
@@ -146,6 +148,13 @@ SHI_CHOICE_ROI = Region(1050, 1190, 460, 140)
 #: 诸葛亮「占星术士」标题。
 ZHUGE_TITLE_ROI = Region(1660, 180, 380, 130)
 
+#: 墨子「请选择一种制造」。
+MOZI_CHOICE_ROI = Region(1060, 1200, 440, 130)
+
+#: 属性变更弹窗的两个标题。
+SKILL_TITLE_ROI = Region(1120, 160, 300, 120)
+SKILL_INFO_ROI = Region(2110, 155, 340, 120)
+
 
 FEATURE_TREE = PageGroup(
     "home",
@@ -179,7 +188,10 @@ FEATURE_TREE = PageGroup(
                         PageLeaf(
                             "qianli/skill_panel",
                             name="局内 · 武将技能弹窗",
-                            queries=(ImageQuery(T_FLOW_UP),),
+                            queries=(
+                                ImageQuery(T_SKILL_TITLE, region=SKILL_TITLE_ROI),
+                                ImageQuery(T_SKILL_INFO, region=SKILL_INFO_ROI),
+                            ),
                             description="角色属性变动/武将技能弹窗；点一下回地图",
                         ),
                         # 意外战斗先占位，等用户给图后再启用（见 FLOW.md）
@@ -213,6 +225,14 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
                             ),
                             description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/mo_zi",
+                            name="局内 · 墨子选择",
+                            queries=(
+                                ImageQuery(T_MOZI_CHOICE, region=MOZI_CHOICE_ROI),
+                            ),
+                            description="墨家巨子：三选一，选完回地图",
                         ),
                         PageLeaf(
                             "qianli/event/zhuge",

@@ -67,6 +67,7 @@ __all__ = [
     "EVENT_OPTION_POINTS",
     "EVENT_OPTION_PRIORITY",
     "EVENT_OPTION_REGIONS",
+    "MOZI_OPTION_POINTS",
     "PENDING_GENERAL_KEY",
     "POCKET_OPTION_POINTS",
     "REST_OPTION_POINT",
@@ -78,6 +79,7 @@ __all__ = [
     "ZHUGE_CARD_POINT",
     "buy_ba_qing",
     "choose_event_option",
+    "choose_mozi",
     "choose_node",
     "choose_pocket",
     "choose_rest",
@@ -144,6 +146,9 @@ SHOP_MIN_COINS = 30
 
 #: 休息界面随便点一个选项（第一个）。
 REST_OPTION_POINT = Point(457, 1150)
+
+#: 墨子三选一的三个选项中心。
+MOZI_OPTION_POINTS = (Point(1450, 380), Point(1450, 650), Point(1450, 920))
 
 #: 诸葛亮：上卦/下卦中间那张卡的位置（外观随机、位置固定）。
 ZHUGE_CARD_POINT = Point(1935, 690)
@@ -509,6 +514,17 @@ def do_zhuge(ctx: RunContext) -> ActionResult[Any]:
     return ActionResult.success(
         "诸葛亮占星完成", action="sequence", continued=bool(cont.ok)
     )
+
+
+def choose_mozi(ctx: RunContext) -> ActionResult[Any]:
+    """墨子三选一：随便点一行制造，选完回地图。"""
+    point = random.choice(MOZI_OPTION_POINTS)
+    clicked = actions.click_source_point(ctx.session, point)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.9)
+    return clicked.with_meta(point=(point.x, point.y))
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

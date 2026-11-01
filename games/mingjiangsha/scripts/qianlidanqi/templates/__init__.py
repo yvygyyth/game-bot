@@ -29,6 +29,7 @@ __all__ = [
     "T_GIFT_KIND_TITLE",
     "T_GIFT_TITLE",
     "T_HOME",
+    "T_MOZI_CHOICE",
     "T_NEXT",
     "T_NODE_BATTLE",
     "T_NODE_BATTLE_HELP",
@@ -62,6 +63,8 @@ __all__ = [
     "T_SHOP_EXIT",
     "T_SHOP_EXIT_PROMPT",
     "T_SHOP_TITLE",
+    "T_SKILL_INFO",
+    "T_SKILL_TITLE",
     "T_START",
     "T_START_BATTLE",
     "T_START_DISABLED",
@@ -115,6 +118,16 @@ T_EVENT_INTRO_BACK = "flow/event_back.png"
 T_EVENT_GIFT = "flow/event_gift.png"
 #: 妃妃选择页顶部标题「偶遇朏朏」（和赠礼类别屏区分）。
 T_EVENT_CHOICE_FEIFEI = "flow/event_choice_feifei.png"
+
+# ---- 墨子选择 ----
+#: 墨子「请选择一种制造」。
+T_MOZI_CHOICE = "flow/mozi_choice.png"
+
+# ---- 属性变更弹窗 ----
+#: 属性变更弹窗的「武将技能」。
+T_SKILL_TITLE = "flow/skill_title.png"
+#: 属性变更弹窗的「武将信息」。
+T_SKILL_INFO = "flow/skill_info.png"
 
 # ---- 诸葛亮（占星术士） ----
 #: 「占星术士」标题。
