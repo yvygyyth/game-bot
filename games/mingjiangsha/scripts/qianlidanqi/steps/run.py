@@ -21,6 +21,7 @@ from ..store import (
     pick_reward_kind,
     pick_reward_slot,
     rank_token_slots,
+    refresh_copper_coins,
     resolve_general_priority,
 )
 from ..templates import (
@@ -31,6 +32,7 @@ from ..templates import (
     T_FIGHT_END,
     T_FIGHT_NEXT,
     T_NODE_BATTLE,
+    T_NODE_REST,
     T_NODE_SHOP_BA_QING,
     T_REWARD_BUFF,
     T_REWARD_CARD,
@@ -50,12 +52,15 @@ if TYPE_CHECKING:
 __all__ = [
     "BATTLE_END_TIMEOUT",
     "PENDING_GENERAL_KEY",
+    "REST_OPTION_POINT",
     "SHOP_BUY_POINT",
+    "SHOP_MIN_COINS",
     "SHOP_TOKEN_POINTS",
     "SHOP_TOKEN_TITLE_REGIONS",
     "SKILL_PANEL_CLOSE",
     "buy_ba_qing",
     "choose_node",
+    "choose_rest",
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
@@ -110,6 +115,12 @@ SHOP_TOKEN_POINTS = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
 #: 购买弹窗里「xx购买」按钮的中心（客户区固定）。
 SHOP_BUY_POINT = Point(842, 964)
 
+#: 铜币少于这个数就不进巴清商店（旧脚本的阈值）。
+SHOP_MIN_COINS = 30
+
+#: 休息界面随便点一个选项（第一个）。
+REST_OPTION_POINT = Point(457, 1150)
+
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
     """地图上选一个节点：战斗优先，其次巴清商店（点两次）。"""
@@ -131,10 +142,28 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
             point=(point.x, point.y), count=len(battle.value), kind="battle"
         )
 
-    # 没有战斗节点：看有没有巴清商店节点（地图上要点两次才进去）
+    # 没有战斗：巴清商店（铜币够才进）> 休息
     shop = ctx.frame().find_image(T_NODE_SHOP_BA_QING, region=NODE_REGION, confidence=0.9)
     if shop.ok and shop.value is not None:
-        point = shop.value
+        coins = refresh_copper_coins(ctx)
+        if coins is None or coins >= SHOP_MIN_COINS:
+            point = shop.value
+            first = actions.click_source_point(ctx.session, point)
+            if not first.ok:
+                return first
+            ctx.sleep(0.4)
+            second = actions.click_source_point(ctx.session, point)
+            if not second.ok:
+                return second
+            ctx.invalidate_frame()
+            ctx.sleep(0.9)
+            return second.with_meta(
+                point=(point.x, point.y), kind="shop_ba_qing", coins=coins
+            )
+
+    rest = ctx.frame().find_image(T_NODE_REST, region=NODE_REGION, confidence=0.9)
+    if rest.ok and rest.value is not None:
+        point = rest.value
         first = actions.click_source_point(ctx.session, point)
         if not first.ok:
             return first
@@ -144,10 +173,10 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
             return second
         ctx.invalidate_frame()
         ctx.sleep(0.9)
-        return second.with_meta(point=(point.x, point.y), kind="shop_ba_qing")
+        return second.with_meta(point=(point.x, point.y), kind="rest")
 
     return ActionResult.not_found(
-        "地图上没有可点的战斗/巴清商店节点（其他商店、奇遇节点后续再支持）",
+        "地图上没有可点的战斗/巴清商店/休息节点（其他节点后续再支持）",
         template=T_NODE_BATTLE,
     )
 
@@ -314,6 +343,16 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
     return ActionResult.success(
         "巴清商店处理完成", action="sequence", bought=bought, count=len(bought)
     )
+
+
+def choose_rest(ctx: RunContext) -> ActionResult[Any]:
+    """休息：三个选项随便点一个，结束回地图。"""
+    clicked = actions.click_source_point(ctx.session, REST_OPTION_POINT)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.9)
+    return clicked.with_meta(point=(REST_OPTION_POINT.x, REST_OPTION_POINT.y))
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

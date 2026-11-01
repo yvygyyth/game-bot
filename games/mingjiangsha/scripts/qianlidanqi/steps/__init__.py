@@ -15,6 +15,7 @@
 | `qianli/gift` | :func:`pick_gift` | OCR 三个武将名 → 按优先表点一个 |
 | `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
 | `qianli/shop/ba_qing` | :func:`buy_ba_qing` | 按 TOKEN_PRIORITY 买信物 → 退出 → 确认 |
+| `qianli/rest` | :func:`choose_rest` | 随便点一个休息选项 → 回地图 |
 | `qianli/end` | :func:`claim_reward` | 点「领取奖励」 |
 | `qianli/end2` | :func:`close_congrats` | Esc 关「恭喜获得」，回选将 |
 
@@ -30,6 +31,7 @@ from .pick import pick_general
 from .run import (
     buy_ba_qing,
     choose_node,
+    choose_rest,
     claim_reward,
     close_congrats,
     close_skill_panel,
@@ -42,6 +44,7 @@ from .run import (
 __all__ = [
     "buy_ba_qing",
     "choose_node",
+    "choose_rest",
     "claim_reward",
     "close_congrats",
     "close_skill_panel",

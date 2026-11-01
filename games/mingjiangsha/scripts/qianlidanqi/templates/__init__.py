@@ -29,11 +29,13 @@ __all__ = [
     "T_NEXT",
     "T_NODE_BATTLE",
     "T_NODE_BATTLE_HELP",
+    "T_NODE_REST",
     "T_NODE_SHOP_BA_QING",
     "T_NODE_SURPRISE",
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
     "T_QIANLI_CARD",
+    "T_REST_TITLE",
     "T_REWARD_BUFF",
     "T_REWARD_CARD",
     "T_REWARD_HELP",
@@ -90,6 +92,10 @@ T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
 #: 本局结束「领取奖励」。
 T_CLAIM_REWARD = "flow/claim_reward.png"
 
+# ---- 休息 ----
+#: 「安营驻寨」标题。
+T_REST_TITLE = "flow/rest_title.png"
+
 # ---- 巴清商店 ----
 #: 「巴清小铺子」标题。
 T_SHOP_TITLE = "flow/shop_title.png"
@@ -115,6 +121,8 @@ T_NODE_BATTLE_HELP = "flow/challenge_help.png"
 T_NODE_SURPRISE = "flow/yi_wai.png"
 #: 地图上的巴清商店节点。
 T_NODE_SHOP_BA_QING = "flow/node_ba_qing.png"
+#: 地图上的休息（火堆）节点。
+T_NODE_REST = "flow/node_rest.png"
 
 #: 战斗界面「取消」。
 T_FIGHT_CANCEL = "flow/cancel.png"

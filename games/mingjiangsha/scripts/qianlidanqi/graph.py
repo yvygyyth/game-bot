@@ -33,6 +33,7 @@ from .pages import FEATURE_TREE
 from .steps import (
     buy_ba_qing,
     choose_node,
+    choose_rest,
     claim_reward,
     close_congrats,
     close_skill_panel,
@@ -138,6 +139,7 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
+                Transition("rest", on_page("qianli/rest"), 15, "进休息"),
                 Transition("pre_battle", on_page("qianli/pre_battle"), 10, "点开战斗预览"),
             ],
         ),
@@ -186,6 +188,16 @@ SCENARIO = ScenarioSpec(
             steps=[buy_ba_qing],
             description="巴清商店：买信物 → 退出 → 确认结束购买",
             transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "rest",
+            steps=[choose_rest],
+            description="休息：随便点一个选项 → 回地图",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),
             ],
         ),

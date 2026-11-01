@@ -56,6 +56,7 @@ from .templates import (
     T_NEXT,
     T_PICK_TITLE,
     T_PLACEHOLDER,
+    T_REST_TITLE,
     T_SEARCH,
     T_SELECT_TITLE,
     T_SHOP_TITLE,
@@ -114,6 +115,9 @@ CONGRATS_ROI = Region(880, 252, 640, 140)
 
 #: 巴清商店标题「巴清小铺子」。
 SHOP_TITLE_ROI = Region(300, 10, 700, 140)
+
+#: 休息标题「安营驻寨」。
+REST_TITLE_ROI = Region(80, 130, 400, 140)
 
 
 FEATURE_TREE = PageGroup(
@@ -204,6 +208,14 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_GIFT_KIND_TITLE, region=GIFT_KIND_TITLE_ROI),
                             ),
                             description="请选择一项赠礼？信物 / 武将牌 / 并肩作战…",
+                        ),
+                        PageLeaf(
+                            "qianli/rest",
+                            name="局内 · 休息",
+                            queries=(
+                                ImageQuery(T_REST_TITLE, region=REST_TITLE_ROI),
+                            ),
+                            description="安营驻寨：三个选项，点一个就回地图",
                         ),
                         PageLeaf(
                             "qianli/shop/ba_qing",
