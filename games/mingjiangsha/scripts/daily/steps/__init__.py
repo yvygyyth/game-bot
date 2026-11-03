@@ -17,6 +17,7 @@ from .run import (
     gong_hui_step,
     mail_claim_then_activity,
     open_mail,
+    send_flower_finish,
     zhan_yi_step,
     zhu_jiu_step,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "gong_hui_step",
     "mail_claim_then_activity",
     "open_mail",
+    "send_flower_finish",
     "zhan_yi_step",
     "zhu_jiu_step",
 ]

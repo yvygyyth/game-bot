@@ -6,6 +6,8 @@ __all__ = [
     "T_ACTIVITY_ENTRY",
     "T_ACTIVITY_STATE",
     "T_CONFIRM",
+    "T_FLOWER_ENTRY",
+    "T_FLOWER_STATE",
     "T_FREE_BINGLI",
     "T_GALLERY_ENTRY",
     "T_GALLERY_GIFT",
@@ -64,3 +66,5 @@ T_ZHANYI_SHOP_ENTRY = "entry/zhanyi_shop.png"
 T_GONG_HUI_ENTRY = "entry/gong_hui.png"
 T_GONG_HUI_STATE = "state_gong_hui.png"
 T_GONGHUI_STORE_ENTRY = "entry/gonghui_store.png"
+T_FLOWER_ENTRY = "entry/flower.png"
+T_FLOWER_STATE = "state_flower.png"

@@ -31,6 +31,7 @@ CASES = (
     ("daily/zhu_jiu", "zhu_jiu.png"),
     ("daily/zhan_yi", "zhanyi.png"),
     ("daily/gong_hui", "gonghui.png"),
+    ("daily/flower", "flower1.png"),
 )
 
 

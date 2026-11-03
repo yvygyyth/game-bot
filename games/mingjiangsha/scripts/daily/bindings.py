@@ -18,5 +18,6 @@ BINDINGS = NodeBindings(
         Binding("zhu_jiu", "daily/zhu_jiu"),
         Binding("zhan_yi", "daily/zhan_yi"),
         Binding("gong_hui", "daily/gong_hui"),
+        Binding("flower", "daily/flower"),
     )
 )

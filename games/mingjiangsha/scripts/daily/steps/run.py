@@ -11,6 +11,7 @@ from gamebot.types import ActionResult, Point
 from ..templates import (
     T_ACTIVITY_ENTRY,
     T_CONFIRM,
+    T_FLOWER_ENTRY,
     T_FREE_BINGLI,
     T_GALLERY_ENTRY,
     T_GALLERY_GIFT,
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ACTIVITY_CARD_POINTS",
+    "FLOWER_FRIEND",
+    "FLOWER_GIFT",
+    "FLOWER_ITEM",
+    "FLOWER_X100",
     "SHOP_ITEM_GONGHUI",
     "SHOP_ITEM_QINGMEI",
     "SHOP_ITEM_ZHANYI",
@@ -46,6 +51,7 @@ __all__ = [
     "gong_hui_step",
     "mail_claim_then_activity",
     "open_mail",
+    "send_flower_finish",
     "zhan_yi_step",
     "zhu_jiu_step",
 ]
@@ -62,6 +68,12 @@ SHOP_TAB_JINLAN = Point(2017, 354)
 SHOP_ITEM_QINGMEI = Point(525, 600)
 SHOP_ITEM_ZHANYI = Point(2050, 600)
 SHOP_ITEM_GONGHUI = Point(2050, 600)
+
+#: 送花界面固定点：送礼 / 油菜花 / 赠送x100 / 好友头像。
+FLOWER_GIFT = Point(330, 990)
+FLOWER_ITEM = Point(1865, 980)
+FLOWER_X100 = Point(2270, 1210)
+FLOWER_FRIEND = Point(480, 400)
 
 SETTLE = 0.9
 
@@ -173,7 +185,22 @@ def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
     click_image(ctx, T_MAX, settle=0.4)
     click_image(ctx, T_CONFIRM, settle=0.7)
     _esc(ctx, 2)
-    return ActionResult.success("公会商店购买完成", action="sequence")
+    # 打开好友/送花（下一段）
+    return click_image(ctx, T_FLOWER_ENTRY, confidence=0.9, settle=1.0)
+
+
+def send_flower_finish(ctx: RunContext) -> ActionResult[Any]:
+    """好友：送礼 → 选油菜花 → 赠送x100 → 点好友 → 关。"""
+    actions.click_source_point(ctx.session, FLOWER_GIFT)
+    ctx.sleep(0.6)
+    actions.click_source_point(ctx.session, FLOWER_ITEM)
+    ctx.sleep(0.4)
+    actions.click_source_point(ctx.session, FLOWER_X100)
+    ctx.sleep(0.4)
+    actions.click_source_point(ctx.session, FLOWER_FRIEND)
+    ctx.sleep(0.8)
+    _esc(ctx, 2)
+    return ActionResult.success("送花完成", action="sequence")
 
 
 def finish_daily(ctx: RunContext) -> ActionResult[Any]:

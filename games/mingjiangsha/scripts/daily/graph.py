@@ -22,6 +22,7 @@ from .steps import (
     gong_hui_step,
     mail_claim_then_activity,
     open_mail,
+    send_flower_finish,
     zhan_yi_step,
     zhu_jiu_step,
 )
@@ -95,6 +96,14 @@ SCENARIO = ScenarioSpec(
             "gong_hui",
             steps=[gong_hui_step],
             description="公会：商店买一个 → 结束",
+            transitions=[
+                Transition("flower", on_page("daily/flower"), 10, "进好友送花"),
+            ],
+        ),
+        Node(
+            "flower",
+            steps=[send_flower_finish],
+            description="好友送花：送礼 → 油菜花 → x100 → 好友",
             transitions=[
                 Transition("finish", on_page("daily/root"), 10, "回首页，结束"),
             ],

@@ -8,6 +8,7 @@ from gamebot.types import Region
 
 from .templates import (
     T_ACTIVITY_STATE,
+    T_FLOWER_STATE,
     T_GALLERY_STATE,
     T_GONG_HUI_STATE,
     T_HOME,
@@ -27,12 +28,19 @@ SHOP_ROI = Region(1420, 180, 260, 140)
 ZHU_JIU_ROI = Region(0, 0, 300, 140)
 ZHAN_YI_ROI = Region(0, 0, 300, 140)
 GONG_HUI_ROI = Region(0, 0, 400, 140)
+FLOWER_ROI = Region(380, 70, 260, 150)
 
 
 FEATURE_TREE = PageGroup(
     "daily",
     name="每日领奖",
     children=(
+        PageLeaf(
+            "daily/flower",
+            name="好友/送花",
+            queries=(ImageQuery(T_FLOWER_STATE, region=FLOWER_ROI),),
+            description="好友：送礼 → 油菜花 → 赠送x100 → 好友",
+        ),
         PageLeaf(
             "daily/root",
             name="首页",
