@@ -5,7 +5,6 @@ from __future__ import annotations
 __all__ = [
     "T_ACTIVITY_ENTRY",
     "T_ACTIVITY_STATE",
-    "T_CONFIRM",
     "T_FLOWER_ENTRY",
     "T_FLOWER_STATE",
     "T_FREE_BINGLI",
@@ -54,7 +53,6 @@ T_FREE_BINGLI = "free_bingli.png"
 T_LINGXI = "lingxi.png"
 T_MINGJIANG = "mingjiang.png"
 T_MAX = "max.png"
-T_CONFIRM = "confirm.png"
 
 # ---- 煮酒/战役/公会 ----
 T_ZHU_JIU_ENTRY = "entry/zhu_jiu.png"
