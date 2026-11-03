@@ -111,13 +111,13 @@ REWARD_KIND_IMAGES: dict[RewardKind, str] = {
 
 #: 赠礼第一屏三个武将标题的 OCR 区域（源坐标）。
 REWARD_TITLE_REGIONS = (
-    Region(390, 1052, 330, 55),
-    Region(1060, 1052, 340, 55),
-    Region(1780, 1052, 340, 55),
+    Region(390, 1010, 260, 90),
+    Region(1170, 1010, 250, 90),
+    Region(1940, 1010, 260, 90),
 )
 
 #: 三个标题的中心（OCR 不可用时默认点第一个）。
-REWARD_SLOT_POINTS = (Point(555, 1082), Point(1230, 1082), Point(1950, 1082))
+REWARD_SLOT_POINTS = (Point(505, 1052), Point(1280, 1052), Point(2054, 1052))
 
 #: 地图上节点的匹配阈值。
 NODE_CONFIDENCE = 0.9
@@ -270,13 +270,20 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     """
     # 先精确模板（单张匹配快、实测 1.0）；失败再走通用确认（全屏多模板，慢）
     clicked = click_image(ctx, T_START_BATTLE, confidence=0.9, settle=0.6)
+    if not clicked.ok:
+        clicked = click_pattern_confirm(ctx, settle=0.6)
     if clicked.ok:
-        return clicked
-    return click_pattern_confirm(ctx, settle=0.6)
+        # 等战斗界面出现（右上角菜单），别让引擎把加载态当成"认不出来"等 5 秒
+        wait_for(ctx, ImageQuery(T_FIGHT_MENU), timeout=8.0)
+    return clicked
 
 
 def run_battle(ctx: RunContext) -> ActionResult[Any]:
     """战斗内：取消换牌 → 点托管 → 等结束 → 点下一步。"""
+    # 先把鼠标移到左上角：hover 提示框可能正好盖住「取消」
+    actions.move_to(ctx.session, Point(20, 20), duration=0.1)
+    ctx.sleep(0.2)
+
     # ---- 1. 换牌弹窗：和竞技场一样点「取消」----
     cancel = wait_for(ctx, ImageQuery(T_FIGHT_CANCEL), timeout=3.0)
     if cancel.ok and cancel.value is not None:
