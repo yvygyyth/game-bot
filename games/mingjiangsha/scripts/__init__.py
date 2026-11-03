@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+from .daily import SPEC as daily
 from .jingji import SPEC as jingji
 from .qianlidanqi import SPEC as qianlidanqi
 
 __all__ = [
+    "daily",
     "jingji",
     "qianlidanqi",
 ]
