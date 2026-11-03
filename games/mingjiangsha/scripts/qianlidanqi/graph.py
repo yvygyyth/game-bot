@@ -302,7 +302,7 @@ SCENARIO = ScenarioSpec(
         ),
     ),
     options=EngineOptions(
-        tick_interval=0.4,
+        tick_interval=0.2,
         # 点按钮到界面更新有过渡；连续命中再动手
         require_confirmed=True,
         # 一局可能打十几分钟；2 小时兜底（脚本是循环的，按 F9 停）

@@ -186,7 +186,7 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
         if not clicked.ok:
             return clicked
         ctx.invalidate_frame()
-        ctx.sleep(0.8)
+        ctx.sleep(0.4)
         return clicked.with_meta(
             point=(point.x, point.y), count=len(battle.value), kind="battle"
         )
@@ -268,27 +268,28 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     先按 404x107 的整按钮模板点（实测 1.0）；失败再用通用确认
     （金色花纹按钮，只认边框、不认文字）。
     """
-    clicked = click_pattern_confirm(ctx, settle=1.2)
+    # 先精确模板（单张匹配快、实测 1.0）；失败再走通用确认（全屏多模板，慢）
+    clicked = click_image(ctx, T_START_BATTLE, confidence=0.9, settle=0.6)
     if clicked.ok:
         return clicked
-    return click_image(ctx, T_START_BATTLE, confidence=0.9, settle=1.2)
+    return click_pattern_confirm(ctx, settle=0.6)
 
 
 def run_battle(ctx: RunContext) -> ActionResult[Any]:
     """战斗内：取消换牌 → 点托管 → 等结束 → 点下一步。"""
     # ---- 1. 换牌弹窗：和竞技场一样点「取消」----
-    cancel = wait_for(ctx, ImageQuery(T_FIGHT_CANCEL), timeout=6.0)
+    cancel = wait_for(ctx, ImageQuery(T_FIGHT_CANCEL), timeout=3.0)
     if cancel.ok and cancel.value is not None:
         actions.click_source_point(ctx.session, cancel.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.6)
+        ctx.sleep(0.3)
 
     # ---- 2. 先点右上角菜单，再点菜单里的「托管」----
     menu = ctx.frame().find_image(T_FIGHT_MENU)
     if menu.ok and menu.value is not None:
         actions.click_source_point(ctx.session, menu.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.6)
+        ctx.sleep(0.3)
 
     already = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
     if not already.ok:
@@ -296,7 +297,7 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
         if auto.ok and auto.value is not None:
             actions.click_source_point(ctx.session, auto.value)
             ctx.invalidate_frame()
-            ctx.sleep(0.6)
+            ctx.sleep(0.3)
 
     # 菜单还开着（还能看到托管/取消托管）就点菜单图标关掉；已经托管则不点，免得关掉
     still_on = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
@@ -304,7 +305,7 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
     if (already.ok or still_on.ok or still_off.ok) and menu.ok and menu.value is not None:
         actions.click_source_point(ctx.session, menu.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.5)
+        ctx.sleep(0.3)
 
     # ---- 3. 等「点击空白区域到下一步」----
     ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
