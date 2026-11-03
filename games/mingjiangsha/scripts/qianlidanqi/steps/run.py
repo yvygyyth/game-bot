@@ -262,8 +262,17 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
 
 
 def start_battle(ctx: RunContext) -> ActionResult[Any]:
-    """战斗预览 → 点「开始对局」。"""
-    return click_image(ctx, T_START_BATTLE, region=START_BATTLE_ROI, settle=1.2)
+    """战斗预览 → 点「开始对局」。
+
+    先按 404x107 的整按钮模板点（实测 1.0）；失败再用通用确认
+    （金色花纹按钮，只认边框、不认文字）。
+    """
+    clicked = click_image(
+        ctx, T_START_BATTLE, region=START_BATTLE_ROI, confidence=0.9, settle=1.2
+    )
+    if clicked.ok:
+        return clicked
+    return click_pattern_confirm(ctx, START_BATTLE_ROI, settle=1.2)
 
 
 def run_battle(ctx: RunContext) -> ActionResult[Any]:
