@@ -19,6 +19,7 @@ __all__ = [
     "T_FIGHT_AUTO_OFF",
     "T_FIGHT_CANCEL",
     "T_FIGHT_END",
+    "T_FIGHT_MENU",
     "T_FIGHT_NEXT",
     "T_FIGHT_SETTING",
     "T_FLOW",
@@ -192,6 +193,8 @@ T_NODE_ZHUGE = "flow/node_zhuge.png"
 T_FIGHT_CANCEL = "flow/cancel.png"
 #: 战斗界面「设置」。
 T_FIGHT_SETTING = "flow/setting.png"
+#: 战斗右上角的菜单（麻花结）。
+T_FIGHT_MENU = "flow/menu.png"
 #: 战斗结束「点击空白区域到下一步」。
 T_FIGHT_END = "flow/challenge_end.png"
 #: 结算「下一步」条。

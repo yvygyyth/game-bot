@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -161,7 +162,10 @@ def build_reader(*, recorder: Any = None, engine: str = "auto") -> TextReader:
         reader = UnavailableTextReader(
             "OCR 未启用（没装 rapidocr-onnxruntime / pytesseract）"
         )
-        log.info("未启用 OCR，find_text / read_text 将返回 not_found")
+        log.info(
+            "未启用 OCR（解释器: %s），find_text / read_text 将返回 not_found",
+            sys.executable,
+        )
     return recorder.wrap_reader(reader) if recorder is not None else reader
 
 

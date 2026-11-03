@@ -48,6 +48,7 @@ from .templates import (
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
+    T_FIGHT_MENU,
     T_FIGHT_SETTING,
     T_FLOW,
     T_FLOW_MAP,
@@ -261,6 +262,7 @@ FEATURE_TREE = PageGroup(
                             queries=(
                                 any_image(
                                     T_FIGHT_CANCEL,
+                                    T_FIGHT_MENU,
                                     T_FIGHT_SETTING,
                                     T_FIGHT_AUTO,
                                     T_FIGHT_AUTO_OFF,

@@ -32,6 +32,7 @@ from ..templates import (
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
     T_FIGHT_END,
+    T_FIGHT_MENU,
     T_FIGHT_NEXT,
     T_NODE_BATTLE,
     T_NODE_FEI_FEI,
@@ -282,7 +283,13 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         ctx.sleep(0.6)
 
-    # ---- 2. 点「托管」：已经托管（取消托管图标）就不点，免得点成取消 ----
+    # ---- 2. 先点右上角菜单，再点菜单里的「托管」----
+    menu = ctx.frame().find_image(T_FIGHT_MENU)
+    if menu.ok and menu.value is not None:
+        actions.click_source_point(ctx.session, menu.value)
+        ctx.invalidate_frame()
+        ctx.sleep(0.6)
+
     already = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
     if not already.ok:
         auto = ctx.frame().find_image(T_FIGHT_AUTO)
@@ -290,6 +297,14 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
             actions.click_source_point(ctx.session, auto.value)
             ctx.invalidate_frame()
             ctx.sleep(0.6)
+
+    # 菜单还开着（还能看到托管/取消托管）就点菜单图标关掉；已经托管则不点，免得关掉
+    still_on = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
+    still_off = ctx.frame().find_image(T_FIGHT_AUTO)
+    if (already.ok or still_on.ok or still_off.ok) and menu.ok and menu.value is not None:
+        actions.click_source_point(ctx.session, menu.value)
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
 
     # ---- 3. 等「点击空白区域到下一步」----
     ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
