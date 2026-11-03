@@ -25,6 +25,12 @@ CASES = (
     ("daily/mail", "mail.png"),
     ("daily/activity", "activity.png"),
     ("daily/gallery", "gallery.png"),
+    ("daily/shop", "shop_gold.png"),
+    ("daily/shop", "shop_copper.png"),
+    ("daily/shop", "shop_jinlan.png"),
+    ("daily/zhu_jiu", "zhu_jiu.png"),
+    ("daily/zhan_yi", "zhanyi.png"),
+    ("daily/gong_hui", "gonghui.png"),
 )
 
 

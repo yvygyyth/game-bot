@@ -10,10 +10,22 @@ from gamebot.types import ActionResult, Point
 
 from ..templates import (
     T_ACTIVITY_ENTRY,
+    T_CONFIRM,
+    T_FREE_BINGLI,
     T_GALLERY_ENTRY,
     T_GALLERY_GIFT,
+    T_GONG_HUI_ENTRY,
+    T_GONGHUI_STORE_ENTRY,
+    T_LINGXI,
     T_MAIL_ENTRY,
     T_MAIL_ONE_CLICK,
+    T_MAX,
+    T_MINGJIANG,
+    T_QINGMEI_ENTRY,
+    T_SHOP_ENTRY,
+    T_ZHAN_YI_ENTRY,
+    T_ZHANYI_SHOP_ENTRY,
+    T_ZHU_JIU_ENTRY,
 )
 
 if TYPE_CHECKING:
@@ -21,15 +33,35 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ACTIVITY_CARD_POINTS",
+    "SHOP_ITEM_GONGHUI",
+    "SHOP_ITEM_QINGMEI",
+    "SHOP_ITEM_ZHANYI",
+    "SHOP_TAB_COPPER",
+    "SHOP_TAB_GOLD",
+    "SHOP_TAB_JINLAN",
+    "buy_shop_then_finish",
     "claim_gallery_then_finish",
     "draw_then_gallery",
     "finish_daily",
+    "gong_hui_step",
     "mail_claim_then_activity",
     "open_mail",
+    "zhan_yi_step",
+    "zhu_jiu_step",
 ]
 
 #: 活动卜卦：抽两张卡的位置（牌堆第一、第二张的中心）。
 ACTIVITY_CARD_POINTS = (Point(754, 579), Point(986, 579))
+
+#: 商店页签位置（黄金/铜钱/金兰）。
+SHOP_TAB_GOLD = Point(1306, 354)
+SHOP_TAB_COPPER = Point(1669, 354)
+SHOP_TAB_JINLAN = Point(2017, 354)
+
+#: 各商店里「名将册」等商品的大致位置（客户区固定）。
+SHOP_ITEM_QINGMEI = Point(525, 600)
+SHOP_ITEM_ZHANYI = Point(2050, 600)
+SHOP_ITEM_GONGHUI = Point(2050, 600)
 
 SETTLE = 0.9
 
@@ -65,7 +97,7 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
 
 
 def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
-    """丹青阁：点每日礼包；如果被购买弹窗挡住，先 Esc 再点。"""
+    """丹青阁：点每日礼包；关掉后开商店（下一段）。"""
     gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
     if not gift.ok:
         # 刚进来可能弹「丹青月令」购买；Esc 关掉后再找礼包
@@ -74,7 +106,74 @@ def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
     if not gift.ok:
         return ActionResult.not_found("丹青阁没找到「每日礼包」", template=T_GALLERY_GIFT)
     _esc(ctx, 2)
-    return ActionResult.success("每日礼包已领取", action="sequence")
+    # 回首页后点「商店」入口
+    return click_image(ctx, T_SHOP_ENTRY, confidence=0.9, settle=1.0)
+
+
+def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
+    """商店：黄金免费兵力 → 铜钱灵犀盒 → 金兰名将册 → 关。"""
+    actions.click_source_point(ctx.session, SHOP_TAB_GOLD)
+    ctx.sleep(0.6)
+    free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
+    if free.ok:
+        click_image(ctx, T_CONFIRM, settle=0.5)
+
+    actions.click_source_point(ctx.session, SHOP_TAB_COPPER)
+    ctx.sleep(0.6)
+    lingxi = click_image(ctx, T_LINGXI, settle=0.5)
+    if lingxi.ok:
+        click_image(ctx, T_MAX, settle=0.4)
+        click_image(ctx, T_CONFIRM, settle=0.6)
+    press(ctx, "esc", settle=0.5)
+
+    actions.click_source_point(ctx.session, SHOP_TAB_JINLAN)
+    ctx.sleep(0.6)
+    ming = click_image(ctx, T_MINGJIANG, settle=0.5)
+    if ming.ok:
+        click_image(ctx, T_CONFIRM, settle=0.6)
+    press(ctx, "esc", settle=0.5)
+    press(ctx, "esc", settle=0.6)
+    # 打开煮酒（下一段）
+    return click_image(ctx, T_ZHU_JIU_ENTRY, confidence=0.8, settle=1.0)
+
+
+def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
+    """煮酒 → 青梅商店 → 买一个 → 关两层 → 开战役。"""
+    shop = click_image(ctx, T_QINGMEI_ENTRY, settle=1.0)
+    if not shop.ok:
+        return ActionResult.not_found("煮酒没找到「青梅商店」", template=T_QINGMEI_ENTRY)
+    actions.click_source_point(ctx.session, SHOP_ITEM_QINGMEI)
+    ctx.sleep(0.5)
+    click_image(ctx, T_MAX, settle=0.4)
+    click_image(ctx, T_CONFIRM, settle=0.7)
+    _esc(ctx, 2)
+    return click_image(ctx, T_ZHAN_YI_ENTRY, settle=1.0)
+
+
+def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
+    """战役 → 战役商店 → 买一个 → 关两层 → 开公会。"""
+    shop = click_image(ctx, T_ZHANYI_SHOP_ENTRY, settle=1.0)
+    if not shop.ok:
+        return ActionResult.not_found("战役没找到「战役商店」", template=T_ZHANYI_SHOP_ENTRY)
+    actions.click_source_point(ctx.session, SHOP_ITEM_ZHANYI)
+    ctx.sleep(0.5)
+    click_image(ctx, T_MAX, settle=0.4)
+    click_image(ctx, T_CONFIRM, settle=0.7)
+    _esc(ctx, 2)
+    return click_image(ctx, T_GONG_HUI_ENTRY, settle=1.0)
+
+
+def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
+    """公会 → 商店 → 买一个 → 关两层 → 结束。"""
+    shop = click_image(ctx, T_GONGHUI_STORE_ENTRY, settle=1.0)
+    if not shop.ok:
+        return ActionResult.not_found("公会没找到「商店」入口", template=T_GONGHUI_STORE_ENTRY)
+    actions.click_source_point(ctx.session, SHOP_ITEM_GONGHUI)
+    ctx.sleep(0.5)
+    click_image(ctx, T_MAX, settle=0.4)
+    click_image(ctx, T_CONFIRM, settle=0.7)
+    _esc(ctx, 2)
+    return ActionResult.success("公会商店购买完成", action="sequence")
 
 
 def finish_daily(ctx: RunContext) -> ActionResult[Any]:

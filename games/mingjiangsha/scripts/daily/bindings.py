@@ -14,5 +14,9 @@ BINDINGS = NodeBindings(
         Binding("mail", "daily/mail"),
         Binding("activity", "daily/activity"),
         Binding("gallery", "daily/gallery"),
+        Binding("shop", "daily/shop"),
+        Binding("zhu_jiu", "daily/zhu_jiu"),
+        Binding("zhan_yi", "daily/zhan_yi"),
+        Binding("gong_hui", "daily/gong_hui"),
     )
 )

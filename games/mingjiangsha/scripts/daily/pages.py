@@ -9,8 +9,12 @@ from gamebot.types import Region
 from .templates import (
     T_ACTIVITY_STATE,
     T_GALLERY_STATE,
+    T_GONG_HUI_STATE,
     T_HOME,
     T_MAIL_STATE,
+    T_SHOP_STATE,
+    T_ZHAN_YI_STATE,
+    T_ZHU_JIU_STATE,
 )
 
 __all__ = ["FEATURE_TREE"]
@@ -19,6 +23,10 @@ HOME_ROI = Region(2380, 190, 180, 180)
 MAIL_ROI = Region(250, 210, 220, 180)
 ACTIVITY_ROI = Region(20, 0, 260, 120)
 GALLERY_ROI = Region(20, 0, 320, 120)
+SHOP_ROI = Region(1420, 180, 260, 140)
+ZHU_JIU_ROI = Region(0, 0, 300, 140)
+ZHAN_YI_ROI = Region(0, 0, 300, 140)
+GONG_HUI_ROI = Region(0, 0, 400, 140)
 
 
 FEATURE_TREE = PageGroup(
@@ -43,6 +51,30 @@ FEATURE_TREE = PageGroup(
             name="活动",
             queries=(ImageQuery(T_ACTIVITY_STATE, region=ACTIVITY_ROI),),
             description="活动：今日卦象（抽两张卡）",
+        ),
+        PageLeaf(
+            "daily/zhu_jiu",
+            name="煮酒",
+            queries=(ImageQuery(T_ZHU_JIU_STATE, region=ZHU_JIU_ROI),),
+            description="煮酒：青梅商店入口",
+        ),
+        PageLeaf(
+            "daily/zhan_yi",
+            name="战役",
+            queries=(ImageQuery(T_ZHAN_YI_STATE, region=ZHAN_YI_ROI),),
+            description="战役：战役商店入口",
+        ),
+        PageLeaf(
+            "daily/gong_hui",
+            name="公会",
+            queries=(ImageQuery(T_GONG_HUI_STATE, region=GONG_HUI_ROI),),
+            description="我的公会：商店入口",
+        ),
+        PageLeaf(
+            "daily/shop",
+            name="商店",
+            queries=(ImageQuery(T_SHOP_STATE, region=SHOP_ROI),),
+            description="商店：黄金/碎银/铜钱/金兰/金铺",
         ),
         PageLeaf(
             "daily/gallery",
