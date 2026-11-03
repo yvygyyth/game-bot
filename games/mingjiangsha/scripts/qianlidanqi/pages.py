@@ -106,9 +106,6 @@ MAP_ICON_ROI = Region(2430, 507, 100, 110)
 #: 地图上可以点的节点区域（旧脚本的 CHOICE_REGION）。
 NODE_REGION = Region(800, 327, 1630, 780)
 
-#: 点节点后的「开始对局」。
-START_BATTLE_ROI = Region(660, 1040, 540, 300)
-
 #: 赠礼第一屏标题。
 GIFT_TITLE_ROI = Region(950, 1142, 640, 95)
 
@@ -213,9 +210,7 @@ FEATURE_TREE = PageGroup(
                         PageLeaf(
                             "qianli/pre_battle",
                             name="局内 · 战斗预览",
-                            queries=(
-                                ImageQuery(T_START_BATTLE, region=START_BATTLE_ROI),
-                            ),
+                            queries=(ImageQuery(T_START_BATTLE),),
                             description="点节点后的战斗预览：开始对局 / 再想一想",
                         ),
                         PageLeaf(

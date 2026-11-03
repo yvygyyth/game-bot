@@ -15,7 +15,7 @@ from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.utils import click_pattern_confirm
 
-from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
+from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI
 from ..store import (
     RewardKind,
     get_run_state,
@@ -267,12 +267,10 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     先按 404x107 的整按钮模板点（实测 1.0）；失败再用通用确认
     （金色花纹按钮，只认边框、不认文字）。
     """
-    clicked = click_image(
-        ctx, T_START_BATTLE, region=START_BATTLE_ROI, confidence=0.9, settle=1.2
-    )
+    clicked = click_pattern_confirm(ctx, settle=1.2)
     if clicked.ok:
         return clicked
-    return click_pattern_confirm(ctx, START_BATTLE_ROI, settle=1.2)
+    return click_image(ctx, T_START_BATTLE, confidence=0.9, settle=1.2)
 
 
 def run_battle(ctx: RunContext) -> ActionResult[Any]:
