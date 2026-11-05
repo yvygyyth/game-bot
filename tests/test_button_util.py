@@ -14,7 +14,7 @@ from gamebot.exceptions import ConfigError
 from gamebot.types import Point, Region
 from games.mingjiangsha.utils import click_button, find_buttons, folder_templates
 
-FOLDER = "shadowConfirm"
+FOLDER = "gold_glow"
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ class TestFolderTemplates:
         with pytest.raises(ConfigError) as excinfo:
             folder_templates(button_ctx, "shadowConfrim")  # 故意拼错
         message = str(excinfo.value)
-        assert "shadowConfirm" in message, "报错里要列出可用的家族名"
+        assert "gold_glow" in message, "报错里要列出可用的家族名"
 
     def test_template_names_carry_the_folder_prefix(self, button_ctx) -> None:
         """运行时按相对名在"功能级/游戏级"两个根里找，所以名字必须带家族目录。"""

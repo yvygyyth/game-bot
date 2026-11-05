@@ -14,8 +14,8 @@
 | `fight/hand` | :func:`advance_fight` | 取消换牌 → 麻花结 → 投降 → 确认 |
 | `fight/victory` | :func:`finish_round` | 点空白区 → 下一步 → 确认（+ 记一局） |
 
-> 按钮点击走**四种家族方法**（``click_shadow_confirm`` / ``click_pattern_confirm``
-> / ``click_shadow_cancel`` / ``click_qj_next``），只比**边框环**、不认文字，
+> 按钮点击走**四种家族方法**（``click_gold_glow`` / ``click_gold_frame``
+> / ``click_cyan_glow`` / ``click_blue_frame``），只比**边框环**、不认文字，
 > 所以步骤里不再为每句文案单独裁图。仍保留文字模板的两处是
 > "等它出现再点"的 `wait_for`（下一步 / 投降序列）—— 那里的重点是**等待**。
 

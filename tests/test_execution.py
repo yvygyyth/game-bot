@@ -351,7 +351,7 @@ class TestJingjiStepsUseTheSharedHelpers:
     SIZE = (2560, 1369)
 
     #: 按钮家族模板名（游戏级）。``click_button`` 按家族找，不再用功能级文字模板。
-    FAMILY_TEMPLATE = "shadowConfirm/before_create.png"
+    FAMILY_TEMPLATE = "gold_glow/before_create.png"
 
     def _make_ctx(self, tmp_path, matcher):
         from gamebot.atomic.backends.fake import build_fake_backends

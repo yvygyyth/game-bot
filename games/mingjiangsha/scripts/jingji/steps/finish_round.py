@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 1 | `zhandou5` | 「点击空白区域到下一步」 | 找 ``T_FIGHT_SPACE``（**提示文字本身**） |
 | 2 | `zhandou6` | 「下一步」 | 模板 ``T_FIGHT_NEXT``（等它出现再点） |
-| 3 | `zhandou7` | 「确认」 | 公共方法 ``click_button(patternConfirm)``（只比边框环） |
+| 3 | `zhandou7` | 「确认」 | 公共方法 ``click_button(gold_frame)``（只比边框环） |
 
 ## 第 1 步为什么从固定坐标改成找图
 
@@ -37,7 +37,7 @@
 
 ## 「确认」为什么用公共方法
 
-「确认」和选将的「确定」、竞技场的「开始匹配」是同一种花纹按钮（`patternConfirm`），
+「确认」和选将的「确定」、竞技场的「开始匹配」是同一种花纹按钮（`gold_frame`），
 所以走 :func:`games.mingjiangsha.utils.click_button`：只比边框环、不认文字，
 换文案不用重裁图。结算页上只有这一个同类按钮，`pick="only"` 足够。
 
@@ -54,7 +54,7 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, wait_for
 from gamebot.types import ActionResult, Region
-from games.mingjiangsha.templates import BUTTON_PATTERN_CONFIRM
+from games.mingjiangsha.templates import BUTTON_GOLD_FRAME
 from games.mingjiangsha.utils import click_button
 
 from ..form import ROUNDS_PARAM
@@ -106,11 +106,11 @@ def finish_round(ctx: RunContext) -> ActionResult[Any]:
 
     # ---- 3. 点结算页的「确认」----
     # 走公共方法（只比边框环）：「确认」和选将的「确定」、竞技场的「开始匹配」
-    # 同属 patternConfirm 家族，换文案不用重裁图。
+    # 同属 gold_frame 家族，换文案不用重裁图。
     # 全图找。提速时加 region= —— 结算页的「确认」在**底部中间**
     # （客户区约 x 1200~1445, y 1250~1315）。
     confirmed = click_button(
-        ctx, BUTTON_PATTERN_CONFIRM, CONFIRM_REGION, settle=FIGHT_NEXT_SETTLE
+        ctx, BUTTON_GOLD_FRAME, CONFIRM_REGION, settle=FIGHT_NEXT_SETTLE
     )
     if not confirmed.ok:
         return confirmed

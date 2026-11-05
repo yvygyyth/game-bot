@@ -24,7 +24,7 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 | `qianli/rest` | 「安营驻寨」标题 | `choose_rest`：随便点一个选项（457,1150）→ 回地图 |
 | `qianli/pocket/choice` | 「三顾茅庐」标题 | `choose_pocket`：三个选项随机点一个；可能还在本屏/到确认/直接进战斗 |
 | `qianli/pocket/confirm` | 确认按钮 | `confirm_pocket`：点确认 → 地图/战斗/下一个锦囊 |
-| `qianli/event/intro` | 「再想一想」按钮 | `enter_event`：点金色「选择事件/选择武将」（`click_pattern_confirm`，只认边框） |
+| `qianli/event/intro` | 「再想一想」按钮 | `enter_event`：点金色「选择事件/选择武将」（`click_gold_frame`，只认边框） |
 | `qianli/event/choice` | 顶部「偶遇朏朏」 | `choose_event_option`：按妃妃优先级选一行（我来帮你 > 讨价还价） |
 | `qianli/event/shi_chang` | 「请选择一项蛊惑」 | `trigger_shi_battle`：点左边人物插画 5 次 → 战斗彩蛋 |
 | `qianli/event/zhuge` | 「占星术士」 | `do_zhuge`：中间卡点两次（间隔 2s）→ 请点击继续 → 点任意处回地图 |

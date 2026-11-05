@@ -171,3 +171,14 @@ class TestRankTokenSlots:
 
     def test_empty_or_unknown(self) -> None:
         assert rank_token_slots(["", "飞仙髻", "虞姬"]) == []
+
+
+class TestDianlun:
+    def test_dianlun_is_in_priority(self) -> None:
+        from games.mingjiangsha.scripts.qianlidanqi.store.rewards import TOKEN_PRIORITY
+
+        assert "典论" in TOKEN_PRIORITY
+
+    def test_rank_includes_dianlun(self) -> None:
+        # 行囊 在 典论 之前
+        assert rank_token_slots(["典论", "行囊", "白狼"]) == [(1, "行囊"), (0, "典论")]

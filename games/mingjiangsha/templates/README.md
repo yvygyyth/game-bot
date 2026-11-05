@@ -4,16 +4,16 @@
 
 ```
 games/mingjiangsha/scripts/<功能>/templates/   ← 先找（可以覆盖同名图）
-games/mingjiangsha/templates/                  ← 再找（公共图）
+games/mingjiangsha/templates/                   ← 再找（公共按钮花纹）
 ```
 
 ## 按钮：**一个文件夹 = 一种按钮**
 
 ```
-templates/shadowConfirm/     金色发光按钮：创建队伍 / 添加伙伴 / 确定 / 投降确认 …
-templates/patternConfirm/    金色花纹边框的大按钮：确定 / 开始匹配 / 开始对局 / 结算确认 …
-templates/shadowCancel/      青色发光按钮：取消
-templates/QJ/                蓝底金框按钮：下一步
+templates/gold_glow/     金色发光按钮：创建队伍 / 添加伙伴 / 确定 / 投降确认 …
+templates/gold_frame/    金色花纹边框的大按钮：确定 / 开始匹配 / 开始对局 / 结算确认 …
+templates/cyan_glow/      青色发光按钮：取消
+templates/blue_frame/                蓝底金框按钮：下一步
 ```
 
 > 同一家族里放的是**这种按钮的各种文字版本**（尺寸不同就再各存一张）。
@@ -24,16 +24,16 @@ templates/QJ/                蓝底金框按钮：下一步
 
 ```python
 from games.mingjiangsha.utils import (
-    click_pattern_confirm,
-    click_qj_next,
-    click_shadow_cancel,
-    click_shadow_confirm,
+    click_gold_frame,
+    click_blue_frame,
+    click_cyan_glow,
+    click_gold_glow,
 )
 
-click_shadow_confirm(ctx)    # 金色发光：创建队伍 / 添加伙伴 / 确定 / 投降确认
-click_pattern_confirm(ctx)   # 金色花纹大按钮：选将确定 / 开始匹配 / 结算确认
-click_shadow_cancel(ctx)     # 青色：取消
-click_qj_next(ctx)           # 蓝底金框：下一步
+click_gold_glow(ctx)    # 金色发光：创建队伍 / 添加伙伴 / 确定 / 投降确认
+click_gold_frame(ctx)   # 金色花纹大按钮：选将确定 / 开始匹配 / 结算确认
+click_cyan_glow(ctx)     # 青色：取消
+click_blue_frame(ctx)           # 蓝底金框：下一步
 ```
 
 > 底层还有通用的 `click_button(ctx, 家族名)`：给"确实要按名字动态选"的场合用
@@ -99,13 +99,13 @@ for 这个家族的每一张图:
 
 | 截图 | 家族 | 命中 | 分数 |
 |---|---|---|---|
-| `tip1.png` | `shadowConfirm` | **1**（确定） | 0.991 |
-| `tip1.png` | `shadowCancel` | **1**（取消） | 0.996 |
-| `jingji1.png` | `shadowConfirm` | **1**（创建队伍） | 0.998 |
-| `jingji2.png` | `shadowConfirm` | **1**（添加伙伴） | 0.997 |
-| `select2.png` | `patternConfirm` | **1**（确定） | 0.993 |
-| `zhandou6.png` | `QJ` | **1**（下一步） | 0.997 |
-| `zhandou7.png` | `QJ` | **1** | 0.997 |
+| `tip1.png` | `gold_glow` | **1**（确定） | 0.991 |
+| `tip1.png` | `cyan_glow` | **1**（取消） | 0.996 |
+| `jingji1.png` | `gold_glow` | **1**（创建队伍） | 0.998 |
+| `jingji2.png` | `gold_glow` | **1**（添加伙伴） | 0.997 |
+| `select2.png` | `gold_frame` | **1**（确定） | 0.993 |
+| `zhandou6.png` | `blue_frame` | **1**（下一步） | 0.997 |
+| `zhandou7.png` | `blue_frame` | **1** | 0.997 |
 | `home / jingji3 / zhandou2,3,5` | 各家族 | **0**（画面里没有这类按钮） | 0.00 |
 
 阈值取 **0.90**（正例 ≥0.99，反例 ≤0.83）。
@@ -124,7 +124,7 @@ for 这个家族的每一张图:
 
 ## 原始素材
 
-`shadowConfirm/` 等目录里的图**同时**是运行期模板和重裁素材 ——
+`gold_glow/` 等目录里的图**同时**是运行期模板和重裁素材 ——
 换分辨率/改版后，从这里挑一张重新裁即可。界面选脚本时的检查会把它们归到
 "游戏级另有 N 张没被 `T_*` 声明（按钮家族按文件夹约定使用，不算错）"，
 只有**功能级**里没声明的图才会被当成"该删的旧图"列出来。

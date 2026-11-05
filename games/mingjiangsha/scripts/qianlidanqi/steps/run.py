@@ -13,7 +13,7 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
-from games.mingjiangsha.utils import click_pattern_confirm
+from games.mingjiangsha.utils import click_gold_frame
 
 from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI
 from ..store import (
@@ -271,7 +271,7 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     # 先精确模板（单张匹配快、实测 1.0）；失败再走通用确认（全屏多模板，慢）
     clicked = click_image(ctx, T_START_BATTLE, confidence=0.9, settle=0.6)
     if not clicked.ok:
-        clicked = click_pattern_confirm(ctx, settle=0.6)
+        clicked = click_gold_frame(ctx, settle=0.6)
     if clicked.ok:
         # 等战斗界面出现（右上角菜单），别让引擎把加载态当成"认不出来"等 5 秒
         wait_for(ctx, ImageQuery(T_FIGHT_MENU), timeout=8.0)
@@ -279,7 +279,7 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
 
 
 def run_battle(ctx: RunContext) -> ActionResult[Any]:
-    """战斗内：取消换牌 → 点托管 → 等结束 → 点下一步。"""
+    """战斗内：取消换牌 → 开菜单点托管 → 等结束 → 点下一步。"""
     # 先把鼠标移到左上角：hover 提示框可能正好盖住「取消」
     actions.move_to(ctx.session, Point(20, 20), duration=0.1)
     ctx.sleep(0.2)
@@ -289,30 +289,49 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
     if cancel.ok and cancel.value is not None:
         actions.click_source_point(ctx.session, cancel.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.3)
+        # 点完取消会有一段遮罩/变暗过渡，等它亮回来（短，但比 0.3s 长）
+        ctx.sleep(1.2)
 
-    # ---- 2. 先点右上角菜单，再点菜单里的「托管」----
-    menu = ctx.frame().find_image(T_FIGHT_MENU)
-    if menu.ok and menu.value is not None:
-        actions.click_source_point(ctx.session, menu.value)
-        ctx.invalidate_frame()
-        ctx.sleep(0.3)
+    # ---- 2. 菜单可能已经开着，也可能要自己点开 ----
+    auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
+    auto = None if auto_off.ok else ctx.frame().find_image(T_FIGHT_AUTO)
 
-    already = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
-    if not already.ok:
-        auto = ctx.frame().find_image(T_FIGHT_AUTO)
-        if auto.ok and auto.value is not None:
-            actions.click_source_point(ctx.session, auto.value)
+    opened_menu = False
+    if not auto_off.ok and (auto is None or not auto.ok):
+        menu = ctx.frame().find_image(T_FIGHT_MENU)
+        if menu.ok and menu.value is not None:
+            actions.click_source_point(ctx.session, menu.value)
+            opened_menu = True
             ctx.invalidate_frame()
-            ctx.sleep(0.3)
+            # 菜单展开也有一段变暗动画；等亮，再找不到就再等一次
+            ctx.sleep(1.5)
+            auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
+            if not auto_off.ok:
+                auto = ctx.frame().find_image(T_FIGHT_AUTO)
+            if not auto_off.ok and (auto is None or not auto.ok):
+                ctx.invalidate_frame()
+                ctx.sleep(1.0)
+                auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
+                if not auto_off.ok:
+                    auto = ctx.frame().find_image(T_FIGHT_AUTO)
 
-    # 菜单还开着（还能看到托管/取消托管）就点菜单图标关掉；已经托管则不点，免得关掉
-    still_on = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
-    still_off = ctx.frame().find_image(T_FIGHT_AUTO)
-    if (already.ok or still_on.ok or still_off.ok) and menu.ok and menu.value is not None:
-        actions.click_source_point(ctx.session, menu.value)
+    if not auto_off.ok and auto is not None and auto.ok and auto.value is not None:
+        actions.click_source_point(ctx.session, auto.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.3)
+        ctx.sleep(0.6)
+        # 第一次可能点在展开动画上没生效：菜单还开着且仍显示「托管」，就再点一次
+        still = ctx.frame().find_image(T_FIGHT_AUTO)
+        if still.ok and still.value is not None:
+            actions.click_source_point(ctx.session, still.value)
+            ctx.invalidate_frame()
+            ctx.sleep(0.4)
+    elif opened_menu and auto_off.ok:
+        # 已经托管，不点托管；菜单是我们打开的，点菜单关掉
+        menu = ctx.frame().find_image(T_FIGHT_MENU)
+        if menu.ok and menu.value is not None:
+            actions.click_source_point(ctx.session, menu.value)
+            ctx.invalidate_frame()
+            ctx.sleep(0.4)
 
     # ---- 3. 等「点击空白区域到下一步」----
     ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
@@ -398,31 +417,23 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
 def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
     """巴清商店：按 TOKEN_PRIORITY 买**所有**够钱/在优先表里的信物，再退出。
 
-    商品是随机的，一屏可能 0~3 个在优先表里；所以每买一个就重新 OCR 一次，
-    最多买 3 个。钱不够（灰的）点了不弹「购买」，跳过继续看下一个。
+    商品是随机的，一屏最多 3 个信物。这里只 OCR **一次**，把三个槽位排好序
+    逐个点（买完的槽位会变“已售罄”，位置不变）；钱不够/已售罄点了不弹购买，
+    跳过下一个。之前每买一个就重 OCR 一遍，是这步慢的主因。
     """
+    titles: list[str] = []
+    for region in SHOP_TOKEN_TITLE_REGIONS:
+        read = ctx.frame().read_text(region)
+        titles.append(read.value if read.ok and read.value is not None else "")
+
     bought: list[str] = []
-    tried: set[int] = set()
-
-    for _ in range(3):
-        titles: list[str] = []
-        for region in SHOP_TOKEN_TITLE_REGIONS:
-            read = ctx.frame().read_text(region)
-            titles.append(read.value if read.ok and read.value is not None else "")
-
-        ranked = rank_token_slots(titles)
-        candidate = next(((slot, name) for slot, name in ranked if slot not in tried), None)
-        if candidate is None:
-            break
-        slot, name = candidate
-        tried.add(slot)
-
+    for slot, name in rank_token_slots(titles):
         point = SHOP_TOKEN_POINTS[min(slot, len(SHOP_TOKEN_POINTS) - 1)]
         picked = actions.click_source_point(ctx.session, point)
         if not picked.ok:
             return picked
         ctx.invalidate_frame()
-        ctx.sleep(0.6)
+        ctx.sleep(0.3)
 
         # 钱够才会弹「购买」；钱不够/已售罄，点完什么都没发生。
         buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
@@ -433,14 +444,14 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
             return clicked
         bought.append(name)
         ctx.invalidate_frame()
-        ctx.sleep(0.8)
+        ctx.sleep(0.5)
 
     # ---- 退出商店：右上角箭头 → 是否结束购买？→ 确认 ----
     exit_btn = ctx.frame().find_image(T_SHOP_EXIT)
     if exit_btn.ok and exit_btn.value is not None:
         actions.click_source_point(ctx.session, exit_btn.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.7)
+        ctx.sleep(0.4)
 
     prompt = ctx.frame().find_image(T_SHOP_EXIT_PROMPT)
     if prompt.ok:
@@ -448,10 +459,10 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
         if confirm.ok and confirm.value is not None:
             actions.click_source_point(ctx.session, confirm.value)
             ctx.invalidate_frame()
-            ctx.sleep(0.8)
+            ctx.sleep(0.5)
 
     return ActionResult.success(
-        "巴清商店处理完成", action="sequence", bought=bought, count=len(bought)
+        "巴清商店处理完成", action="sequence", bought=bought, count=len(bought), titles=titles
     )
 
 
@@ -483,7 +494,7 @@ def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
 
 def enter_event(ctx: RunContext) -> ActionResult[Any]:
     """奇遇介绍页：点左边金色按钮（选择事件/选择武将，按边框认，不认文字）。"""
-    return click_pattern_confirm(ctx, EVENT_ENTER_REGION, settle=0.8)
+    return click_gold_frame(ctx, EVENT_ENTER_REGION, settle=0.8)
 
 
 def choose_event_option(ctx: RunContext) -> ActionResult[Any]:

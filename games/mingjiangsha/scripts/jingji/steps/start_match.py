@@ -1,7 +1,7 @@
 """推进队伍流程：创建队伍 → 添加伙伴 → 开始匹配。
 
-按钮点击各走**对应家族的方法**（:func:`~games.mingjiangsha.utils.click_shadow_confirm`
-/ :func:`~games.mingjiangsha.utils.click_pattern_confirm`）：底层只比**边框环**、
+按钮点击各走**对应家族的方法**（:func:`~games.mingjiangsha.utils.click_gold_glow`
+/ :func:`~games.mingjiangsha.utils.click_gold_frame`）：底层只比**边框环**、
 不认中间文字，所以换文案不用重裁图。
 
 ## 提示框不在这里了
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from gamebot.execution.builtins import click_image
 from gamebot.types import ActionResult, Region
-from games.mingjiangsha.utils import click_pattern_confirm, click_shadow_confirm
+from games.mingjiangsha.utils import click_gold_frame, click_gold_glow
 
 from ..templates import T_TIP_CHECK
 
@@ -48,7 +48,7 @@ TIP_CONFIRM_REGION = Region(930, 880, 330, 150)
 
 def create_team(ctx: RunContext) -> ActionResult[object]:
     """建队前：点「创建队伍」。"""
-    return click_shadow_confirm(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
+    return click_gold_glow(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
 
 
 def add_pet(ctx: RunContext) -> ActionResult[object]:
@@ -57,7 +57,7 @@ def add_pet(ctx: RunContext) -> ActionResult[object]:
     和「创建队伍」同一个位置、同一个家族（只有文字不同）——
     公共方法只比边框，所以它俩共用一套模板。
     """
-    return click_shadow_confirm(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
+    return click_gold_glow(ctx, TEAM_BUTTON_REGION, settle=CLICK_SETTLE)
 
 
 def start_match(ctx: RunContext) -> ActionResult[object]:
@@ -66,7 +66,7 @@ def start_match(ctx: RunContext) -> ActionResult[object]:
     之后弹不弹提示框由**状态**说了算（`tip/unchecked` / `tip/checked`），
     流程图会自己分流 —— 这个步骤不猜、不等待。
     """
-    return click_pattern_confirm(ctx, START_MATCH_REGION, settle=0.8)
+    return click_gold_frame(ctx, START_MATCH_REGION, settle=0.8)
 
 
 def check_tip(ctx: RunContext) -> ActionResult[object]:
@@ -81,6 +81,6 @@ def confirm_tip(ctx: RunContext) -> ActionResult[object]:
     """提示框 · 已勾：点「确定」。
 
     「确定」和别的金色确认按钮同家族，所以直接用
-    :func:`~games.mingjiangsha.utils.click_shadow_confirm`。
+    :func:`~games.mingjiangsha.utils.click_gold_glow`。
     """
-    return click_shadow_confirm(ctx, TIP_CONFIRM_REGION, settle=0.8)
+    return click_gold_glow(ctx, TIP_CONFIRM_REGION, settle=0.8)

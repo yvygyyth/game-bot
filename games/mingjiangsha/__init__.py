@@ -8,21 +8,21 @@ from __future__ import annotations
 
 from .scripts import jingji
 from .utils import (
+    click_blue_frame,
     click_button,
-    click_pattern_confirm,
-    click_qj_next,
-    click_shadow_cancel,
-    click_shadow_confirm,
+    click_cyan_glow,
+    click_gold_frame,
+    click_gold_glow,
     find_buttons,
     go_back,
 )
 
 __all__ = [
+    "click_blue_frame",
     "click_button",
-    "click_pattern_confirm",
-    "click_qj_next",
-    "click_shadow_cancel",
-    "click_shadow_confirm",
+    "click_cyan_glow",
+    "click_gold_frame",
+    "click_gold_glow",
     "find_buttons",
     "go_back",
     "jingji",

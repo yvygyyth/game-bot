@@ -32,13 +32,13 @@ CONFIDENCE = 0.90
 
 #: ``(截图, 家族, 该命中哪张图, 分数下限)``
 CASES = [
-    ("tip1.png", "shadowConfirm", "ok.png", 0.95),
-    ("tip1.png", "shadowCancel", "cancel.png", 0.95),
-    ("jingji1.png", "shadowConfirm", "before_create.png", 0.95),
-    ("jingji2.png", "shadowConfirm", "after_create.png", 0.95),
-    ("select2.png", "patternConfirm", "ok1.png", 0.95),
-    ("zhandou6.png", "QJ", "qj1.png", 0.95),
-    ("zhandou7.png", "QJ", "qj2.png", 0.95),
+    ("tip1.png", "gold_glow", "ok.png", 0.95),
+    ("tip1.png", "cyan_glow", "cancel.png", 0.95),
+    ("jingji1.png", "gold_glow", "before_create.png", 0.95),
+    ("jingji2.png", "gold_glow", "after_create.png", 0.95),
+    ("select2.png", "gold_frame", "ok1.png", 0.95),
+    ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
+    ("zhandou7.png", "blue_frame", "qj2.png", 0.95),
 ]
 
 
@@ -101,8 +101,8 @@ class TestFamiliesOnRealScreens:
         这正是"一个文件夹一种按钮"的价值：想点确定就不会点到取消。
         """
         image = _screenshot(screenshots, "tip1.png")
-        assert len(_family_hits(matcher, image, "shadowConfirm")) == 1
-        assert len(_family_hits(matcher, image, "shadowCancel")) == 1
+        assert len(_family_hits(matcher, image, "gold_glow")) == 1
+        assert len(_family_hits(matcher, image, "cyan_glow")) == 1
 
 
 class TestFamiliesAreDistinct:
@@ -113,13 +113,13 @@ class TestFamiliesAreDistinct:
         ``TestRingMatching``。这条留着的价值是：说明"整块比"本身是精确的，
         换文字失配不是 bug，是特性。
         """
-        base = cv2.imread(str(GAME / "shadowConfirm" / "before_create.png"))
+        base = cv2.imread(str(GAME / "gold_glow" / "before_create.png"))
         assert base is not None
 
         for other in ("after_create.png", "ok.png"):
             hits = matcher.match_all(
                 base,
-                f"shadowConfirm/{other}",
+                f"gold_glow/{other}",
                 confidence=CONFIDENCE,
                 min_distance=10,
             )
@@ -144,7 +144,7 @@ class TestEndToEndOnARealScreenshot:
         from gamebot.config.schema import RunPaths
         from gamebot.context import RunContext
         from gamebot.types import Region
-        from games.mingjiangsha.templates import BUTTON_SHADOW_CONFIRM
+        from games.mingjiangsha.templates import BUTTON_GOLD_GLOW
         from games.mingjiangsha.utils import click_button
 
         image = _screenshot(screenshots, "tip1.png")
@@ -158,7 +158,7 @@ class TestEndToEndOnARealScreenshot:
             # 只框住提示框底部（确定 / 取消那一行）；真实脚本里这个 ROI 来自弹窗位置
             result = click_button(
                 ctx,
-                BUTTON_SHADOW_CONFIRM,
+                BUTTON_GOLD_GLOW,
                 Region(900, 880, 480, 140),
             )
         finally:
@@ -175,13 +175,13 @@ class TestEndToEndOnARealScreenshot:
     def test_it_does_not_click_cancel_when_asked_for_confirm(
         self, screenshots: dict[str, np.ndarray], tmp_path: Path
     ) -> None:
-        """同一个 ROI 里取消/确定都在 —— 请求 shadowConfirm 就不该点到取消。"""
+        """同一个 ROI 里取消/确定都在 —— 请求 gold_glow 就不该点到取消。"""
         from gamebot.atomic.backends.fake import build_fake_backends
         from gamebot.atomic.session import BaseSession
         from gamebot.config.schema import RunPaths
         from gamebot.context import RunContext
         from gamebot.types import Region
-        from games.mingjiangsha.templates import BUTTON_SHADOW_CONFIRM
+        from games.mingjiangsha.templates import BUTTON_GOLD_GLOW
         from games.mingjiangsha.utils import click_button
 
         image = _screenshot(screenshots, "tip1.png")
@@ -192,7 +192,7 @@ class TestEndToEndOnARealScreenshot:
         )
         ctx = RunContext(session, name="mingjiangsha/jingji", paths=RunPaths.under(tmp_path))
         try:
-            result = click_button(ctx, BUTTON_SHADOW_CONFIRM, Region(900, 880, 700, 140))
+            result = click_button(ctx, BUTTON_GOLD_GLOW, Region(900, 880, 700, 140))
         finally:
             ctx.close()
 
@@ -209,7 +209,7 @@ class TestRingMatching:
         image = _screenshot(screenshots, "jingji2.png")   # 这里是「添加伙伴」
         hits = matcher.match_all(
             image,
-            "shadowConfirm/before_create.png",            # 模板是「创建队伍」
+            "gold_glow/before_create.png",            # 模板是「创建队伍」
             confidence=CONFIDENCE,
             min_distance=30,
         )
@@ -237,9 +237,9 @@ class TestRingMatching:
             # 模板是「创建队伍」，画面上是「添加伙伴」—— 文字不同、尺寸相同
             hits = find_buttons(
                 ctx,
-                "shadowConfirm",
+                "gold_glow",
                 Region(2100, 800, 420, 200),
-                templates=["shadowConfirm/before_create.png"],
+                templates=["gold_glow/before_create.png"],
             )
         finally:
             ctx.close()
@@ -258,13 +258,13 @@ class TestRingMatching:
         from games.mingjiangsha.utils import ring_mask
 
         image = _screenshot(screenshots, "jingji2.png")
-        tpl = cv2.imread(str(GAME / "shadowConfirm" / "ok.png"))
+        tpl = cv2.imread(str(GAME / "gold_glow" / "ok.png"))
         assert tpl is not None
         mask = ring_mask(tpl.shape[:2], inset=4, width=12)
 
         hits = matcher.match_all(
             image,
-            "shadowConfirm/ok.png",
+            "gold_glow/ok.png",
             confidence=CONFIDENCE,
             min_distance=30,
             mask=mask,
@@ -273,13 +273,13 @@ class TestRingMatching:
 
 #: 只比边框环的实测表（截图, 家族, 模板, 分数下限）
 RING_CASES = [
-    ("tip1.png", "shadowConfirm", "ok.png", 0.95),
-    ("tip1.png", "shadowCancel", "cancel.png", 0.95),
-    ("jingji1.png", "shadowConfirm", "before_create.png", 0.95),
-    ("jingji2.png", "shadowConfirm", "after_create.png", 0.95),
-    ("select2.png", "patternConfirm", "ok1.png", 0.95),
-    ("zhandou6.png", "QJ", "qj1.png", 0.95),
-    ("zhandou7.png", "QJ", "qj2.png", 0.95),
+    ("tip1.png", "gold_glow", "ok.png", 0.95),
+    ("tip1.png", "cyan_glow", "cancel.png", 0.95),
+    ("jingji1.png", "gold_glow", "before_create.png", 0.95),
+    ("jingji2.png", "gold_glow", "after_create.png", 0.95),
+    ("select2.png", "gold_frame", "ok1.png", 0.95),
+    ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
+    ("zhandou7.png", "blue_frame", "qj2.png", 0.95),
 ]
 
 
@@ -325,9 +325,9 @@ class TestRingTable:
 
         image = _screenshot(screenshots, shot)
         for folder, template in (
-            ("shadowConfirm", "before_create.png"),
-            ("shadowCancel", "cancel.png"),
-            ("QJ", "qj1.png"),
+            ("gold_glow", "before_create.png"),
+            ("cyan_glow", "cancel.png"),
+            ("blue_frame", "qj1.png"),
         ):
             tpl = cv2.imread(str(GAME / folder / template))
             assert tpl is not None

@@ -1,58 +1,52 @@
-"""名将杀 —— **游戏级公共模板**（多个脚本共用）。
+"""名将杀 —— **游戏级公共按钮花纹**。
 
-放"换个脚本还是那张图"的东西。查找顺序是**功能级优先、这里兜底**
-（见 ``bootstrap.build_matcher`` 的 ``fallback_dirs``），所以功能级可以放同名图覆盖。
-
-## 按钮：**一个文件夹 = 一种按钮**
+一个文件夹 = 一种花纹；同一花纹的不同**文字/尺寸/底色版本**都放进去：
 
 ```
-templates/<家族>/*.png     ← 这个家族的**所有文字版本**都放进来
+templates/gold_glow/    金色发光
+templates/gold_frame/   金色花纹边框
+templates/cyan_glow/    青色发光
+templates/blue_frame/   蓝底金框
 ```
 
-同一家族里，不同文字版本（创建队伍 / 添加伙伴 / 确定…）**同一个位置只会出现一个**，
-所以"把家族里每张都试一遍，谁命中就点谁"不会歧义。调用方只关心**哪种按钮**：
+调用方只用四个方法，**不用关心按钮位置、尺寸、文案**：
 
 ```python
-from games.mingjiangsha.utils import click_button
-from games.mingjiangsha.templates import BUTTON_SHADOW_CONFIRM
+from games.mingjiangsha.utils import click_blue_frame
 
-click_button(ctx, BUTTON_SHADOW_CONFIRM)      # 金色确认按钮，具体是哪句字无所谓
+click_blue_frame(ctx)   # 蓝底金框的「下一步」，具体哪句字/多大都无所谓
 ```
 
-加一种文字版本**不用改代码**：把这个按钮的截图裁下来丢进对应文件夹即可。
-加一种**新按钮**：新建一个文件夹，调用时把文件夹名传进去。
-
-现有家族见 :data:`BUTTON_FOLDERS`。
+加一种文字/尺寸版本不用改代码：把截图裁下来丢进对应文件夹即可。
+查找顺序：功能级模板优先，这里兜底。
 """
 
 from __future__ import annotations
 
 __all__ = [
+    "BUTTON_BLUE_FRAME",
+    "BUTTON_CYAN_GLOW",
     "BUTTON_FOLDERS",
-    "BUTTON_PATTERN_CONFIRM",
-    "BUTTON_QJ_NEXT",
-    "BUTTON_SHADOW_CANCEL",
-    "BUTTON_SHADOW_CONFIRM",
+    "BUTTON_GOLD_FRAME",
+    "BUTTON_GOLD_GLOW",
 ]
 
-# ---- 按钮家族（相对 games/<游戏>/templates/ 的目录名）----
+#: 金色发光按钮：创建队伍 / 添加伙伴 / 确定…
+BUTTON_GOLD_GLOW = "gold_glow"
 
-#: 金色发光按钮：创建队伍 / 添加伙伴 / 确定…（最常用的一种"确认"）
-BUTTON_SHADOW_CONFIRM = "shadowConfirm"
-
-#: 金色花纹边框的大按钮：确定（弹窗里那种更花的）
-BUTTON_PATTERN_CONFIRM = "patternConfirm"
+#: 金色花纹边框的大按钮：确定 / 开始匹配 / 开始对局…
+BUTTON_GOLD_FRAME = "gold_frame"
 
 #: 青色发光按钮：取消
-BUTTON_SHADOW_CANCEL = "shadowCancel"
+BUTTON_CYAN_GLOW = "cyan_glow"
 
-#: 蓝底金框按钮：下一步（千里单骑/结算）
-BUTTON_QJ_NEXT = "QJ"
+#: 蓝底金框按钮：下一步（千里单骑 / 结算）
+BUTTON_BLUE_FRAME = "blue_frame"
 
-#: 全部按钮家族目录。**只作参考**，新加文件夹不必登记到这里才能用。
+#: 全部花纹目录。**只作参考**，新加文件夹不必登记到这里才能用。
 BUTTON_FOLDERS = (
-    BUTTON_SHADOW_CONFIRM,
-    BUTTON_PATTERN_CONFIRM,
-    BUTTON_SHADOW_CANCEL,
-    BUTTON_QJ_NEXT,
+    BUTTON_GOLD_GLOW,
+    BUTTON_GOLD_FRAME,
+    BUTTON_CYAN_GLOW,
+    BUTTON_BLUE_FRAME,
 )

@@ -443,7 +443,7 @@ def finish_round(ctx):
 
 ```text
 games/<游戏>/scripts/<功能>/templates      ← 先找（功能专属）
-games/<游戏>/templates/                    ← 再找（跨脚本共用，兜底）
+games/<游戏>/templates/                      ← 再找（跨脚本共用，兜底）
 ```
 
 功能代码里写 `"battle/skill.png"` → 先找功能目录，没有就落到游戏级。
@@ -456,16 +456,16 @@ games/<游戏>/templates/                    ← 再找（跨脚本共用，兜�
 
 ```python
 from games.mingjiangsha.utils import (
-    click_pattern_confirm,
-    click_qj_next,
-    click_shadow_cancel,
-    click_shadow_confirm,
+    click_gold_frame,
+    click_blue_frame,
+    click_cyan_glow,
+    click_gold_glow,
 )
 
-click_shadow_confirm(ctx)    # 金色发光：创建队伍/添加伙伴/确定/投降确认
-click_pattern_confirm(ctx)   # 金色花纹：选将确定/开始匹配/结算确认
-click_shadow_cancel(ctx)     # 青色：取消
-click_qj_next(ctx)           # 蓝底金框：下一步
+click_gold_glow(ctx)    # 金色发光：创建队伍/添加伙伴/确定/投降确认
+click_gold_frame(ctx)   # 金色花纹：选将确定/开始匹配/结算确认
+click_cyan_glow(ctx)     # 青色：取消
+click_blue_frame(ctx)           # 蓝底金框：下一步
 ```
 
 通用入口 `click_button(ctx, 家族名)` 仍在（给按配置动态选的场合）。

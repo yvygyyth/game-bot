@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from gamebot.atomic import actions
 from gamebot.execution.builtins import click_image, press
 from gamebot.types import ActionResult, Point
-from games.mingjiangsha.utils import click_pattern_confirm
+from games.mingjiangsha.utils import click_gold_frame
 
 from ..templates import (
     T_ACTIVITY_ENTRY,
@@ -128,21 +128,21 @@ def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
     ctx.sleep(0.6)
     free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
     if free.ok:
-        click_pattern_confirm(ctx, settle=0.5)
+        click_gold_frame(ctx, settle=0.5)
 
     actions.click_source_point(ctx.session, SHOP_TAB_COPPER)
     ctx.sleep(0.6)
     lingxi = click_image(ctx, T_LINGXI, settle=0.5)
     if lingxi.ok:
         click_image(ctx, T_MAX, settle=0.4)
-        click_pattern_confirm(ctx, settle=0.6)
+        click_gold_frame(ctx, settle=0.6)
     press(ctx, "esc", settle=0.5)
 
     actions.click_source_point(ctx.session, SHOP_TAB_JINLAN)
     ctx.sleep(0.6)
     ming = click_image(ctx, T_MINGJIANG, settle=0.5)
     if ming.ok:
-        click_pattern_confirm(ctx, settle=0.6)
+        click_gold_frame(ctx, settle=0.6)
     press(ctx, "esc", settle=0.5)
     press(ctx, "esc", settle=0.6)
     # 打开煮酒（下一段）
@@ -157,7 +157,7 @@ def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
     actions.click_source_point(ctx.session, SHOP_ITEM_QINGMEI)
     ctx.sleep(0.5)
     click_image(ctx, T_MAX, settle=0.4)
-    click_pattern_confirm(ctx, settle=0.7)
+    click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
     return click_image(ctx, T_ZHAN_YI_ENTRY, settle=1.0)
 
@@ -170,7 +170,7 @@ def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
     actions.click_source_point(ctx.session, SHOP_ITEM_ZHANYI)
     ctx.sleep(0.5)
     click_image(ctx, T_MAX, settle=0.4)
-    click_pattern_confirm(ctx, settle=0.7)
+    click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
     return click_image(ctx, T_GONG_HUI_ENTRY, settle=1.0)
 
@@ -183,7 +183,7 @@ def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
     actions.click_source_point(ctx.session, SHOP_ITEM_GONGHUI)
     ctx.sleep(0.5)
     click_image(ctx, T_MAX, settle=0.4)
-    click_pattern_confirm(ctx, settle=0.7)
+    click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
     # 打开好友/送花（下一段）
     return click_image(ctx, T_FLOWER_ENTRY, confidence=0.9, settle=1.0)

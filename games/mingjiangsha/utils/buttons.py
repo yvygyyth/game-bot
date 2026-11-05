@@ -26,18 +26,20 @@
 ## 一个文件夹 = 一种按钮
 
 ```
-games/mingjiangsha/templates/shadowConfirm/   ← 金色确认按钮：各种文字版本都放这儿
-games/mingjiangsha/templates/shadowCancel/    ← 青色取消按钮
+games/mingjiangsha/templates/gold_glow/   ← 金色确认按钮：各种文字版本都放这儿
+games/mingjiangsha/templates/cyan_glow/    ← 青色取消按钮
 ```
 
-调用时只说"点哪种按钮"，不说"点哪句字"：
+调用时只说"点哪种**花纹**"，不说"点哪句字"：
 
 ```python
-from games.mingjiangsha.templates import BUTTON_SHADOW_CONFIRM
-from games.mingjiangsha.utils import click_button
+from games.mingjiangsha.templates import BUTTON_GOLD_FRAME
+from games.mingjiangsha.utils import click_pattern
 
-click_button(ctx, BUTTON_SHADOW_CONFIRM)   # 创建队伍 / 添加伙伴 / 确定…都算
+click_pattern(ctx, BUTTON_GOLD_FRAME)   # 确定 / 开始匹配 / 开始对局…都算
 ```
+
+四个 `click_*` 是常用花纹的快捷方式；底层都是 `click_pattern`。
 
 ## 尺寸 / 底色的限制（重要）
 
@@ -71,10 +73,10 @@ from gamebot.bootstrap import project_root
 from gamebot.exceptions import ConfigError
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.templates import (
-    BUTTON_PATTERN_CONFIRM,
-    BUTTON_QJ_NEXT,
-    BUTTON_SHADOW_CANCEL,
-    BUTTON_SHADOW_CONFIRM,
+    BUTTON_BLUE_FRAME,
+    BUTTON_CYAN_GLOW,
+    BUTTON_GOLD_FRAME,
+    BUTTON_GOLD_GLOW,
 )
 
 if TYPE_CHECKING:
@@ -85,11 +87,11 @@ __all__ = [
     "BUTTON_RING_INSET",
     "BUTTON_RING_WIDTH",
     "ButtonHit",
+    "click_blue_frame",
     "click_button",
-    "click_pattern_confirm",
-    "click_qj_next",
-    "click_shadow_cancel",
-    "click_shadow_confirm",
+    "click_cyan_glow",
+    "click_gold_frame",
+    "click_gold_glow",
     "find_buttons",
     "folder_templates",
     "ring_mask",
@@ -326,6 +328,28 @@ def click_button(
     )
 
 
+def _click_pattern(
+    ctx: RunContext,
+    pattern: str,
+    region: Region | None = None,
+    *,
+    pick: str = "only",
+    confidence: float = BUTTON_CONFIDENCE,
+    templates: list[str] | None = None,
+    settle: float = 0.0,
+) -> ActionResult[Point]:
+    """按**花纹**点按钮：``pattern`` 就是家族目录名，调用方不用关心文字/尺寸。"""
+    return click_button(
+        ctx,
+        pattern,
+        region,
+        pick=pick,
+        confidence=confidence,
+        templates=templates,
+        settle=settle,
+    )
+
+
 def _pick(hits: list[ButtonHit], pick: str) -> ButtonHit:
     if pick == "best":
         return max(hits, key=lambda hit: hit.score)
@@ -347,85 +371,29 @@ def _pick(hits: list[ButtonHit], pick: str) -> ButtonHit:
 # 自己要的是哪种按钮** —— 让调用点直接说清"金色确认 / 花纹确认 / 青色取消 /
 # 蓝色下一步"，比传一个字符串文件夹名更难写错，日志里也一眼看出意图。
 # --------------------------------------------------------------------------- #
-def click_shadow_confirm(
-    ctx: RunContext,
-    region: Region | None = None,
-    *,
-    pick: str = "only",
-    confidence: float = BUTTON_CONFIDENCE,
-    templates: list[str] | None = None,
-    settle: float = 0.0,
+def click_gold_glow(
+    ctx: RunContext, region: Region | None = None, **kwargs: Any
 ) -> ActionResult[Point]:
-    """点**金色发光确认按钮**：创建队伍 / 添加伙伴 / 确定 / 投降确认…"""
-    return click_button(
-        ctx,
-        BUTTON_SHADOW_CONFIRM,
-        region,
-        pick=pick,
-        confidence=confidence,
-        templates=templates,
-        settle=settle,
-    )
+    """金色发光确认按钮。"""
+    return _click_pattern(ctx, BUTTON_GOLD_GLOW, region, **kwargs)
 
 
-def click_pattern_confirm(
-    ctx: RunContext,
-    region: Region | None = None,
-    *,
-    pick: str = "only",
-    confidence: float = BUTTON_CONFIDENCE,
-    templates: list[str] | None = None,
-    settle: float = 0.0,
+def click_gold_frame(
+    ctx: RunContext, region: Region | None = None, **kwargs: Any
 ) -> ActionResult[Point]:
-    """点**金色花纹边框的大确认按钮**：选将确定 / 开始匹配 / 结算确认…"""
-    return click_button(
-        ctx,
-        BUTTON_PATTERN_CONFIRM,
-        region,
-        pick=pick,
-        confidence=confidence,
-        templates=templates,
-        settle=settle,
-    )
+    """金色花纹大确认按钮。"""
+    return _click_pattern(ctx, BUTTON_GOLD_FRAME, region, **kwargs)
 
 
-def click_shadow_cancel(
-    ctx: RunContext,
-    region: Region | None = None,
-    *,
-    pick: str = "only",
-    confidence: float = BUTTON_CONFIDENCE,
-    templates: list[str] | None = None,
-    settle: float = 0.0,
+def click_cyan_glow(
+    ctx: RunContext, region: Region | None = None, **kwargs: Any
 ) -> ActionResult[Point]:
-    """点**青色发光取消按钮**。"""
-    return click_button(
-        ctx,
-        BUTTON_SHADOW_CANCEL,
-        region,
-        pick=pick,
-        confidence=confidence,
-        templates=templates,
-        settle=settle,
-    )
+    """青色发光取消按钮。"""
+    return _click_pattern(ctx, BUTTON_CYAN_GLOW, region, **kwargs)
 
 
-def click_qj_next(
-    ctx: RunContext,
-    region: Region | None = None,
-    *,
-    pick: str = "only",
-    confidence: float = BUTTON_CONFIDENCE,
-    templates: list[str] | None = None,
-    settle: float = 0.0,
+def click_blue_frame(
+    ctx: RunContext, region: Region | None = None, **kwargs: Any
 ) -> ActionResult[Point]:
-    """点**蓝底金框的「下一步」**。"""
-    return click_button(
-        ctx,
-        BUTTON_QJ_NEXT,
-        region,
-        pick=pick,
-        confidence=confidence,
-        templates=templates,
-        settle=settle,
-    )
+    """蓝底金框的「下一步」。"""
+    return _click_pattern(ctx, BUTTON_BLUE_FRAME, region, **kwargs)
