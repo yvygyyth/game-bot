@@ -33,7 +33,7 @@ class HomeEntry:
 
 ENTRIES = (
     # ---- 每日奖励：有红点才进 ----
-    HomeEntry("mail", Point(2372, 80), Region(2480, 40, 60, 60), True),
+    HomeEntry("mail", Point(2372, 80), Region(2355, 25, 70, 65), True),
     HomeEntry("activity", Point(1784, 280), Region(1790, 210, 60, 60), True),
     HomeEntry("gallery", Point(2124, 290), Region(2125, 210, 60, 60), True),
     HomeEntry("shop", Point(1955, 282), Region(1955, 210, 60, 60), True),
