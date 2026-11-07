@@ -38,6 +38,7 @@ __all__ = [
     "FLOWER_GIFT",
     "FLOWER_ITEM",
     "FLOWER_X100",
+    "JUNXU_CLAIM_POINTS",
     "SHOP_ITEM_GONGHUI",
     "SHOP_ITEM_QINGMEI",
     "SHOP_ITEM_ZHANYI",
@@ -77,6 +78,34 @@ FLOWER_FRIEND = Point(480, 400)
 
 SETTLE = 0.9
 
+#: 军需月令页：两个「立即领取」按钮（普通 / 高级）。
+JUNXU_CLAIM_POINTS = (Point(1054, 1076), Point(1931, 1076))
+
+#: 活动左侧菜单的悬停点（滚轮要指在上面才响应）。
+JUNXU_MENU_POINT = Point(180, 800)
+
+
+def _claim_junxu(ctx: RunContext) -> bool:
+    """活动左侧列表往下滚，找到「军需月令」→ 点进去领两个日常。
+
+    找不到就返回 False，不阻断后续抽卡/丹青阁。
+    """
+    for _ in range(3):
+        actions.scroll(ctx.session, -4, point=JUNXU_MENU_POINT)
+        ctx.invalidate_frame()
+        ctx.sleep(0.6)
+        hit = ctx.frame().find_text("军需月令")
+        if hit.ok and hit.value is not None:
+            actions.click_source_point(ctx.session, hit.value)
+            ctx.invalidate_frame()
+            ctx.sleep(1.0)
+            for point in JUNXU_CLAIM_POINTS:
+                actions.click_source_point(ctx.session, point)
+                ctx.sleep(0.7)
+            press(ctx, "esc", settle=0.8)
+            return True
+    return False
+
 
 def _esc(ctx: RunContext, times: int = 2) -> None:
     for _ in range(times):
@@ -105,6 +134,8 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
         ctx.sleep(1.2)
+    # 军需月令在活动左侧列表下面，先滚下去领；找不到也不影响后面的丹青阁
+    _claim_junxu(ctx)
     _esc(ctx, 2)
     return click_image(ctx, T_GALLERY_ENTRY, confidence=0.9, settle=1.0)
 
