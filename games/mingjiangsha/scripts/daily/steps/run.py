@@ -80,6 +80,23 @@ JUNXU_CLAIM_POINTS = (Point(1054, 1076), Point(1931, 1076))
 JUNXU_MENU_POINT = Point(180, 800)
 
 
+def _close_activity_reward(ctx: RunContext) -> None:
+    """抽完两张卡会弹「恭喜获得」，先关掉再滚动/点军需月令。"""
+    for _ in range(3):
+        hit = ctx.frame().find_text("恭喜获得")
+        if not hit.ok:
+            return
+        # 弹窗提示“点击空白处关闭”；先 Esc，没关掉再点空白
+        press(ctx, "esc", settle=0.6)
+        ctx.invalidate_frame()
+        ctx.sleep(0.4)
+        if not ctx.frame().find_text("恭喜获得").ok:
+            return
+        actions.click_source_point(ctx.session, Point(1300, 760))
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
+
+
 def _claim_junxu(ctx: RunContext) -> bool:
     """活动左侧列表往下滚，找到「军需月令」→ 点进去领两个日常。
 
@@ -160,6 +177,8 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
         ctx.sleep(1.2)
+    # 第二张翻完会弹「恭喜获得」，不关掉会挡住军需月令/退出
+    _close_activity_reward(ctx)
     # 军需月令在活动左侧列表下面，先滚下去领；找不到也不影响后面的丹青阁
     _claim_junxu(ctx)
     _esc(ctx, 2)
