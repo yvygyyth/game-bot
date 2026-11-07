@@ -57,7 +57,7 @@ __all__ = [
 ]
 
 #: 活动卜卦：抽两张卡的位置（牌堆第一、第二张的中心）。
-ACTIVITY_CARD_POINTS = (Point(1179, 979), Point(1767, 979))
+ACTIVITY_CARD_POINTS = (Point(754, 579), Point(986, 579))
 
 #: 商店页签位置（黄金/铜钱/金兰）。
 SHOP_TAB_GOLD = Point(1306, 354)
@@ -103,29 +103,19 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     for point in ACTIVITY_CARD_POINTS:
         actions.click_source_point(ctx.session, point)
         ctx.invalidate_frame()
-        # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
-        ctx.sleep(1.2)
+        ctx.sleep(0.8)
     _esc(ctx, 2)
     return click_image(ctx, T_GALLERY_ENTRY, confidence=0.9, settle=1.0)
 
 
 def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
-    """丹青阁：点每日礼包；进来可能先弹「丹青月令」购买，Esc 关掉再看。
-
-    第一次找不到先等加载/动画（可能是刚进丹青阁还没画完），不要立刻按 Esc ——
-    Esc 在正常丹青阁里会直接退出去，反而把每日礼包关掉。
-    """
-    gift = None
-    for attempt in range(3):
+    """丹青阁：点每日礼包；关掉后开商店（下一段）。"""
+    gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
+    if not gift.ok:
+        # 刚进来可能弹「丹青月令」购买；Esc 关掉后再找礼包
+        press(ctx, "esc", settle=0.6)
         gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
-        if gift.ok:
-            break
-        if attempt == 0:
-            ctx.sleep(1.0)  # 等丹青阁加载/动画
-            continue
-        press(ctx, "esc", settle=0.8)  # 关「丹青月令」购买弹窗
-        ctx.sleep(1.0)
-    if gift is None or not gift.ok:
+    if not gift.ok:
         return ActionResult.not_found("丹青阁没找到「每日礼包」", template=T_GALLERY_GIFT)
     _esc(ctx, 2)
     # 回首页后点「商店」入口
