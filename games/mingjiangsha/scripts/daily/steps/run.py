@@ -15,6 +15,7 @@ from ..templates import (
     T_FREE_BINGLI,
     T_GALLERY_GIFT,
     T_GONGHUI_STORE_ENTRY,
+    T_HOME,
     T_LINGXI,
     T_MAIL_ONE_CLICK,
     T_MAX,
@@ -113,6 +114,11 @@ def visit_next_entry(ctx: RunContext) -> ActionResult[Any]:
     * 煮酒/战役/公会/送花：日常流程，没有红点也进一次；
     * 任何一个入口只处理一次，全部处理完置 ``daily.done`` 走 finish。
     """
+    # 首页都没确认时绝不按固定点点入口（否则会把“认不出来的画面”点开邮箱）
+    home = ctx.frame().find_image(T_HOME, confidence=0.95)
+    if not home.ok:
+        return ActionResult.not_found("首页未确认", template=T_HOME)
+
     visited = set(ctx.blackboard.get("daily.visited", []))
     image = ctx.frame().to_numpy()
     for entry in ENTRIES:

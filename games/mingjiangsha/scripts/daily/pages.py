@@ -21,7 +21,7 @@ from .templates import (
 __all__ = ["FEATURE_TREE"]
 
 HOME_ROI = Region(2380, 190, 180, 180)
-MAIL_ROI = Region(250, 210, 220, 180)
+MAIL_ROI = Region(420, 390, 120, 260)
 ACTIVITY_ROI = Region(20, 0, 260, 120)
 GALLERY_ROI = Region(20, 0, 320, 120)
 SHOP_ROI = Region(1420, 180, 260, 140)
