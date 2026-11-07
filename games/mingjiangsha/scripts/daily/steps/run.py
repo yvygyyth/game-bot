@@ -57,8 +57,8 @@ __all__ = [
     "zhu_jiu_step",
 ]
 
-#: 活动卜卦：抽两张卡的位置（牌堆第一、第二张的中心）。
-ACTIVITY_CARD_POINTS = (Point(1158, 985), Point(1791, 985))
+#: 活动卜卦：点上排牌堆里随便两张（最左、最右两张牌的中心）。
+ACTIVITY_CARD_POINTS = (Point(735, 584), Point(2203, 584))
 
 #: 商店页签位置（黄金/铜钱/金兰）。
 SHOP_TAB_GOLD = Point(1306, 354)
