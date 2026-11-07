@@ -57,7 +57,7 @@ __all__ = [
 ]
 
 #: 活动卜卦：抽两张卡的位置（牌堆第一、第二张的中心）。
-ACTIVITY_CARD_POINTS = (Point(754, 579), Point(986, 579))
+ACTIVITY_CARD_POINTS = (Point(1158, 985), Point(1791, 985))
 
 #: 商店页签位置（黄金/铜钱/金兰）。
 SHOP_TAB_GOLD = Point(1306, 354)
@@ -103,7 +103,8 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     for point in ACTIVITY_CARD_POINTS:
         actions.click_source_point(ctx.session, point)
         ctx.invalidate_frame()
-        ctx.sleep(0.8)
+        # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
+        ctx.sleep(1.2)
     _esc(ctx, 2)
     return click_image(ctx, T_GALLERY_ENTRY, confidence=0.9, settle=1.0)
 
