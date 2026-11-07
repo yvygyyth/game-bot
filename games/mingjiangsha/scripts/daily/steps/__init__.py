@@ -16,8 +16,8 @@ from .run import (
     finish_daily,
     gong_hui_step,
     mail_claim_then_activity,
-    open_mail,
     send_flower_finish,
+    visit_next_entry,
     zhan_yi_step,
     zhu_jiu_step,
 )
@@ -36,8 +36,8 @@ __all__ = [
     "finish_daily",
     "gong_hui_step",
     "mail_claim_then_activity",
-    "open_mail",
     "send_flower_finish",
+    "visit_next_entry",
     "zhan_yi_step",
     "zhu_jiu_step",
 ]

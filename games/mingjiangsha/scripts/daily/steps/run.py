@@ -9,26 +9,18 @@ from gamebot.execution.builtins import click_image, press
 from gamebot.types import ActionResult, Point
 from games.mingjiangsha.utils import click_gold_frame
 
+from ..entries import ENTRIES
+from ..red import has_red
 from ..templates import (
-    T_ACTIVITY_ENTRY,
-    T_FLOWER_ENTRY,
     T_FREE_BINGLI,
-    T_GALLERY_ENTRY,
     T_GALLERY_GIFT,
-    T_GONG_HUI_ENTRY,
     T_GONGHUI_STORE_ENTRY,
     T_LINGXI,
-    T_MAIL_ENTRY,
-    T_MAIL_NO_RED,
     T_MAIL_ONE_CLICK,
-    T_MAIL_RED,
     T_MAX,
     T_MINGJIANG,
     T_QINGMEI_ENTRY,
-    T_SHOP_ENTRY,
-    T_ZHAN_YI_ENTRY,
     T_ZHANYI_SHOP_ENTRY,
-    T_ZHU_JIU_ENTRY,
 )
 
 if TYPE_CHECKING:
@@ -53,8 +45,8 @@ __all__ = [
     "finish_daily",
     "gong_hui_step",
     "mail_claim_then_activity",
-    "open_mail",
     "send_flower_finish",
+    "visit_next_entry",
     "zhan_yi_step",
     "zhu_jiu_step",
 ]
@@ -114,21 +106,35 @@ def _esc(ctx: RunContext, times: int = 2) -> None:
         press(ctx, "esc", settle=0.4)
 
 
-def open_mail(ctx: RunContext) -> ActionResult[Any]:
-    """首页 → 点邮件入口。
+def visit_next_entry(ctx: RunContext) -> ActionResult[Any]:
+    """首页 hub：按红点挑下一个入口。
 
-    邮件图标**没有红点**说明今天已经领过，直接去活动，别再点进邮箱。
+    * 邮件/活动/丹青阁/商店：有红点才进；
+    * 煮酒/战役/公会/送花：日常流程，没有红点也进一次；
+    * 任何一个入口只处理一次，全部处理完置 ``daily.done`` 走 finish。
     """
-    red = ctx.frame().find_image(T_MAIL_RED, confidence=0.9)
-    if red.ok:
-        return click_image(ctx, T_MAIL_ENTRY, confidence=0.85, settle=1.0)
+    visited = set(ctx.blackboard.get("daily.visited", []))
+    image = ctx.frame().to_numpy()
+    for entry in ENTRIES:
+        if entry.key in visited:
+            continue
+        if (
+            entry.check_red
+            and entry.badge is not None
+            and not has_red(image, entry.badge, min_pixels=80)
+        ):
+            visited.add(entry.key)
+            continue
+        clicked = actions.click_source_point(ctx.session, entry.click)
+        if not clicked.ok:
+            return clicked
+        visited.add(entry.key)
+        ctx.blackboard["daily.visited"] = sorted(visited)
+        return clicked.with_meta(entry=entry.key)
 
-    no_red = ctx.frame().find_image(T_MAIL_NO_RED, confidence=0.9)
-    if no_red.ok:
-        return click_image(ctx, T_ACTIVITY_ENTRY, confidence=0.9, settle=1.0)
-
-    # 看不清红点/没红点：按“有红点”处理，最多多点一次邮箱，不会漏领
-    return click_image(ctx, T_MAIL_ENTRY, confidence=0.85, settle=1.0)
+    ctx.blackboard["daily.visited"] = []
+    ctx.blackboard["daily.done"] = True
+    return ActionResult.success("所有入口处理完成")
 
 
 def mail_claim_then_activity(ctx: RunContext) -> ActionResult[Any]:
@@ -138,7 +144,7 @@ def mail_claim_then_activity(ctx: RunContext) -> ActionResult[Any]:
         # 没有可领也继续，不能卡在这
         pass
     _esc(ctx, 2)
-    return click_image(ctx, T_ACTIVITY_ENTRY, confidence=0.9, settle=1.0)
+    return ActionResult.success("邮件领取完成")
 
 
 def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
@@ -151,7 +157,7 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     # 军需月令在活动左侧列表下面，先滚下去领；找不到也不影响后面的丹青阁
     _claim_junxu(ctx)
     _esc(ctx, 2)
-    return click_image(ctx, T_GALLERY_ENTRY, confidence=0.9, settle=1.0)
+    return ActionResult.success("活动领取完成")
 
 
 def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
@@ -164,8 +170,7 @@ def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
     if not gift.ok:
         return ActionResult.not_found("丹青阁没找到「每日礼包」", template=T_GALLERY_GIFT)
     _esc(ctx, 2)
-    # 回首页后点「商店」入口
-    return click_image(ctx, T_SHOP_ENTRY, confidence=0.9, settle=1.0)
+    return ActionResult.success("丹青阁领取完成")
 
 
 def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
@@ -191,8 +196,7 @@ def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
         click_gold_frame(ctx, settle=0.6)
     press(ctx, "esc", settle=0.5)
     press(ctx, "esc", settle=0.6)
-    # 打开煮酒（下一段）
-    return click_image(ctx, T_ZHU_JIU_ENTRY, confidence=0.8, settle=1.0)
+    return ActionResult.success("商店购买完成")
 
 
 def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
@@ -205,7 +209,7 @@ def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
     click_image(ctx, T_MAX, settle=0.4)
     click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
-    return click_image(ctx, T_ZHAN_YI_ENTRY, settle=1.0)
+    return ActionResult.success("煮酒购买完成")
 
 
 def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
@@ -218,7 +222,7 @@ def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
     click_image(ctx, T_MAX, settle=0.4)
     click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
-    return click_image(ctx, T_GONG_HUI_ENTRY, settle=1.0)
+    return ActionResult.success("战役购买完成")
 
 
 def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
@@ -231,8 +235,7 @@ def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
     click_image(ctx, T_MAX, settle=0.4)
     click_gold_frame(ctx, settle=0.7)
     _esc(ctx, 2)
-    # 打开好友/送花（下一段）
-    return click_image(ctx, T_FLOWER_ENTRY, confidence=0.9, settle=1.0)
+    return ActionResult.success("公会购买完成")
 
 
 def send_flower_finish(ctx: RunContext) -> ActionResult[Any]:
@@ -250,5 +253,7 @@ def send_flower_finish(ctx: RunContext) -> ActionResult[Any]:
 
 
 def finish_daily(ctx: RunContext) -> ActionResult[Any]:
-    """收尾：返回 not_found 让末梢判定结束。"""
+    """收尾：清掉本轮 hub 状态，返回 not_found 让末梢判定结束。"""
+    ctx.blackboard["daily.visited"] = []
+    ctx.blackboard["daily.done"] = False
     return ActionResult.not_found("每日领奖完成")
