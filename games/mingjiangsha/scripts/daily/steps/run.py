@@ -19,7 +19,9 @@ from ..templates import (
     T_GONGHUI_STORE_ENTRY,
     T_LINGXI,
     T_MAIL_ENTRY,
+    T_MAIL_NO_RED,
     T_MAIL_ONE_CLICK,
+    T_MAIL_RED,
     T_MAX,
     T_MINGJIANG,
     T_QINGMEI_ENTRY,
@@ -113,7 +115,19 @@ def _esc(ctx: RunContext, times: int = 2) -> None:
 
 
 def open_mail(ctx: RunContext) -> ActionResult[Any]:
-    """首页 → 点邮件入口。"""
+    """首页 → 点邮件入口。
+
+    邮件图标**没有红点**说明今天已经领过，直接去活动，别再点进邮箱。
+    """
+    red = ctx.frame().find_image(T_MAIL_RED, confidence=0.9)
+    if red.ok:
+        return click_image(ctx, T_MAIL_ENTRY, confidence=0.85, settle=1.0)
+
+    no_red = ctx.frame().find_image(T_MAIL_NO_RED, confidence=0.9)
+    if no_red.ok:
+        return click_image(ctx, T_ACTIVITY_ENTRY, confidence=0.9, settle=1.0)
+
+    # 看不清红点/没红点：按“有红点”处理，最多多点一次邮箱，不会漏领
     return click_image(ctx, T_MAIL_ENTRY, confidence=0.85, settle=1.0)
 
 

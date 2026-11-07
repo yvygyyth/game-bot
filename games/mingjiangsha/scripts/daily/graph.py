@@ -42,6 +42,7 @@ SCENARIO = ScenarioSpec(
             description="首页：点邮件入口",
             transitions=[
                 Transition("mail", on_page("daily/mail"), 10, "进入邮箱"),
+                Transition("activity", on_page("daily/activity"), 5, "邮件已领，直接活动"),
             ],
         ),
         Node(
