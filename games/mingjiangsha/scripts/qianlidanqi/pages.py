@@ -48,7 +48,9 @@ from .templates import (
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
+    T_FIGHT_END,
     T_FIGHT_MENU,
+    T_FIGHT_NEXT,
     T_FIGHT_SETTING,
     T_FLOW,
     T_FLOW_MAP,
@@ -259,20 +261,66 @@ FEATURE_TREE = PageGroup(
                             ),
                             description="妃妃选择页：选一个回地图（目前只认这一种）",
                         ),
-                        PageLeaf(
+                        PageGroup(
                             "qianli/fight",
-                            name="局内 · 战斗中",
-                            queries=(
-                                any_image(
-                                    T_FIGHT_CANCEL,
-                                    T_FIGHT_MENU,
-                                    T_FIGHT_SETTING,
-                                    T_FIGHT_AUTO,
-                                    T_FIGHT_AUTO_OFF,
-                                    confidence=0.9,
+                            name="局内 · 战斗",
+                            children=(
+                                PageLeaf(
+                                    "qianli/fight/hand_swap",
+                                    name="战斗 · 换牌弹窗",
+                                    queries=(ImageQuery(T_FIGHT_CANCEL),),
+                                    priority=40,
+                                    description="是否需要更换初始手牌",
+                                ),
+                                PageLeaf(
+                                    "qianli/fight/menu_off",
+                                    name="战斗 · 菜单（托管未开）",
+                                    queries=(ImageQuery(T_FIGHT_AUTO),),
+                                    priority=35,
+                                    description="右上角菜单展开，显示「托管」",
+                                ),
+                                PageLeaf(
+                                    "qianli/fight/menu_on",
+                                    name="战斗 · 菜单（托管已开）",
+                                    queries=(ImageQuery(T_FIGHT_AUTO_OFF),),
+                                    priority=34,
+                                    description="右上角菜单展开，显示「取消托管」",
+                                ),
+                                PageLeaf(
+                                    "qianli/fight/ended",
+                                    name="战斗 · 结束提示",
+                                    queries=(ImageQuery(T_FIGHT_END),),
+                                    priority=30,
+                                    description="点击空白区域到下一步",
+                                ),
+                                PageLeaf(
+                                    "qianli/fight/result",
+                                    name="战斗 · 下一步",
+                                    queries=(ImageQuery(T_FIGHT_NEXT),),
+                                    priority=25,
+                                    description="战斗结算后的下一步条",
+                                ),
+                                PageLeaf(
+                                    "qianli/fight/main",
+                                    name="战斗 · 主界面",
+                                    queries=(
+                                        any_image(
+                                            T_FIGHT_MENU,
+                                            T_FIGHT_SETTING,
+                                            confidence=0.9,
+                                        ),
+                                    ),
+                                    exclude=(
+                                        ImageQuery(T_FIGHT_CANCEL),
+                                        ImageQuery(T_FIGHT_AUTO),
+                                        ImageQuery(T_FIGHT_AUTO_OFF),
+                                        ImageQuery(T_FIGHT_END),
+                                        ImageQuery(T_FIGHT_NEXT),
+                                    ),
+                                    priority=10,
+                                    description="战斗主界面：右上角菜单/设置",
                                 ),
                             ),
-                            description="战斗界面：取消换牌 / 设置 / 托管",
                         ),
                         PageLeaf(
                             "qianli/gift",

@@ -34,7 +34,6 @@ from ..templates import (
     T_EVENT_FEIFEI_HELP,
     T_EVENT_FEIFEI_SLEEP,
     T_FIGHT_AUTO,
-    T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
     T_FIGHT_END,
     T_FIGHT_MENU,
@@ -94,9 +93,14 @@ __all__ = [
     "confirm_pocket",
     "do_zhuge",
     "enter_event",
+    "fight_cancel_hand_swap",
+    "fight_choose_auto",
+    "fight_click_end",
+    "fight_click_next",
+    "fight_close_menu",
+    "fight_open_menu_or_wait",
     "pick_gift",
     "pick_kind",
-    "run_battle",
     "start_battle",
     "trigger_shi_battle",
 ]
@@ -128,6 +132,9 @@ NODE_CONFIDENCE = 0.9
 
 #: 战斗最长等多久（秒）。自动战斗一局可能几分钟。
 BATTLE_END_TIMEOUT = 1200.0
+
+#: 本场战斗是否已经处理/确认过托管（黑板键）。
+AUTO_READY_KEY = "qianli.fight.auto_ready"
 
 #: 关「武将技能」弹窗的点击位置（客户区坐标；旧代码点 1300,1150 窗口坐标）。
 SKILL_PANEL_CLOSE = Point(1300, 1127)
@@ -256,6 +263,7 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     先按 404x107 的整按钮模板点（实测 1.0）；失败再用通用确认
     （金色花纹按钮，只认边框、不认文字）。
     """
+    ctx.blackboard[AUTO_READY_KEY] = False
     # 先精确模板（单张匹配快、实测 1.0）；失败再走通用确认（全屏多模板，慢）
     clicked = click_image(
         ctx, T_START_BATTLE, region=START_BATTLE_ROI, confidence=0.9, settle=0.6
@@ -268,81 +276,55 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     return clicked
 
 
-def run_battle(ctx: RunContext) -> ActionResult[Any]:
-    """战斗内：取消换牌 → 开菜单点托管 → 等结束 → 点下一步。"""
-    # 先把鼠标移到左上角：hover 提示框可能正好盖住「取消」
+def fight_cancel_hand_swap(ctx: RunContext) -> ActionResult[Any]:
+    """换牌弹窗：把鼠标移开 hover，再点取消。"""
     actions.move_to(ctx.session, Point(20, 20), duration=0.1)
     ctx.sleep(0.2)
+    ctx.blackboard[AUTO_READY_KEY] = False
+    return click_image(ctx, T_FIGHT_CANCEL, settle=0.4)
 
-    # ---- 1. 换牌弹窗：和竞技场一样点「取消」----
-    cancel = wait_for(ctx, ImageQuery(T_FIGHT_CANCEL), timeout=3.0)
-    if cancel.ok and cancel.value is not None:
-        actions.click_source_point(ctx.session, cancel.value)
-        ctx.invalidate_frame()
-        # 点完取消会有一段遮罩/变暗过渡，等它亮回来（短，但比 0.3s 长）
-        ctx.sleep(1.2)
 
-    # ---- 2. 菜单可能已经开着，也可能要自己点开 ----
-    auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
-    auto = None if auto_off.ok else ctx.frame().find_image(T_FIGHT_AUTO)
+def fight_open_menu_or_wait(ctx: RunContext) -> ActionResult[Any]:
+    """战斗主界面：没处理托管就开菜单；处理过就等结束提示。"""
+    if ctx.blackboard.get(AUTO_READY_KEY):
+        ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
+        if not ended.ok or ended.value is None:
+            return ActionResult.not_found(
+                f"战斗 {BATTLE_END_TIMEOUT:.0f}s 内没结束", template=T_FIGHT_END
+            )
+        return ActionResult.success("战斗结束提示", action="wait")
+    return click_image(ctx, T_FIGHT_MENU, settle=0.4)
 
-    opened_menu = False
-    if not auto_off.ok and (auto is None or not auto.ok):
-        menu = ctx.frame().find_image(T_FIGHT_MENU)
-        if menu.ok and menu.value is not None:
-            actions.click_source_point(ctx.session, menu.value)
-            opened_menu = True
-            ctx.invalidate_frame()
-            # 菜单展开也有一段变暗动画；等亮，再找不到就再等一次
-            ctx.sleep(1.5)
-            auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
-            if not auto_off.ok:
-                auto = ctx.frame().find_image(T_FIGHT_AUTO)
-            if not auto_off.ok and (auto is None or not auto.ok):
-                ctx.invalidate_frame()
-                ctx.sleep(1.0)
-                auto_off = ctx.frame().find_image(T_FIGHT_AUTO_OFF)
-                if not auto_off.ok:
-                    auto = ctx.frame().find_image(T_FIGHT_AUTO)
 
-    if not auto_off.ok and auto is not None and auto.ok and auto.value is not None:
-        actions.click_source_point(ctx.session, auto.value)
-        ctx.invalidate_frame()
-        ctx.sleep(0.6)
-        # 第一次可能点在展开动画上没生效：菜单还开着且仍显示「托管」，就再点一次
-        still = ctx.frame().find_image(T_FIGHT_AUTO)
-        if still.ok and still.value is not None:
-            actions.click_source_point(ctx.session, still.value)
-            ctx.invalidate_frame()
-            ctx.sleep(0.4)
-    elif opened_menu and auto_off.ok:
-        # 已经托管，不点托管；菜单是我们打开的，点菜单关掉
-        menu = ctx.frame().find_image(T_FIGHT_MENU)
-        if menu.ok and menu.value is not None:
-            actions.click_source_point(ctx.session, menu.value)
-            ctx.invalidate_frame()
-            ctx.sleep(0.4)
+def fight_choose_auto(ctx: RunContext) -> ActionResult[Any]:
+    """菜单展开且显示「托管」：点托管。"""
+    clicked = click_image(ctx, T_FIGHT_AUTO, settle=0.4)
+    if clicked.ok:
+        ctx.blackboard[AUTO_READY_KEY] = True
+    return clicked
 
-    # ---- 3. 等「点击空白区域到下一步」----
-    ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
-    if not ended.ok or ended.value is None:
-        return ActionResult.not_found(
-            f"战斗 {BATTLE_END_TIMEOUT:.0f}s 内没结束", template=T_FIGHT_END
-        )
-    actions.click_source_point(ctx.session, ended.value)
-    ctx.invalidate_frame()
-    ctx.sleep(1.0)
 
-    # ---- 4. 「下一步」条，最多点 5 次 ----
+def fight_close_menu(ctx: RunContext) -> ActionResult[Any]:
+    """菜单展开且显示「取消托管」：确认托管已开，点菜单关闭。"""
+    ctx.blackboard[AUTO_READY_KEY] = True
+    return click_image(ctx, T_FIGHT_MENU, settle=0.4)
+
+
+def fight_click_end(ctx: RunContext) -> ActionResult[Any]:
+    """点「点击空白区域到下一步」。"""
+    return click_image(ctx, T_FIGHT_END, settle=0.6)
+
+
+def fight_click_next(ctx: RunContext) -> ActionResult[Any]:
+    """结算后「下一步」条，最多点 5 次。"""
     for _ in range(5):
         nxt = ctx.frame().find_image(T_FIGHT_NEXT)
         if not nxt.ok or nxt.value is None:
             break
         actions.click_source_point(ctx.session, nxt.value)
         ctx.invalidate_frame()
-        ctx.sleep(0.8)
-
-    return ActionResult.success("战斗结束", action="sequence")
+        ctx.sleep(0.5)
+    return ActionResult.success("战斗下一步处理完成", action="sequence")
 
 
 def pick_gift(ctx: RunContext) -> ActionResult[Any]:
@@ -516,6 +498,7 @@ def choose_rest(ctx: RunContext) -> ActionResult[Any]:
 
 def choose_pocket(ctx: RunContext) -> ActionResult[Any]:
     """锦囊三选一：用卡片左上角花纹找出三个选项，随机点一个。"""
+    ctx.blackboard[AUTO_READY_KEY] = False
     hits = ctx.frame().find_all_images(T_POCKET_OPTION, min_distance=80, max_count=3)
     if not hits.ok or not hits.value:
         return ActionResult.not_found("锦囊三选一没找到选项", template=T_POCKET_OPTION)
@@ -530,6 +513,7 @@ def choose_pocket(ctx: RunContext) -> ActionResult[Any]:
 
 def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
     """锦囊确认页：点「确认」。"""
+    ctx.blackboard[AUTO_READY_KEY] = False
     return click_image(ctx, T_POCKET_CONFIRM, region=POCKET_CONFIRM_ROI, settle=1.0)
 
 
@@ -584,6 +568,7 @@ def choose_event_option(ctx: RunContext) -> ActionResult[Any]:
 
 def trigger_shi_battle(ctx: RunContext) -> ActionResult[Any]:
     """十常侍：点左边人物插画 5 次，触发战斗彩蛋。"""
+    ctx.blackboard[AUTO_READY_KEY] = False
     click = ctx.frame().find_image(T_SHI_ATTACK)
     if not click.ok or click.value is None:
         return ActionResult.not_found("十常侍界面没找到左边人物插画", template=T_SHI_ATTACK)

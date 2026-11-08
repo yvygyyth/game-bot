@@ -11,7 +11,12 @@
 | `qianli/select5` | :func:`continue_run` | 点红色「继续挑战」，直接进局内 |
 | `qianli/map` | :func:`choose_node` | 地图上点一个战斗节点 |
 | `qianli/pre_battle` | :func:`start_battle` | 点「开始对局」 |
-| `qianli/fight` | :func:`run_battle` | 取消换牌 → 托管 → 等结束 → 下一步 |
+| `qianli/fight/hand_swap` | :func:`fight_cancel_hand_swap` | 点掉换牌弹窗 |
+| `qianli/fight/main` | :func:`fight_open_menu_or_wait` | 开菜单，或托管后等结束 |
+| `qianli/fight/menu_off` | :func:`fight_choose_auto` | 菜单里点「托管」 |
+| `qianli/fight/menu_on` | :func:`fight_close_menu` | 确认托管已开并关菜单 |
+| `qianli/fight/ended` | :func:`fight_click_end` | 点空白区域到下一步 |
+| `qianli/fight/result` | :func:`fight_click_next` | 点下一步，最多 5 次 |
 | `qianli/gift` | :func:`pick_gift` | OCR 三个武将名 → 按优先表点一个 |
 | `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
 | `qianli/shop/ba_qing` | :func:`buy_ba_qing` | 按 TOKEN_PRIORITY 买信物 → 退出 → 确认 |
@@ -48,9 +53,14 @@ from .run import (
     confirm_pocket,
     do_zhuge,
     enter_event,
+    fight_cancel_hand_swap,
+    fight_choose_auto,
+    fight_click_end,
+    fight_click_next,
+    fight_close_menu,
+    fight_open_menu_or_wait,
     pick_gift,
     pick_kind,
-    run_battle,
     start_battle,
     trigger_shi_battle,
 )
@@ -71,12 +81,17 @@ __all__ = [
     "enter_campaign",
     "enter_event",
     "enter_qianli",
+    "fight_cancel_hand_swap",
+    "fight_choose_auto",
+    "fight_click_end",
+    "fight_click_next",
+    "fight_close_menu",
+    "fight_open_menu_or_wait",
     "leave_pick",
     "open_pick",
     "pick_general",
     "pick_gift",
     "pick_kind",
-    "run_battle",
     "start_battle",
     "start_run",
     "trigger_shi_battle",
