@@ -28,6 +28,7 @@ from ..store import (
 )
 from ..templates import (
     T_CLAIM_REWARD,
+    T_EVENT_CHOOSE,
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
@@ -163,7 +164,7 @@ POCKET_OPTION_POINTS = (Point(457, 1150), Point(1317, 1150), Point(2155, 1150))
 
 # ---- 奇遇 ----
 #: 奇遇介绍页左下角的金色按钮（选择事件/选择武将）。
-EVENT_ENTER_REGION = Region(680, 1180, 520, 160)
+EVENT_ENTER_REGION = Region(650, 1140, 620, 220)
 
 #: 奇遇选择页两行选项的 OCR 区域与点击点。
 EVENT_OPTION_REGIONS = (Region(1000, 450, 900, 140), Region(1000, 700, 900, 140))
@@ -510,7 +511,15 @@ def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
 
 
 def enter_event(ctx: RunContext) -> ActionResult[Any]:
-    """奇遇介绍页：点左边金色按钮（选择事件/选择武将，按边框认，不认文字）。"""
+    """奇遇介绍页：点左边金色按钮。
+
+    优先用「选择事件」整按钮模板；「选择武将」等变体再退回金色边框识别。
+    """
+    clicked = click_image(
+        ctx, T_EVENT_CHOOSE, region=EVENT_ENTER_REGION, confidence=0.9, settle=0.8
+    )
+    if clicked.ok:
+        return clicked
     return click_gold_frame(ctx, EVENT_ENTER_REGION, settle=0.8)
 
 
