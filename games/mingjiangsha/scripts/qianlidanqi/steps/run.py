@@ -17,8 +17,10 @@ from games.mingjiangsha.utils import click_gold_frame
 
 from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
+    COPPER_REGION,
     RewardKind,
     get_run_state,
+    parse_copper_text,
     parse_general_name,
     pick_reward_kind,
     pick_reward_slot,
@@ -77,10 +79,7 @@ __all__ = [
     "MOZI_OPTION_POINTS",
     "PENDING_GENERAL_KEY",
     "REST_OPTION_POINT",
-    "SHOP_BUY_POINT",
     "SHOP_MIN_COINS",
-    "SHOP_TOKEN_POINTS",
-    "SHOP_TOKEN_TITLE_REGIONS",
     "SKILL_PANEL_CLOSE",
     "ZHUGE_CARD_POINT",
     "buy_ba_qing",
@@ -132,20 +131,6 @@ BATTLE_END_TIMEOUT = 1200.0
 
 #: 关「武将技能」弹窗的点击位置（客户区坐标；旧代码点 1300,1150 窗口坐标）。
 SKILL_PANEL_CLOSE = Point(1300, 1127)
-
-# ---- 巴清商店 ----
-#: 三个信物标题的 OCR 区域（客户区）。
-SHOP_TOKEN_TITLE_REGIONS = (
-    Region(1276, 277, 280, 50),
-    Region(1730, 277, 280, 50),
-    Region(2186, 277, 280, 50),
-)
-
-#: 三个信物标题的中心（点它选中）。
-SHOP_TOKEN_POINTS = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
-
-#: 购买弹窗里「xx购买」按钮的中心（客户区固定）。
-SHOP_BUY_POINT = Point(842, 964)
 
 #: 铜币少于这个数就不进巴清商店（旧脚本的阈值）。
 SHOP_MIN_COINS = 30
@@ -423,20 +408,44 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
 
 
 def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
-    """巴清商店：按 TOKEN_PRIORITY 买**所有**够钱/在优先表里的信物，再退出。
+    """巴清商店：一次 OCR 读钱包/三个名字/三个价格，再按优先级买。
 
-    商品是随机的，一屏最多 3 个信物。这里只 OCR **一次**，把三个槽位排好序
-    逐个点（买完的槽位会变“已售罄”，位置不变）；钱不够/已售罄点了不弹购买，
-    跳过下一个。之前每买一个就重 OCR 一遍，是这步慢的主因。
+    价格已知就不必先点开弹窗：价格 > 钱包直接结束购买；价格够才点商品。
     """
-    titles: list[str] = []
-    for region in SHOP_TOKEN_TITLE_REGIONS:
-        read = ctx.frame().read_text(region)
-        titles.append(read.value if read.ok and read.value is not None else "")
+    title_regions = (
+        Region(1260, 260, 320, 80),
+        Region(1715, 260, 320, 80),
+        Region(2170, 260, 320, 80),
+    )
+    price_regions = (
+        Region(1360, 625, 140, 70),
+        Region(1815, 625, 140, 70),
+        Region(2270, 625, 140, 70),
+    )
+    token_points = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
+    buy_point = Point(842, 964)
+
+    # 一次画布 OCR：钱包 + 3 个名字 + 3 个价格
+    read = ctx.frame().read_regions((COPPER_REGION, *title_regions, *price_regions))
+    groups = read.value if read.ok and read.value else []
+
+    def _first_text(group: list[Any]) -> str:
+        return next((box.text for box in group if box.text), "")
+
+    wallet_text = _first_text(groups[0]) if groups else ""
+    wallet = parse_copper_text(wallet_text)
+    titles = [_first_text(groups[i]) if i < len(groups) else "" for i in range(1, 4)]
+    prices = [
+        parse_copper_text(_first_text(groups[i])) if i < len(groups) else None
+        for i in range(4, 7)
+    ]
 
     bought: list[str] = []
     for slot, name in rank_token_slots(titles):
-        point = SHOP_TOKEN_POINTS[min(slot, len(SHOP_TOKEN_POINTS) - 1)]
+        price = prices[slot] if slot < len(prices) else None
+        if wallet is not None and price is not None and price > wallet:
+            break
+        point = token_points[min(slot, len(token_points) - 1)]
         picked = actions.click_source_point(ctx.session, point)
         if not picked.ok:
             return picked
@@ -462,7 +471,7 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
             ctx.sleep(0.6)
             break
 
-        clicked = actions.click_source_point(ctx.session, SHOP_BUY_POINT)
+        clicked = actions.click_source_point(ctx.session, buy_point)
         if not clicked.ok:
             return clicked
         bought.append(name)
@@ -485,7 +494,13 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
             ctx.sleep(0.5)
 
     return ActionResult.success(
-        "巴清商店处理完成", action="sequence", bought=bought, count=len(bought), titles=titles
+        "巴清商店处理完成",
+        action="sequence",
+        bought=bought,
+        count=len(bought),
+        titles=titles,
+        prices=prices,
+        wallet=wallet,
     )
 
 
