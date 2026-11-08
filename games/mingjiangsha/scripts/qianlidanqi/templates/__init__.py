@@ -13,7 +13,6 @@ __all__ = [
     "T_CONFIRM",
     "T_CONGRATS",
     "T_EVENT_CHOICE_FEIFEI",
-    "T_EVENT_CHOOSE",
     "T_EVENT_GIFT",
     "T_EVENT_INTRO_BACK",
     "T_FIGHT_AUTO",
@@ -122,8 +121,6 @@ T_EVENT_INTRO_BACK = "flow/event_back.png"
 T_EVENT_GIFT = "flow/event_gift.png"
 #: 妃妃选择页顶部标题「偶遇朏朏」（和赠礼类别屏区分）。
 T_EVENT_CHOICE_FEIFEI = "flow/event_choice_feifei.png"
-#: 奇遇介绍页左下「选择事件」金色按钮。
-T_EVENT_CHOOSE = "flow/event_choose.png"
 
 # ---- 墨子选择 ----
 #: 墨子「请选择一种制造」。

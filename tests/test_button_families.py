@@ -38,7 +38,7 @@ CASES = [
     ("jingji2.png", "gold_glow", "after_create.png", 0.95),
     ("select2.png", "gold_frame", "ok1.png", 0.95),
     ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
-    ("zhandou7.png", "blue_frame", "qj2.png", 0.95),
+    ("zhandou7.png", "blue_frame", "settle_confirm.png", 0.95),
 ]
 
 
@@ -62,8 +62,12 @@ def _screenshot(cache: dict[str, np.ndarray], name: str) -> np.ndarray:
 
 
 def _family_hits(matcher: OpenCvMatcher, image: np.ndarray, folder: str) -> list[tuple[float, str]]:
-    """把家族里每张图都试一遍，返回 ``(分数, 文件名)``。"""
-    hits: list[tuple[float, str]] = []
+    """把家族里每张图都试一遍，返回 ``(分数, 文件名)``。
+
+    同一个按钮被多张模板命中（比如 blue_frame 的 qj2/settle_confirm，文字不同、
+    边框相同）只保留分数最高的一张——和 ``find_buttons._dedupe`` 的规则一致。
+    """
+    hits: list[tuple[float, str, object]] = []
     for path in sorted((GAME / folder).glob("*.png")):
         for hit in matcher.match_all(
             image,
@@ -71,8 +75,16 @@ def _family_hits(matcher: OpenCvMatcher, image: np.ndarray, folder: str) -> list
             confidence=CONFIDENCE,
             min_distance=30,
         ):
-            hits.append((hit.score, path.name))
-    return sorted(hits, reverse=True)
+            hits.append((hit.score, path.name, hit.point))
+    kept: list[tuple[float, str, object]] = []
+    for score, name, point in sorted(hits, reverse=True):
+        if any(
+            abs(point.x - other.x) <= 30 and abs(point.y - other.y) <= 30
+            for _, _, other in kept
+        ):
+            continue
+        kept.append((score, name, point))
+    return [(score, name) for score, name, _ in kept]
 
 
 class TestFamiliesOnRealScreens:
@@ -279,7 +291,7 @@ RING_CASES = [
     ("jingji2.png", "gold_glow", "after_create.png", 0.95),
     ("select2.png", "gold_frame", "ok1.png", 0.95),
     ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
-    ("zhandou7.png", "blue_frame", "qj2.png", 0.95),
+    ("zhandou7.png", "blue_frame", "settle_confirm.png", 0.95),
 ]
 
 

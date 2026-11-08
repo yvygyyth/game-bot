@@ -28,7 +28,6 @@ from ..store import (
 )
 from ..templates import (
     T_CLAIM_REWARD,
-    T_EVENT_CHOOSE,
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
@@ -511,15 +510,7 @@ def confirm_pocket(ctx: RunContext) -> ActionResult[Any]:
 
 
 def enter_event(ctx: RunContext) -> ActionResult[Any]:
-    """奇遇介绍页：点左边金色按钮。
-
-    优先用「选择事件」整按钮模板；「选择武将」等变体再退回金色边框识别。
-    """
-    clicked = click_image(
-        ctx, T_EVENT_CHOOSE, region=EVENT_ENTER_REGION, confidence=0.9, settle=0.8
-    )
-    if clicked.ok:
-        return clicked
+    """奇遇介绍页：点左边金色按钮（「选择事件」已加入 gold_frame 家族）。"""
     return click_gold_frame(ctx, EVENT_ENTER_REGION, settle=0.8)
 
 

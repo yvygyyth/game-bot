@@ -11,9 +11,9 @@ games/mingjiangsha/templates/                   ← 再找（公共按钮花纹�
 
 ```
 templates/gold_glow/     金色发光按钮：创建队伍 / 添加伙伴 / 确定 / 投降确认 …
-templates/gold_frame/    金色花纹边框的大按钮：确定 / 开始匹配 / 开始对局 / 结算确认 …
+templates/gold_frame/    金色花纹边框的大按钮：确定 / 开始匹配 / 开始对局 / 选择事件 …
 templates/cyan_glow/      青色发光按钮：取消
-templates/blue_frame/                蓝底金框按钮：下一步
+templates/blue_frame/                蓝底金框按钮：下一步 / 结算确认
 ```
 
 > 同一家族里放的是**这种按钮的各种文字版本**（尺寸不同就再各存一张）。
@@ -31,7 +31,7 @@ from games.mingjiangsha.utils import (
 )
 
 click_gold_glow(ctx)    # 金色发光：创建队伍 / 添加伙伴 / 确定 / 投降确认
-click_gold_frame(ctx)   # 金色花纹大按钮：选将确定 / 开始匹配 / 结算确认
+click_gold_frame(ctx)   # 金色花纹大按钮：选将确定 / 开始匹配 / 选择事件
 click_cyan_glow(ctx)     # 青色：取消
 click_blue_frame(ctx)           # 蓝底金框：下一步
 ```
@@ -105,7 +105,7 @@ for 这个家族的每一张图:
 | `jingji2.png` | `gold_glow` | **1**（添加伙伴） | 0.997 |
 | `select2.png` | `gold_frame` | **1**（确定） | 0.993 |
 | `zhandou6.png` | `blue_frame` | **1**（下一步） | 0.997 |
-| `zhandou7.png` | `blue_frame` | **1** | 0.997 |
+| `zhandou7.png` | `blue_frame` | **1**（结算确认） | 0.997 |
 | `home / jingji3 / zhandou2,3,5` | 各家族 | **0**（画面里没有这类按钮） | 0.00 |
 
 阈值取 **0.90**（正例 ≥0.99，反例 ≤0.83）。
