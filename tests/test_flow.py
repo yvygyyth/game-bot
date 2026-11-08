@@ -1036,6 +1036,29 @@ class TestRelocateAfterStepFailure:
         assert ctx.current_frame is not None
         assert engine.cursor.current == "battle", "新帧看到了 battle，就该挪过去"
 
+    def test_step_failure_backtracks_flow_history(self, ctx, matcher) -> None:
+        """步骤失败、当前页确认失败 -> 沿 history 跳回能对上的祖先节点。"""
+        from gamebot.execution.executor import Executor, StepOutcome
+
+        scenario, _tree = build_live()
+        ctx.executor = Executor(ctx)
+        engine = FlowEngine(scenario, ctx)
+        engine.CONFIRM_DELAY = 0.0
+        engine.cursor.advance("battle")
+        engine.cursor.advance("arena")
+        engine.tracker.set_initial("home/arena", now=0.0)
+        matcher.matches = {"lobby.png": (Point(1, 1), 0.99)}
+
+        failure = StepOutcome("whatever", ActionResult.not_found("没找到"))
+        moved = engine._relocate_after_failure(
+            scenario.graph.require("arena"), failure, now=0.0
+        )
+
+        assert moved is True
+        assert engine.cursor.current == "lobby"
+        assert engine.tracker.current_id == "home/lobby"
+        assert engine.report.recoveries[-1].to_node == "lobby"
+
     def test_unbound_node_does_not_relocate(self, ctx, matcher) -> None:
         """不关联状态的节点做不了"因失败而重定位" —— 它没有"该在的位置"。
 

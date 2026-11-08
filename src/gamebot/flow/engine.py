@@ -251,7 +251,7 @@ class FlowEngine:
     常数                默认   管什么
     ==================  =====  ================================================
     :attr:`RECOVER_DELAY`  5.0s  搜之前先等多久（**故意等的，见下**）
-    :attr:`RECOVER_PASSES` 2     搜几轮（一轮落空就整体再试一轮）
+    :attr:`RECOVER_PASSES` 1     搜几轮（一轮落空就结束）
     :attr:`RECENT_STATES`  5     优先查"最近待过"的几个状态
     ==================  =====  ================================================
 
@@ -265,7 +265,7 @@ class FlowEngine:
     那时 `_pending_recover` 被清掉，一次搜索都不做，一个动作都不发。
 
     而真正卡住的（比如点进了脚本没定义过的界面），延迟结束之后搜一遍、
-    两轮都没命中就**当场结束**，而不是靠宽容期慢慢耗 —— 用户看到的是
+    一轮没命中就**当场结束**，而不是靠宽容期慢慢耗 —— 用户看到的是
     "停下来了，而且说清了为什么"，不是"卡着不动也不报错"。
     """
 
@@ -682,46 +682,38 @@ class FlowEngine:
     def _relocate_after_failure(
         self, node: Node, failure: StepOutcome, *, now: float
     ) -> bool:
-        """一步失败了：拿**新帧**看看现在到底在哪，该挪就挪。
+        """一步失败了：先确认当前位置，再回溯流程，最后才扩散状态树。
 
-        和 :meth:`_realign` 的区别只在**触发原因**（这里是"某步失败"，
-        那里是"进 tick 时自检就不符"）和**日志措辞** —— 定位与挪游标那套
-        完全共用，不另写一份（否则"怎么判断现在在哪"就有了两个出处）。
+        顺序：
 
-        ## 为什么必须重新取帧
-
-        失败之前那次 ``locate`` 用的是**已经用过的帧**（``_frame()`` 在 TTL 内复用），
-        而失败的那一步很可能已经点了按钮 —— 那张图过期了。
-        不作废帧的话，这里会得出"位置没变"的错误结论。
-
-        :return: 游标**已经挪过**了返回 True（调用方就不要再 ``_note_advance``，
-            否则会在新节点上再判一次边、把中间节点跳过去）。
+        1. 重新取帧，确认当前节点对应的状态；确认成功 -> 原地继续；
+        2. 如果是正常的下一页（有边接住）-> 正常推进；
+        3. 页面不稳定时等 :attr:`CONFIRM_DELAY` 秒再确认一次；
+        4. 仍不对 -> 沿 :attr:`GraphCursor.history` 往回找最多
+           :attr:`BACKTRACK_STEPS` 个节点，哪个节点的状态能对上就跳回去；
+        5. 都不行 -> 交给状态树重定位。
         """
         # 作废缓存 -> 真的抓一张新的
         self.ctx.invalidate_frame()
         frame = self.ctx.frame()
+        bound = self.binding.state_of(node.id)
         found = self.scenario.tree.locate(
-            frame, self.tracker.current_id, expected=self.binding.state_of(node.id), now=now
+            frame, self.tracker.current_id, expected=bound, now=now
         )
         if not found.ok or found.value is None:
-            # 底层定位出错：不猜，交给下一轮（它有自己的错误处理）。
             log.debug("节点 %r 步骤失败后重新定位出错: %s", node.id, found.message)
             return False
         self.tracker.update(found.value, now=now, reason="失败后重新定位")
         anchor = self.tracker.current_id
 
-        bound = self.binding.state_of(node.id)
         if bound is None:
-            # 节点不关联状态（纯逻辑/纯等待节点）：没有"该在的位置"可言，
-            # 不猜、不挪 —— 下一轮它会照常再试一次。
+            # 节点不关联状态（纯逻辑/纯等待节点）：没有“该在的位置”可言。
             log.debug("节点 %r 不关联状态，步骤失败后不做重定位", node.id)
             return False
 
         if anchor == bound:
-            # 画面还在原地：失败是"这一步没命中"，不是"位置跑了"。
-            # **不挪** —— 挪了等于把游标从正确的位置上踢开。
             log.info(
-                "节点 %r 的步骤 %r 失败（%s），但位置没变（仍是 %r）—— 不重定位",
+                "节点 %r 的步骤 %r 失败（%s），但当前位置仍是 %r -> 原地重试",
                 node.id,
                 failure.step,
                 failure.message,
@@ -729,8 +721,7 @@ class FlowEngine:
             )
             return False
 
-        # 画面确实变了：如果某条出边等的就是新画面，那是**正常推进**
-        # （点了按钮、进了下一屏），不该记成重定位。
+        # 页面明确是下一页：按边正常推进，不要回溯
         if anchor != UNKNOWN_PAGE and self._advance_if_edge_matches(now=now):
             log.info(
                 "节点 %r 的步骤 %r 失败（%s），但画面已到下一页 -> 按边推进",
@@ -740,9 +731,82 @@ class FlowEngine:
             )
             return True
 
-        # 位置确实变了、又没有边接得住：交给和自检不符时**同一套**重定位逻辑
-        # （慢路径确认 + 关联表反查 + 记 Recovery）
+        # 页面可能只是还没稳定：等 3 秒再确认一次当前状态
+        self.ctx.sleep(self.CONFIRM_DELAY)
+        now = self.ctx.now()
+        self.ctx.invalidate_frame()
+        frame = self.ctx.frame()
+        found = self.scenario.tree.locate(
+            frame, self.tracker.current_id, expected=bound, now=now
+        )
+        if found.ok and found.value is not None:
+            self.tracker.update(found.value, now=now, reason="失败后二次确认")
+            anchor = self.tracker.current_id
+            if anchor == bound:
+                log.info(
+                    "节点 %r 的步骤 %r 失败，等待 %.1fs 后确认回到 %r -> 原地重试",
+                    node.id,
+                    failure.step,
+                    self.CONFIRM_DELAY,
+                    anchor,
+                )
+                return False
+            if anchor != UNKNOWN_PAGE and self._advance_if_edge_matches(now=now):
+                log.info(
+                    "节点 %r 的步骤 %r 失败，等待后画面到下一页 -> 按边推进",
+                    node.id,
+                    failure.step,
+                )
+                return True
+
+        # 流程链回溯：最近 10 个历史节点，哪个状态能对上就跳回去
+        if self._backtrack_by_history(frame, node, now=now, cause="步骤失败"):
+            return True
+
+        # 最后才沿状态树扩散
         return self._realign(frame, node, bound, anchor, now=now, cause="步骤失败")
+
+    def _backtrack_by_history(
+        self, frame: Frame, node: Node, *, now: float, cause: str
+    ) -> bool:
+        """沿流程 history 往回找最多 ``BACKTRACK_STEPS`` 步。
+
+        找到某个历史节点的状态和当前画面匹配，就把游标跳回那个节点；
+        本轮不执行，下一轮从那个节点继续。
+        """
+        seen: set[NodeId] = set()
+        history = self.cursor.history[:-1]
+        for ancestor_id in reversed(history[-self.BACKTRACK_STEPS :]):
+            if ancestor_id == node.id or ancestor_id in seen:
+                continue
+            seen.add(ancestor_id)
+            state = self.binding.state_of(ancestor_id)
+            if state is None:
+                continue
+            found = self.scenario.tree.locate(
+                frame, self.tracker.current_id, expected=state, now=now
+            )
+            if not found.ok or found.value is None or found.value.id != state:
+                continue
+            self.tracker.update(found.value, now=now, reason="流程回溯")
+            if not self.cursor.advance(ancestor_id, now=now):
+                continue
+            self._note_recovery(
+                node.id,
+                self.binding.state_of(node.id) or state,
+                state,
+                ancestor_id,
+                found.value,
+            )
+            log.info(
+                "%s：节点 %r 失败，沿流程回溯到 %r（状态 %r）",
+                cause,
+                node.id,
+                ancestor_id,
+                state,
+            )
+            return True
+        return False
 
     #: 重定位时先查"最近待过的状态"队列，查几个。
     #:
@@ -751,10 +815,16 @@ class FlowEngine:
     #: 状态拉进来（那等于没有优先级，还不如直接扩散）。
     RECENT_STATES = 5
 
+    #: 当前状态确认失败后，先等多久再确认一次（处理“页面刚开始不稳定”）。
+    CONFIRM_DELAY = 3.0
+
+    #: 沿流程 history 最多回溯多少个节点。
+    BACKTRACK_STEPS = 10
+
     #: 重定位搜几轮。一轮落空说明"这一瞬间的画面不属于任何状态"，
     #: 而过渡动画会持续几帧 —— 第二轮给画面一点时间变成可识别的样子。
     #: 再多没意义：同一个画面探第三遍和第一遍没有区别。
-    RECOVER_PASSES = 2
+    RECOVER_PASSES = 1
 
     #: 判定"出问题了"之后、真正开始搜之前，先等多久（秒）。
     #:
@@ -783,7 +853,7 @@ class FlowEngine:
 
         1. 锚点认不出来（``unknown``）-> **记下"该重定位了"，然后等
            :attr:`RECOVER_DELAY` 秒**。等的时候自检一旦通过就把这件事忘掉
-           （那只是过场动画）；等满了再搜树，搜不到就当场结束。
+           （那只是过场动画）；等满了再搜树（一轮），搜不到就当场结束。
            认不出来时**绝不猜**，也绝不动作；
         2. 认得出但和预期不同 -> 用**慢路径**确认一下真实状态（快路径只验了预期），
            再问关联表"这归哪个节点管"，把游标挪过去；
@@ -801,6 +871,10 @@ class FlowEngine:
             self._note_advance(now=now)
             return True
         self._pending_recover = None
+
+        # 先沿流程 history 回溯；能对上历史节点的状态就不用扩散状态树。
+        if self._backtrack_by_history(frame, node, now=now, cause=cause):
+            return True
 
         # 认得出、只是和预期不同：**不用等**（画面已经明确可识别了），直接搜。
         # 慢路径：先查"最近待过的"队列，再沿树扩散。快路径只验了 expected，

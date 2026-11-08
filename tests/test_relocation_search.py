@@ -446,7 +446,7 @@ class TestRecoverDelay:
             assert engine.report.errors, "该留一条 errors"
             message = engine.report.errors[0]
             assert "所有状态" in message
-            assert "2 轮" in message, f"该说清搜了几轮: {message}"
+            assert "1 轮" in message, f"该说清搜了几轮: {message}"
             stop = engine._stop_message
             assert "5s" in stop, f"该说清等了多久: {stop}"
         finally:
@@ -457,5 +457,5 @@ class TestRecoverDelay:
         from gamebot.flow.engine import FlowEngine
 
         assert FlowEngine.RECOVER_DELAY == 5.0
-        assert FlowEngine.RECOVER_PASSES == 2
+        assert FlowEngine.RECOVER_PASSES == 1
         assert FlowEngine.RECENT_STATES == 5
