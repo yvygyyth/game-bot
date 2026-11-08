@@ -31,18 +31,6 @@ if TYPE_CHECKING:
     from gamebot.context import RunContext
 
 __all__ = [
-    "ACTIVITY_CARD_POINTS",
-    "FLOWER_FRIEND",
-    "FLOWER_GIFT",
-    "FLOWER_ITEM",
-    "FLOWER_X100",
-    "JUNXU_CLAIM_POINTS",
-    "SHOP_ITEM_GONGHUI",
-    "SHOP_ITEM_QINGMEI",
-    "SHOP_ITEM_ZHANYI",
-    "SHOP_TAB_COPPER",
-    "SHOP_TAB_GOLD",
-    "SHOP_TAB_JINLAN",
     "buy_shop_then_finish",
     "claim_gallery_then_finish",
     "draw_then_gallery",
@@ -55,35 +43,7 @@ __all__ = [
     "zhu_jiu_step",
 ]
 
-#: 活动卜卦：点上排牌堆里随便两张（最左、最右两张牌的中心）。
-ACTIVITY_CARD_POINTS = (Point(735, 584), Point(2203, 584))
-
-#: 商店页签位置（黄金/铜钱/金兰）。
-SHOP_TAB_GOLD = Point(1306, 354)
-SHOP_TAB_COPPER = Point(1669, 354)
-SHOP_TAB_JINLAN = Point(2017, 354)
-
-#: 各商店里「名将册」等商品的大致位置（客户区固定）。
-SHOP_ITEM_QINGMEI = Point(525, 600)
-SHOP_ITEM_ZHANYI = Point(2050, 600)
-SHOP_ITEM_GONGHUI = Point(2050, 600)
-
-#: 送花界面固定点：送礼 / 油菜花 / 赠送x100 / 好友头像。
-FLOWER_GIFT = Point(330, 990)
-FLOWER_ITEM = Point(1865, 980)
-FLOWER_X100 = Point(2270, 1210)
-FLOWER_FRIEND = Point(480, 400)
-
 SETTLE = 0.9
-
-#: 军需月令页：两个「立即领取」按钮（普通 / 高级）。
-JUNXU_CLAIM_POINTS = (Point(1054, 1076), Point(1931, 1076))
-
-#: 活动左侧菜单的悬停点（滚轮要指在上面才响应）。
-JUNXU_MENU_POINT = Point(180, 800)
-
-#: 丹青阁每日礼包固定点（新布局左下角）。
-GALLERY_GIFT_POINT = Point(145, 1205)
 
 
 def _close_activity_reward(ctx: RunContext) -> None:
@@ -108,8 +68,10 @@ def _claim_junxu(ctx: RunContext) -> bool:
 
     找不到就返回 False，不阻断后续抽卡/丹青阁。
     """
+    menu_point = Point(180, 800)
+    claim_points = (Point(1054, 1076), Point(1931, 1076))
     for _ in range(3):
-        actions.scroll(ctx.session, -4, point=JUNXU_MENU_POINT)
+        actions.scroll(ctx.session, -4, point=menu_point)
         ctx.invalidate_frame()
         ctx.sleep(0.6)
         hit = ctx.frame().find_text("军需月令")
@@ -117,7 +79,7 @@ def _claim_junxu(ctx: RunContext) -> bool:
             actions.click_source_point(ctx.session, hit.value)
             ctx.invalidate_frame()
             ctx.sleep(1.0)
-            for point in JUNXU_CLAIM_POINTS:
+            for point in claim_points:
                 actions.click_source_point(ctx.session, point)
                 ctx.sleep(0.7)
             press(ctx, "esc", settle=0.8)
@@ -178,7 +140,7 @@ def mail_claim_then_activity(ctx: RunContext) -> ActionResult[Any]:
 
 def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     """活动：抽两张卡（今日卦象）→ 关活动 → 点丹青阁入口。"""
-    for point in ACTIVITY_CARD_POINTS:
+    for point in (Point(735, 584), Point(2203, 584)):
         actions.click_source_point(ctx.session, point)
         ctx.invalidate_frame()
         # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
@@ -207,7 +169,7 @@ def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
         gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
     if not gift.ok:
         # 新布局/红点变化时模板可能对不上，兜底点左下角每日礼包
-        actions.click_source_point(ctx.session, GALLERY_GIFT_POINT)
+        actions.click_source_point(ctx.session, Point(145, 1205))
         ctx.invalidate_frame()
         ctx.sleep(0.8)
         gift = ActionResult.success("点每日礼包固定点")
@@ -227,7 +189,10 @@ def _buy_if_present(ctx: RunContext, template: str) -> bool:
 
 def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
     """商店：黄金免费兵力 → 铜钱灵犀宝箱 → 金兰名将册。"""
-    actions.click_source_point(ctx.session, SHOP_TAB_GOLD)
+    gold_tab = Point(1306, 354)
+    copper_tab = Point(1669, 354)
+    jinlan_tab = Point(2017, 354)
+    actions.click_source_point(ctx.session, gold_tab)
     ctx.sleep(0.6)
     free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
     if free.ok:
@@ -236,14 +201,14 @@ def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
     # 铜钱页签用「铜钱」艺术字模板，别按固定坐标
     tab = click_image(ctx, T_SHOP_TAB_COPPER, confidence=0.9, settle=0.6)
     if not tab.ok:
-        actions.click_source_point(ctx.session, SHOP_TAB_COPPER)
+        actions.click_source_point(ctx.session, copper_tab)
         ctx.sleep(0.6)
     _buy_if_present(ctx, T_SHOP_LINGXI)
     press(ctx, "esc", settle=0.5)
 
     tab = click_image(ctx, T_SHOP_TAB_JINLAN, confidence=0.9, settle=0.6)
     if not tab.ok:
-        actions.click_source_point(ctx.session, SHOP_TAB_JINLAN)
+        actions.click_source_point(ctx.session, jinlan_tab)
         ctx.sleep(0.6)
     _buy_if_present(ctx, T_SHOP_MINGJIANG)
     press(ctx, "esc", settle=0.5)
@@ -286,13 +251,17 @@ def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
 
 def send_flower_finish(ctx: RunContext) -> ActionResult[Any]:
     """好友：送礼 → 选油菜花 → 赠送x100 → 点好友 → 关。"""
-    actions.click_source_point(ctx.session, FLOWER_GIFT)
+    gift_button = Point(330, 990)
+    flower = Point(1865, 980)
+    x100 = Point(2270, 1210)
+    friend = Point(480, 400)
+    actions.click_source_point(ctx.session, gift_button)
     ctx.sleep(0.6)
-    actions.click_source_point(ctx.session, FLOWER_ITEM)
+    actions.click_source_point(ctx.session, flower)
     ctx.sleep(0.4)
-    actions.click_source_point(ctx.session, FLOWER_X100)
+    actions.click_source_point(ctx.session, x100)
     ctx.sleep(0.4)
-    actions.click_source_point(ctx.session, FLOWER_FRIEND)
+    actions.click_source_point(ctx.session, friend)
     ctx.sleep(0.8)
     _esc(ctx, 2)
     return ActionResult.success("送花完成", action="sequence")
