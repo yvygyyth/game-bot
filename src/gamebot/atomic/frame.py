@@ -443,6 +443,117 @@ class Frame:
             scores=[box.score for box in boxes],
         )
 
+    def read_regions(
+        self,
+        regions: tuple[Region, ...] | list[Region],
+        lang: str = "ch",
+        confidence: float = 0.8,
+        *,
+        gap: int = 12,
+    ) -> ActionResult[list[list[Any]]]:
+        """一次 OCR 多个不连续区域，返回和 ``regions`` 一一对应的文本框。
+
+        做法：把每个区域裁出来，横向拼到一张画布（段间留 ``gap`` 像素黑边），
+        只调用一次 OCR；再按 x 把识别框分回各段，并加回原图偏移。
+
+        返回的 ``TextBox.point/region`` 已经是**源分辨率坐标**，可直接点击；
+        ``value[i]`` 是第 i 个区域里的所有文本框。
+        """
+        import numpy as np
+
+        from .vision import TextBox
+
+        return self.cached(
+            ("read_regions", tuple(regions), lang, confidence, gap),
+            lambda: self._read_regions(regions, lang, confidence, gap, np, TextBox),
+        )
+
+    def _read_regions(
+        self,
+        regions: tuple[Region, ...] | list[Region],
+        lang: str,
+        confidence: float,
+        gap: int,
+        np: Any,
+        text_box_type: Any,
+    ) -> ActionResult[list[list[Any]]]:
+        reader = self._reader()
+        if reader is None:
+            return _unbound()
+        _mark_frame(self)
+
+        started = perf_counter()
+        searches = [self._resolve_region(region) for region in regions]
+        crops: list[Any] = []
+        for search in searches:
+            if search.is_empty:
+                crops.append(None)
+            else:
+                crops.append(
+                    self._image[search.y : search.y + search.h, search.x : search.x + search.w]
+                )
+
+        valid = [crop for crop in crops if crop is not None and crop.size]
+        if not valid:
+            return ActionResult.success(
+                [[] for _ in regions], elapsed=perf_counter() - started, regions=regions
+            )
+
+        height = max(crop.shape[0] for crop in valid)
+        width = sum(crop.shape[1] for crop in valid) + gap * max(0, len(valid) - 1)
+        channels = self._image.shape[2] if self._image.ndim == 3 else 1
+        canvas = np.zeros((height, width, channels), dtype=self._image.dtype)
+        segments: list[tuple[int, int, Region]] = []
+        cursor = 0
+        for search, crop in zip(searches, crops, strict=True):
+            if crop is None or not crop.size:
+                segments.append((cursor, 0, search))
+                continue
+            canvas[0 : crop.shape[0], cursor : cursor + crop.shape[1]] = crop
+            segments.append((cursor, crop.shape[1], search))
+            cursor += crop.shape[1] + gap
+
+        try:
+            boxes = reader.read_boxes(canvas, lang=lang, confidence=confidence)
+        except Exception as exc:
+            return ActionResult.error(
+                f"多区域 OCR 失败: {exc}", exc=exc, elapsed=perf_counter() - started
+            )
+
+        groups: list[list[Any]] = [[] for _ in regions]
+        for box in boxes:
+            for index, (seg_x, seg_w, search) in enumerate(segments):
+                if seg_w and seg_x <= box.point.x < seg_x + seg_w:
+                    local = Point(box.point.x - seg_x + search.x, box.point.y + search.y)
+                    rect = Region(
+                        box.region.x - seg_x + search.x,
+                        box.region.y + search.y,
+                        box.region.w,
+                        box.region.h,
+                    )
+                    groups[index].append(
+                        text_box_type(
+                            point=self._to_source(local),
+                            text=box.text,
+                            score=box.score,
+                            region=Region(
+                                rect.x + self._origin.x,
+                                rect.y + self._origin.y,
+                                rect.w,
+                                rect.h,
+                            ),
+                        )
+                    )
+                    break
+
+        elapsed = perf_counter() - started
+        return ActionResult.success(
+            groups,
+            elapsed=elapsed,
+            regions=regions,
+            counts=[len(group) for group in groups],
+        )
+
     def read_text(
         self,
         region: Region,

@@ -168,6 +168,33 @@ class RapidOcrReader:
             )
         return boxes
 
+    def read_boxes(
+        self,
+        image: np.ndarray,
+        *,
+        region: Region | None = None,
+        lang: str = "ch",
+        confidence: float = 0.8,
+    ) -> list[TextBox]:
+        """读出区域里的所有文本框，坐标相对传入的整张图。"""
+        search = _normalize_region(region, image.shape)
+        if search.is_empty:
+            return []
+        boxes: list[TextBox] = []
+        for box, recognized, score in self._run(_crop(image, search)):
+            if score < confidence or score < self.box_threshold:
+                continue
+            rect, center = self._box_region(box)
+            boxes.append(
+                TextBox(
+                    point=center.offset(search.x, search.y),
+                    text=recognized,
+                    score=score,
+                    region=rect.offset(search.x, search.y),
+                )
+            )
+        return boxes
+
     def read(
         self,
         image: np.ndarray,
@@ -303,6 +330,37 @@ class TesseractReader:
             rect = Region(row["x"], row["y"], row["w"], row["h"]).offset(search.x, search.y)
             boxes.append(
                 TextBox(point=rect.center, text=row["text"], score=row["score"], region=rect)
+            )
+        return boxes
+
+    def read_boxes(
+        self,
+        image: np.ndarray,
+        *,
+        region: Region | None = None,
+        lang: str = "ch",
+        confidence: float = 0.8,
+    ) -> list[TextBox]:
+        search = _normalize_region(region, image.shape)
+        if search.is_empty:
+            return []
+        boxes: list[TextBox] = []
+        for row in self._data(_crop(image, search)):
+            if row["score"] < confidence:
+                continue
+            rect = Region(
+                int(row["x"]) + search.x,
+                int(row["y"]) + search.y,
+                max(1, int(row["w"])),
+                max(1, int(row["h"])),
+            )
+            boxes.append(
+                TextBox(
+                    point=rect.center,
+                    text=row["text"],
+                    score=row["score"],
+                    region=rect,
+                )
             )
         return boxes
 

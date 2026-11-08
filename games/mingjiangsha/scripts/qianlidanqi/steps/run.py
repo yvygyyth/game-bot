@@ -360,10 +360,13 @@ def run_battle(ctx: RunContext) -> ActionResult[Any]:
 
 def pick_gift(ctx: RunContext) -> ActionResult[Any]:
     """赠礼第一屏：OCR 三个武将名 → 按优先表选一个点它。"""
-    titles: list[str] = []
-    for region in REWARD_TITLE_REGIONS:
-        read = ctx.frame().read_text(region)
-        titles.append(read.value if read.ok and read.value is not None else "")
+    # 三个标题拼一张画布只 OCR 一次；返回按区域分组的文本框
+    read = ctx.frame().read_regions(REWARD_TITLE_REGIONS)
+    groups = read.value if read.ok and read.value else []
+    titles = [
+        next((box.text for box in groups[i] if box.text), "") if i < len(groups) else ""
+        for i in range(len(REWARD_TITLE_REGIONS))
+    ]
 
     state = get_run_state(ctx)
     slot = pick_reward_slot(titles, state)

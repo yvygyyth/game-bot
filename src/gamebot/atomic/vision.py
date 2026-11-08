@@ -154,6 +154,17 @@ class TextReader(Protocol):
         """读出区域内的全部文本，用空格拼接。"""
         ...
 
+    def read_boxes(
+        self,
+        image: ImageArray,
+        *,
+        region: Region | None = None,
+        lang: str = "ch",
+        confidence: float = 0.8,
+    ) -> list[TextBox]:
+        """读出区域内的所有文本框（含位置）。"""
+        ...
+
 
 # --------------------------------------------------------------------------- #
 # 退化实现：没装 OCR 时用它，让上层照常拿到 NOT_FOUND 而不是 ImportError
@@ -189,6 +200,16 @@ class UnavailableTextReader:
         confidence: float = 0.8,
     ) -> str:
         return ""
+
+    def read_boxes(
+        self,
+        image: ImageArray,
+        *,
+        region: Region | None = None,
+        lang: str = "ch",
+        confidence: float = 0.8,
+    ) -> list[TextBox]:
+        return []
 
     def __repr__(self) -> str:
         return f"UnavailableTextReader({self.reason!r})"
