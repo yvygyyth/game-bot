@@ -140,11 +140,11 @@ def mail_claim_then_activity(ctx: RunContext) -> ActionResult[Any]:
 
 def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     """活动：抽两张卡（今日卦象）→ 关活动 → 点丹青阁入口。"""
-    for point in (Point(735, 584), Point(2203, 584)):
+    for point in (Point(735, 584), Point(735, 584)):
         actions.click_source_point(ctx.session, point)
         ctx.invalidate_frame()
         # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
-        ctx.sleep(1.2)
+        ctx.sleep(3)
     # 第二张翻完会弹「恭喜获得」，不关掉会挡住军需月令/退出
     _close_activity_reward(ctx)
     # 军需月令在活动左侧列表下面，先滚下去领；找不到也不影响后面的丹青阁

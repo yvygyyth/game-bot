@@ -536,7 +536,11 @@ class WindowsInputBackend:
         if point is not None:
             x, y = self._absolute(point)
             impl.moveTo(x, y, duration=0)
-        impl.scroll(clicks)
+        # 游戏只认“滚轮次数”，不认一次大 delta：必须一格一格发。
+        direction = 1 if clicks > 0 else -1
+        for _ in range(abs(clicks)):
+            impl.scroll(direction)
+            time.sleep(0.03)
 
     def type_text(self, text: str, *, interval: float = 0.05) -> None:
         if not text:

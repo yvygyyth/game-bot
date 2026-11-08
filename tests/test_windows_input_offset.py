@@ -80,6 +80,8 @@ class TestInputCoordinateOffset:
         backend, impl = make_backend((21, 49))
         backend.scroll(-3, Point(5, 6))
         assert impl.calls[0] == ("moveTo", 26, 55)
+        # 一格一格发，不能合并成一次大 delta
+        assert impl.calls.count(("scroll", 0, 0)) == 3
 
     def test_no_provider_means_zero_offset(self) -> None:
         """抓整屏时捕获区原点就是 (0,0)，这条路径也必须对。"""
