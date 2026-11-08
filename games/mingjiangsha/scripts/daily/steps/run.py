@@ -186,7 +186,14 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
 
 
 def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
-    """丹青阁：点每日礼包；关掉后开商店（下一段）。"""
+    """丹青阁：先关「丹青月令」购买弹窗，再点每日礼包，最后退出。"""
+    # 没买丹青月令时进来会直接弹购买页（有「续费」按钮）；先 Esc 回丹青阁
+    monthly = ctx.frame().find_text("续费")
+    if monthly.ok:
+        press(ctx, "esc", settle=0.8)
+        ctx.invalidate_frame()
+        ctx.sleep(1.0)
+
     gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
     if not gift.ok:
         # 刚进来可能弹「丹青月令」购买；Esc 关掉后再找礼包
