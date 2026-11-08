@@ -10,6 +10,7 @@ __all__ = [
     "T_FREE_BINGLI",
     "T_GALLERY_ENTRY",
     "T_GALLERY_GIFT",
+    "T_GALLERY_MONTHLY",
     "T_GALLERY_STATE",
     "T_GONGHUI_STORE_ENTRY",
     "T_GONG_HUI_ENTRY",
@@ -51,6 +52,8 @@ T_GALLERY_STATE = "state_gallery.png"
 # ---- 按钮 ----
 T_MAIL_ONE_CLICK = "mail_one_click.png"
 T_GALLERY_GIFT = "gallery_gift.png"
+#: 丹青月令购买页的「续费」按钮（艺术字，用模板不 OCR）。
+T_GALLERY_MONTHLY = "gallery_monthly.png"
 
 # ---- 商店 ----
 T_SHOP_ENTRY = "entry/shop.png"

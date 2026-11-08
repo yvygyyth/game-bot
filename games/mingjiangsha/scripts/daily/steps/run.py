@@ -14,6 +14,7 @@ from ..red import has_red
 from ..templates import (
     T_FREE_BINGLI,
     T_GALLERY_GIFT,
+    T_GALLERY_MONTHLY,
     T_GONGHUI_STORE_ENTRY,
     T_HOME,
     T_LINGXI,
@@ -188,7 +189,7 @@ def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
 def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
     """丹青阁：先关「丹青月令」购买弹窗，再点每日礼包，最后退出。"""
     # 没买丹青月令时进来会直接弹购买页（有「续费」按钮）；先 Esc 回丹青阁
-    monthly = ctx.frame().find_text("续费")
+    monthly = ctx.frame().find_image(T_GALLERY_MONTHLY)
     if monthly.ok:
         press(ctx, "esc", settle=0.8)
         ctx.invalidate_frame()
