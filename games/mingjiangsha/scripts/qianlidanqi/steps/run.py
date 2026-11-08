@@ -52,9 +52,11 @@ from ..templates import (
     T_REWARD_TOKEN,
     T_SHI_ATTACK,
     T_SHOP_BUY_TITLE,
+    T_SHOP_CANCEL,
     T_SHOP_CONFIRM,
     T_SHOP_EXIT,
     T_SHOP_EXIT_PROMPT,
+    T_SHOP_GRAY,
     T_START_BATTLE,
     T_ZHUGE_CONTINUE,
 )
@@ -439,6 +441,21 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
         buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
         if not buy.ok:
             continue
+
+        # 购买按钮是灰色边框 = 钱不够：点取消，直接结束本轮购买
+        gray = ctx.frame().find_image(
+            T_SHOP_GRAY, region=Region(700, 880, 550, 220), confidence=0.95
+        )
+        if gray.ok:
+            cancel = ctx.frame().find_image(T_SHOP_CANCEL)
+            if cancel.ok and cancel.value is not None:
+                actions.click_source_point(ctx.session, cancel.value)
+            else:
+                actions.click_source_point(ctx.session, Point(1517, 1009))
+            ctx.invalidate_frame()
+            ctx.sleep(0.6)
+            break
+
         clicked = actions.click_source_point(ctx.session, SHOP_BUY_POINT)
         if not clicked.ok:
             return clicked
