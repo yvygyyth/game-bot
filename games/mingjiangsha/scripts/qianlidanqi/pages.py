@@ -60,7 +60,7 @@ from .templates import (
     T_PICK_TITLE,
     T_PLACEHOLDER,
     T_POCKET_CONFIRM,
-    T_POCKET_TITLE,
+    T_POCKET_OPTION,
     T_REST_TITLE,
     T_SEARCH,
     T_SELECT_TITLE,
@@ -126,7 +126,7 @@ SHOP_TITLE_ROI = Region(300, 10, 700, 140)
 REST_TITLE_ROI = Region(80, 130, 400, 140)
 
 #: 锦囊标题「三顾茅庐」。
-POCKET_TITLE_ROI = Region(1550, 120, 430, 150)
+POCKET_OPTION_ROI = Region(100, 1020, 1800, 200)
 
 #: 锦囊确认按钮「确认」。
 POCKET_CONFIRM_ROI = Region(930, 1040, 700, 180)
@@ -299,7 +299,7 @@ FEATURE_TREE = PageGroup(
                             "qianli/pocket/choice",
                             name="局内 · 锦囊 · 三选一",
                             queries=(
-                                ImageQuery(T_POCKET_TITLE, region=POCKET_TITLE_ROI),
+                                ImageQuery(T_POCKET_OPTION, region=POCKET_OPTION_ROI),
                             ),
                             description="锦囊/奇遇三选一：点一个选项，可能再弹、确认或直接进战斗",
                         ),

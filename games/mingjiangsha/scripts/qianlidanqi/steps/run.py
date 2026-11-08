@@ -48,6 +48,7 @@ from ..templates import (
     T_NODE_ZHUGE,
     T_NODE_ZUO_CI,
     T_POCKET_CONFIRM,
+    T_POCKET_OPTION,
     T_REWARD_BUFF,
     T_REWARD_CARD,
     T_REWARD_HELP,
@@ -75,7 +76,6 @@ __all__ = [
     "EVENT_OPTION_REGIONS",
     "MOZI_OPTION_POINTS",
     "PENDING_GENERAL_KEY",
-    "POCKET_OPTION_POINTS",
     "REST_OPTION_POINT",
     "SHOP_BUY_POINT",
     "SHOP_MIN_COINS",
@@ -162,8 +162,6 @@ ZHUGE_CARD_POINT = Point(1935, 690)
 ZHUGE_CONTINUE_POINT = Point(1300, 600)
 
 #: 锦囊三选一的三个选项中心（随便点一个）。
-POCKET_OPTION_POINTS = (Point(457, 1150), Point(1317, 1150), Point(2155, 1150))
-
 # ---- 奇遇 ----
 #: 奇遇介绍页左下角的金色按钮（选择事件/选择武将）。
 EVENT_ENTER_REGION = Region(650, 1140, 620, 220)
@@ -497,8 +495,11 @@ def choose_rest(ctx: RunContext) -> ActionResult[Any]:
 
 
 def choose_pocket(ctx: RunContext) -> ActionResult[Any]:
-    """锦囊三选一：随便点一个。可能还是这屏、可能到确认、也可能直接进战斗。"""
-    point = random.choice(POCKET_OPTION_POINTS)
+    """锦囊三选一：用卡片左上角花纹找出三个选项，随机点一个。"""
+    hits = ctx.frame().find_all_images(T_POCKET_OPTION, min_distance=80, max_count=3)
+    if not hits.ok or not hits.value:
+        return ActionResult.not_found("锦囊三选一没找到选项", template=T_POCKET_OPTION)
+    point = random.choice(hits.value)
     clicked = actions.click_source_point(ctx.session, point)
     if not clicked.ok:
         return clicked

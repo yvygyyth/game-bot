@@ -50,7 +50,7 @@ __all__ = [
     "T_PICK_TITLE",
     "T_PLACEHOLDER",
     "T_POCKET_CONFIRM",
-    "T_POCKET_TITLE",
+    "T_POCKET_OPTION",
     "T_QIANLI_CARD",
     "T_REST_TITLE",
     "T_REWARD_BUFF",
@@ -152,7 +152,7 @@ T_SHI_ATTACK = "flow/shi_attack.png"
 
 # ---- 锦囊（奇遇） ----
 #: 「三顾茅庐」标题（锦囊当前这一种）。
-T_POCKET_TITLE = "flow/pocket_title.png"
+T_POCKET_OPTION = "flow/pocket_option.png"
 #: 锦囊确认页的「确认」按钮。
 T_POCKET_CONFIRM = "flow/pocket_confirm.png"
 
