@@ -28,6 +28,9 @@ from ..store import (
 )
 from ..templates import (
     T_CLAIM_REWARD,
+    T_EVENT_FEIFEI_BARGAIN,
+    T_EVENT_FEIFEI_HELP,
+    T_EVENT_FEIFEI_SLEEP,
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
     T_FIGHT_CANCEL,
@@ -170,7 +173,7 @@ EVENT_OPTION_REGIONS = (Region(1000, 450, 900, 140), Region(1000, 700, 900, 140)
 EVENT_OPTION_POINTS = (Point(1300, 530), Point(1300, 775))
 
 #: 妃妃选项优先级（老代码：我来帮你 > 讨价还价）。
-EVENT_OPTION_PRIORITY = ("我来帮你", "讨价还价")
+EVENT_OPTION_PRIORITY = ("快睡午觉", "我来帮你", "讨价还价")
 
 
 def choose_node(ctx: RunContext) -> ActionResult[Any]:
@@ -515,7 +518,25 @@ def enter_event(ctx: RunContext) -> ActionResult[Any]:
 
 
 def choose_event_option(ctx: RunContext) -> ActionResult[Any]:
-    """奇遇选择页：按妃妃优先级选一行；其他事件先选第一行。"""
+    """奇遇选择页：妃妃按图片优先级选；其他事件先选第一行。
+
+    妃妃优先级：快睡午觉 > 我来帮你 > 讨价还价（艺术字，用模板不 OCR）。
+    """
+    for template, name in (
+        (T_EVENT_FEIFEI_SLEEP, "快睡午觉"),
+        (T_EVENT_FEIFEI_HELP, "我来帮你"),
+        (T_EVENT_FEIFEI_BARGAIN, "讨价还价"),
+    ):
+        hit = ctx.frame().find_image(template)
+        if hit.ok and hit.value is not None:
+            clicked = actions.click_source_point(ctx.session, hit.value)
+            if not clicked.ok:
+                return clicked
+            ctx.invalidate_frame()
+            ctx.sleep(0.8)
+            return clicked.with_meta(option=name, point=(hit.value.x, hit.value.y))
+
+    # 其他事件没有这几张模板：退回 OCR，再不行点第一行
     texts: list[str] = []
     for region in EVENT_OPTION_REGIONS:
         read = ctx.frame().read_text(region)
