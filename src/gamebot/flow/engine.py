@@ -764,7 +764,15 @@ class FlowEngine:
             return True
 
         # 最后才沿状态树扩散
-        return self._realign(frame, node, bound, anchor, now=now, cause="步骤失败")
+        return self._realign(
+            frame,
+            node,
+            bound,
+            anchor,
+            now=now,
+            cause="步骤失败",
+            try_backtrack=False,
+        )
 
     def _backtrack_by_history(
         self, frame: Frame, node: Node, *, now: float, cause: str
@@ -846,6 +854,7 @@ class FlowEngine:
         *,
         now: float,
         cause: str = "自检不符",
+        try_backtrack: bool = True,
     ) -> bool:
         """状态对不上：走意外路径（重定位）。
 
@@ -873,7 +882,9 @@ class FlowEngine:
         self._pending_recover = None
 
         # 先沿流程 history 回溯；能对上历史节点的状态就不用扩散状态树。
-        if self._backtrack_by_history(frame, node, now=now, cause=cause):
+        if try_backtrack and self._backtrack_by_history(
+            frame, node, now=now, cause=cause
+        ):
             return True
 
         # 认得出、只是和预期不同：**不用等**（画面已经明确可识别了），直接搜。

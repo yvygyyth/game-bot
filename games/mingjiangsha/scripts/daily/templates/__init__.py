@@ -18,9 +18,7 @@ __all__ = [
     "T_HOME",
     "T_LINGXI",
     "T_MAIL_ENTRY",
-    "T_MAIL_NO_RED",
     "T_MAIL_ONE_CLICK",
-    "T_MAIL_RED",
     "T_MAIL_STATE",
     "T_MAX",
     "T_MINGJIANG",
@@ -41,10 +39,6 @@ __all__ = [
 # ---- 首页入口 ----
 T_HOME = "entry/home.png"
 T_MAIL_ENTRY = "entry/mail.png"
-#: 邮件入口「没有红点」= 今天已经领过。
-T_MAIL_NO_RED = "mail_no_red.png"
-#: 邮件红点（有红点才需要进邮箱）。
-T_MAIL_RED = "mail_red.png"
 T_ACTIVITY_ENTRY = "entry/activity.png"
 T_GALLERY_ENTRY = "entry/gallery.png"
 
