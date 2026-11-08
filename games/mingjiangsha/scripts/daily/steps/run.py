@@ -17,11 +17,13 @@ from ..templates import (
     T_GALLERY_MONTHLY,
     T_GONGHUI_STORE_ENTRY,
     T_HOME,
-    T_LINGXI,
     T_MAIL_ONE_CLICK,
     T_MAX,
-    T_MINGJIANG,
     T_QINGMEI_ENTRY,
+    T_SHOP_LINGXI,
+    T_SHOP_MINGJIANG,
+    T_SHOP_TAB_COPPER,
+    T_SHOP_TAB_JINLAN,
     T_ZHANYI_SHOP_ENTRY,
 )
 
@@ -79,6 +81,9 @@ JUNXU_CLAIM_POINTS = (Point(1054, 1076), Point(1931, 1076))
 
 #: 活动左侧菜单的悬停点（滚轮要指在上面才响应）。
 JUNXU_MENU_POINT = Point(180, 800)
+
+#: 丹青阁每日礼包固定点（新布局左下角）。
+GALLERY_GIFT_POINT = Point(145, 1205)
 
 
 def _close_activity_reward(ctx: RunContext) -> None:
@@ -201,72 +206,80 @@ def claim_gallery_then_finish(ctx: RunContext) -> ActionResult[Any]:
         press(ctx, "esc", settle=0.6)
         gift = click_image(ctx, T_GALLERY_GIFT, settle=SETTLE)
     if not gift.ok:
-        return ActionResult.not_found("丹青阁没找到「每日礼包」", template=T_GALLERY_GIFT)
+        # 新布局/红点变化时模板可能对不上，兜底点左下角每日礼包
+        actions.click_source_point(ctx.session, GALLERY_GIFT_POINT)
+        ctx.invalidate_frame()
+        ctx.sleep(0.8)
+        gift = ActionResult.success("点每日礼包固定点")
     _esc(ctx, 2)
     return ActionResult.success("丹青阁领取完成")
 
 
+def _buy_if_present(ctx: RunContext, template: str) -> bool:
+    """商店里看到目标商品才点，没看到就跳过（不按固定格子瞎买）。"""
+    item = click_image(ctx, template, confidence=0.85, settle=0.5)
+    if not item.ok:
+        return False
+    click_image(ctx, T_MAX, settle=0.4)
+    click_gold_frame(ctx, settle=0.6)
+    return True
+
+
 def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
-    """商店：黄金免费兵力 → 铜钱灵犀盒 → 金兰名将册 → 关。"""
+    """商店：黄金免费兵力 → 铜钱灵犀宝箱 → 金兰名将册。"""
     actions.click_source_point(ctx.session, SHOP_TAB_GOLD)
     ctx.sleep(0.6)
     free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
     if free.ok:
         click_gold_frame(ctx, settle=0.5)
 
-    actions.click_source_point(ctx.session, SHOP_TAB_COPPER)
-    ctx.sleep(0.6)
-    lingxi = click_image(ctx, T_LINGXI, settle=0.5)
-    if lingxi.ok:
-        click_image(ctx, T_MAX, settle=0.4)
-        click_gold_frame(ctx, settle=0.6)
+    # 铜钱页签用「铜钱」艺术字模板，别按固定坐标
+    tab = click_image(ctx, T_SHOP_TAB_COPPER, confidence=0.9, settle=0.6)
+    if not tab.ok:
+        actions.click_source_point(ctx.session, SHOP_TAB_COPPER)
+        ctx.sleep(0.6)
+    _buy_if_present(ctx, T_SHOP_LINGXI)
     press(ctx, "esc", settle=0.5)
 
-    actions.click_source_point(ctx.session, SHOP_TAB_JINLAN)
-    ctx.sleep(0.6)
-    ming = click_image(ctx, T_MINGJIANG, settle=0.5)
-    if ming.ok:
-        click_gold_frame(ctx, settle=0.6)
+    tab = click_image(ctx, T_SHOP_TAB_JINLAN, confidence=0.9, settle=0.6)
+    if not tab.ok:
+        actions.click_source_point(ctx.session, SHOP_TAB_JINLAN)
+        ctx.sleep(0.6)
+    _buy_if_present(ctx, T_SHOP_MINGJIANG)
     press(ctx, "esc", settle=0.5)
     press(ctx, "esc", settle=0.6)
     return ActionResult.success("商店购买完成")
 
 
 def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
-    """煮酒 → 青梅商店 → 买一个 → 关两层 → 开战役。"""
+    """煮酒 → 青梅商店：只买名将册/灵犀宝箱，没看到就退出。"""
     shop = click_image(ctx, T_QINGMEI_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("煮酒没找到「青梅商店」", template=T_QINGMEI_ENTRY)
-    actions.click_source_point(ctx.session, SHOP_ITEM_QINGMEI)
-    ctx.sleep(0.5)
-    click_image(ctx, T_MAX, settle=0.4)
-    click_gold_frame(ctx, settle=0.7)
+    _buy_if_present(ctx, T_SHOP_MINGJIANG)
+    _buy_if_present(ctx, T_SHOP_LINGXI)
     _esc(ctx, 2)
     return ActionResult.success("煮酒购买完成")
 
 
 def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
-    """战役 → 战役商店 → 买一个 → 关两层 → 开公会。"""
+    """战役 → 战役商店：只买名将册/灵犀宝箱，不买问鼎令。"""
     shop = click_image(ctx, T_ZHANYI_SHOP_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("战役没找到「战役商店」", template=T_ZHANYI_SHOP_ENTRY)
-    actions.click_source_point(ctx.session, SHOP_ITEM_ZHANYI)
-    ctx.sleep(0.5)
-    click_image(ctx, T_MAX, settle=0.4)
-    click_gold_frame(ctx, settle=0.7)
+    _buy_if_present(ctx, T_SHOP_MINGJIANG)
+    _buy_if_present(ctx, T_SHOP_LINGXI)
     _esc(ctx, 2)
     return ActionResult.success("战役购买完成")
 
 
 def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
-    """公会 → 商店 → 买一个 → 关两层 → 结束。"""
+    """公会 → 商店：只买名将册/灵犀宝箱。"""
     shop = click_image(ctx, T_GONGHUI_STORE_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("公会没找到「商店」入口", template=T_GONGHUI_STORE_ENTRY)
-    actions.click_source_point(ctx.session, SHOP_ITEM_GONGHUI)
-    ctx.sleep(0.5)
-    click_image(ctx, T_MAX, settle=0.4)
-    click_gold_frame(ctx, settle=0.7)
+    _buy_if_present(ctx, T_SHOP_MINGJIANG)
+    _buy_if_present(ctx, T_SHOP_LINGXI)
     _esc(ctx, 2)
     return ActionResult.success("公会购买完成")
 

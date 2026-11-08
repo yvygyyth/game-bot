@@ -26,7 +26,11 @@ __all__ = [
     "T_MINGJIANG",
     "T_QINGMEI_ENTRY",
     "T_SHOP_ENTRY",
+    "T_SHOP_LINGXI",
+    "T_SHOP_MINGJIANG",
     "T_SHOP_STATE",
+    "T_SHOP_TAB_COPPER",
+    "T_SHOP_TAB_JINLAN",
     "T_ZHANYI_SHOP_ENTRY",
     "T_ZHAN_YI_ENTRY",
     "T_ZHAN_YI_STATE",
@@ -61,6 +65,11 @@ T_SHOP_STATE = "state_shop.png"
 T_FREE_BINGLI = "free_bingli.png"
 T_LINGXI = "lingxi.png"
 T_MINGJIANG = "mingjiang.png"
+#: 新商店：灵犀宝箱 / 名将册 / 铜钱页签 / 金兰页签。
+T_SHOP_LINGXI = "shop_lingxi.png"
+T_SHOP_MINGJIANG = "shop_mingjiang.png"
+T_SHOP_TAB_COPPER = "shop_tab_copper.png"
+T_SHOP_TAB_JINLAN = "shop_tab_jinlan.png"
 T_MAX = "max.png"
 
 # ---- 煮酒/战役/公会 ----
