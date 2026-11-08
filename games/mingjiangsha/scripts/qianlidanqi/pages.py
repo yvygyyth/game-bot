@@ -128,6 +128,9 @@ REST_TITLE_ROI = Region(80, 130, 400, 140)
 #: 锦囊标题「三顾茅庐」。
 POCKET_OPTION_ROI = Region(100, 1020, 1800, 200)
 
+#: 战斗预览「开始对局」所在的下方区域（按钮完整包住，比全屏快）。
+START_BATTLE_ROI = Region(600, 1050, 800, 300)
+
 #: 锦囊确认按钮「确认」。
 POCKET_CONFIRM_ROI = Region(930, 1040, 700, 180)
 
@@ -211,7 +214,7 @@ FEATURE_TREE = PageGroup(
                         PageLeaf(
                             "qianli/pre_battle",
                             name="局内 · 战斗预览",
-                            queries=(ImageQuery(T_START_BATTLE),),
+                            queries=(ImageQuery(T_START_BATTLE, region=START_BATTLE_ROI),),
                             description="点节点后的战斗预览：开始对局 / 再想一想",
                         ),
                         PageLeaf(

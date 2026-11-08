@@ -15,7 +15,7 @@ from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.utils import click_gold_frame
 
-from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI
+from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
     RewardKind,
     get_run_state,
@@ -272,9 +272,11 @@ def start_battle(ctx: RunContext) -> ActionResult[Any]:
     （金色花纹按钮，只认边框、不认文字）。
     """
     # 先精确模板（单张匹配快、实测 1.0）；失败再走通用确认（全屏多模板，慢）
-    clicked = click_image(ctx, T_START_BATTLE, confidence=0.9, settle=0.6)
+    clicked = click_image(
+        ctx, T_START_BATTLE, region=START_BATTLE_ROI, confidence=0.9, settle=0.6
+    )
     if not clicked.ok:
-        clicked = click_gold_frame(ctx, settle=0.6)
+        clicked = click_gold_frame(ctx, region=START_BATTLE_ROI, settle=0.6)
     if clicked.ok:
         # 等战斗界面出现（右上角菜单），别让引擎把加载态当成"认不出来"等 5 秒
         wait_for(ctx, ImageQuery(T_FIGHT_MENU), timeout=8.0)

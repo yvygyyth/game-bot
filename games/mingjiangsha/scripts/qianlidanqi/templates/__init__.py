@@ -109,7 +109,7 @@ T_FLOW_SWITCH = "flow/switch.png"
 T_FLOW_UP = "flow/up.png"
 
 #: 点节点后的战斗预览「开始对局」。
-T_START_BATTLE = "flow/start_battle.png"
+T_START_BATTLE = "gold_frame/start_battle.png"
 #: 赠礼第一屏标题「请选择接受谁的赠礼？」。
 T_GIFT_TITLE = "flow/gift_title.png"
 #: 赠礼第二屏标题「请选择一项赠礼？」。

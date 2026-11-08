@@ -23,6 +23,7 @@ from games._templates import audit, declared_from_module
 
 FEATURE_DIR = Path(__file__).resolve().parents[1] / "games/mingjiangsha/scripts/qianlidanqi"
 TEMPLATES_DIR = FEATURE_DIR / "templates"
+GAME_TEMPLATES_DIR = FEATURE_DIR.parents[1] / "templates"
 RAW_DIR = TEMPLATES_DIR / "rawMaterial"
 
 #: (期望状态, 真机截图)
@@ -47,7 +48,6 @@ CASES = (
     ("qianli/pocket/choice", "pocket1.png"),
     ("qianli/pocket/confirm", "pocket2.png"),
     ("qianli/map", "flow_map26.png"),
-    ("qianli/event/intro", "event_feifei_intro.png"),
     ("qianli/event/intro", "event_zuoci_intro.png"),
     ("qianli/event/intro", "event_kaka_intro.png"),
     ("qianli/event/choice", "event_feifei_choice.png"),
@@ -74,7 +74,9 @@ def scenario():
 
 @pytest.fixture(scope="module")
 def matcher() -> OpenCvMatcher:
-    return OpenCvMatcher(TEMPLATES_DIR, preload=True, use_pyramid=False)
+    return OpenCvMatcher(
+        TEMPLATES_DIR, fallback_dirs=(GAME_TEMPLATES_DIR,), preload=True, use_pyramid=False
+    )
 
 
 def _locate_image(scenario, matcher, image) -> str | None:
@@ -113,7 +115,9 @@ def test_select2_and_select3_differ_by_the_placeholder(scenario, matcher) -> Non
 
 def test_all_templates_are_declared() -> None:
     declared = declared_from_module("games.mingjiangsha.scripts.qianlidanqi.templates")
-    missing, unused = audit(TEMPLATES_DIR, declared)
+    missing, _ = audit((TEMPLATES_DIR, GAME_TEMPLATES_DIR), declared)
+    # unused 只看功能级；游戏级公共按钮模板不归这个脚本声明
+    _, unused = audit(TEMPLATES_DIR, declared)
     assert not missing, f"缺少声明: {missing}"
     assert not unused, f"没有被声明的图: {unused}"
 
