@@ -73,7 +73,6 @@ from gamebot.bootstrap import project_root
 from gamebot.exceptions import ConfigError
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.templates import (
-    BUTTON_BLUE_FRAME,
     BUTTON_CYAN_GLOW,
     BUTTON_GOLD_FRAME,
     BUTTON_GOLD_GLOW,
@@ -87,7 +86,6 @@ __all__ = [
     "BUTTON_RING_INSET",
     "BUTTON_RING_WIDTH",
     "ButtonHit",
-    "click_blue_frame",
     "click_button",
     "click_cyan_glow",
     "click_gold_frame",
@@ -365,7 +363,7 @@ def _pick(hits: list[ButtonHit], pick: str) -> ButtonHit:
 
 
 # --------------------------------------------------------------------------- #
-# 四种按钮各一个入口
+# 各按钮家族一个入口
 #
 # 底层是同一个 :func:`click_button`（只比边框环），但**写脚本的人知道
 # 自己要的是哪种按钮** —— 让调用点直接说清"金色确认 / 花纹确认 / 青色取消 /
@@ -392,8 +390,4 @@ def click_cyan_glow(
     return _click_pattern(ctx, BUTTON_CYAN_GLOW, region, **kwargs)
 
 
-def click_blue_frame(
-    ctx: RunContext, region: Region | None = None, **kwargs: Any
-) -> ActionResult[Point]:
-    """蓝底金框的「下一步」。"""
-    return _click_pattern(ctx, BUTTON_BLUE_FRAME, region, **kwargs)
+

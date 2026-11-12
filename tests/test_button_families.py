@@ -37,8 +37,6 @@ CASES = [
     ("jingji1.png", "gold_glow", "before_create.png", 0.95),
     ("jingji2.png", "gold_glow", "after_create.png", 0.95),
     ("select2.png", "gold_frame", "ok1.png", 0.95),
-    ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
-    ("zhandou7.png", "blue_frame", "settle_confirm.png", 0.95),
 ]
 
 
@@ -64,8 +62,8 @@ def _screenshot(cache: dict[str, np.ndarray], name: str) -> np.ndarray:
 def _family_hits(matcher: OpenCvMatcher, image: np.ndarray, folder: str) -> list[tuple[float, str]]:
     """把家族里每张图都试一遍，返回 ``(分数, 文件名)``。
 
-    同一个按钮被多张模板命中（比如 blue_frame 的 qj2/settle_confirm，文字不同、
-    边框相同）只保留分数最高的一张——和 ``find_buttons._dedupe`` 的规则一致。
+    同一个按钮被多张模板命中（文字不同、边框相同）只保留分数最高的一张——
+    和 ``find_buttons._dedupe`` 的规则一致。
     """
     hits: list[tuple[float, str, object]] = []
     for path in sorted((GAME / folder).glob("*.png")):
@@ -290,8 +288,6 @@ RING_CASES = [
     ("jingji1.png", "gold_glow", "before_create.png", 0.95),
     ("jingji2.png", "gold_glow", "after_create.png", 0.95),
     ("select2.png", "gold_frame", "ok1.png", 0.95),
-    ("zhandou6.png", "blue_frame", "qj1.png", 0.95),
-    ("zhandou7.png", "blue_frame", "settle_confirm.png", 0.95),
 ]
 
 
@@ -339,7 +335,6 @@ class TestRingTable:
         for folder, template in (
             ("gold_glow", "before_create.png"),
             ("cyan_glow", "cancel.png"),
-            ("blue_frame", "qj1.png"),
         ):
             tpl = cv2.imread(str(GAME / folder / template))
             assert tpl is not None
@@ -350,3 +345,14 @@ class TestRingTable:
                 image, f"{folder}/{template}", confidence=0.90, min_distance=30, mask=mask
             )
             assert hits == [], f"{shot} 上 {folder}/{template} 误命中 {hits}"
+
+
+class TestNewNextButton:
+    def test_next_button_is_gold_frame(self, matcher: OpenCvMatcher) -> None:
+        image = cv2.imread(str(GAME / "gold_frame" / "next_step.png"))
+        assert image is not None
+        hits = _family_hits(matcher, image, "gold_frame")
+        assert len(hits) == 1, hits
+        score, template = hits[0]
+        assert template == "next_step.png"
+        assert score >= 0.95

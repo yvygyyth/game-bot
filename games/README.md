@@ -451,21 +451,19 @@ games/<游戏>/templates/                      ← 再找（跨脚本共用，�
 `fallback_dirs`）。两处都用 `templates/__init__.py` 的 `T_*` 常量登记路径 ——
 界面检查时会两个根都查。
 
-游戏级的典型内容：**按钮家族、通用弹窗、公共图标**。名将杀已经整理成四类按钮，
+游戏级的典型内容：**按钮家族、通用弹窗、公共图标**。名将杀已经整理成按钮家族，
 每类一个方法（底层都只比边框环，换文字不用重裁）：
 
 ```python
 from games.mingjiangsha.utils import (
     click_gold_frame,
-    click_blue_frame,
     click_cyan_glow,
     click_gold_glow,
 )
 
 click_gold_glow(ctx)    # 金色发光：创建队伍/添加伙伴/确定/投降确认
-click_gold_frame(ctx)   # 金色花纹：选将确定/开始匹配/结算确认
+click_gold_frame(ctx)   # 金色花纹：选将确定/开始匹配/下一步/选择事件
 click_cyan_glow(ctx)     # 青色：取消
-click_blue_frame(ctx)           # 蓝底金框：下一步
 ```
 
 通用入口 `click_button(ctx, 家族名)` 仍在（给按配置动态选的场合）。

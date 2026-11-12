@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from .scripts import jingji
 from .utils import (
-    click_blue_frame,
     click_button,
     click_cyan_glow,
     click_gold_frame,
@@ -18,7 +17,6 @@ from .utils import (
 )
 
 __all__ = [
-    "click_blue_frame",
     "click_button",
     "click_cyan_glow",
     "click_gold_frame",

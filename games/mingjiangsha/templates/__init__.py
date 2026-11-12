@@ -6,15 +6,14 @@
 templates/gold_glow/    金色发光
 templates/gold_frame/   金色花纹边框
 templates/cyan_glow/    青色发光
-templates/blue_frame/   蓝底金框
 ```
 
-调用方只用四个方法，**不用关心按钮位置、尺寸、文案**：
+调用方只用对应家族的方法，**不用关心按钮位置、尺寸、文案**：
 
 ```python
-from games.mingjiangsha.utils import click_blue_frame
+from games.mingjiangsha.utils import click_gold_frame
 
-click_blue_frame(ctx)   # 蓝底金框的「下一步」，具体哪句字/多大都无所谓
+click_gold_frame(ctx)   # 金色花纹大按钮（含「下一步」）
 ```
 
 加一种文字/尺寸版本不用改代码：把截图裁下来丢进对应文件夹即可。
@@ -24,7 +23,6 @@ click_blue_frame(ctx)   # 蓝底金框的「下一步」，具体哪句字/多�
 from __future__ import annotations
 
 __all__ = [
-    "BUTTON_BLUE_FRAME",
     "BUTTON_CYAN_GLOW",
     "BUTTON_FOLDERS",
     "BUTTON_GOLD_FRAME",
@@ -40,13 +38,9 @@ BUTTON_GOLD_FRAME = "gold_frame"
 #: 青色发光按钮：取消
 BUTTON_CYAN_GLOW = "cyan_glow"
 
-#: 蓝底金框按钮：下一步（千里单骑 / 结算）
-BUTTON_BLUE_FRAME = "blue_frame"
-
 #: 全部花纹目录。**只作参考**，新加文件夹不必登记到这里才能用。
 BUTTON_FOLDERS = (
     BUTTON_GOLD_GLOW,
     BUTTON_GOLD_FRAME,
     BUTTON_CYAN_GLOW,
-    BUTTON_BLUE_FRAME,
 )
