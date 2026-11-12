@@ -10,7 +10,7 @@ import random
 from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
-from gamebot.atomic.query import ImageQuery
+from gamebot.atomic.query import ImageQuery, any_image
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.utils import click_gold_frame
@@ -38,6 +38,7 @@ from ..templates import (
     T_FIGHT_END,
     T_FIGHT_MENU,
     T_FIGHT_NEXT,
+    T_FIGHT_WIN_CLOSE,
     T_NODE_BATTLE,
     T_NODE_FEI_FEI,
     T_NODE_KA_KA,
@@ -287,7 +288,11 @@ def fight_cancel_hand_swap(ctx: RunContext) -> ActionResult[Any]:
 def fight_open_menu_or_wait(ctx: RunContext) -> ActionResult[Any]:
     """战斗主界面：没处理托管就开菜单；处理过就等结束提示。"""
     if ctx.blackboard.get(AUTO_READY_KEY):
-        ended = wait_for(ctx, ImageQuery(T_FIGHT_END), timeout=BATTLE_END_TIMEOUT)
+        ended = wait_for(
+            ctx,
+            any_image(T_FIGHT_END, T_FIGHT_WIN_CLOSE, confidence=0.9),
+            timeout=BATTLE_END_TIMEOUT,
+        )
         if not ended.ok or ended.value is None:
             return ActionResult.not_found(
                 f"战斗 {BATTLE_END_TIMEOUT:.0f}s 内没结束", template=T_FIGHT_END
@@ -312,7 +317,10 @@ def fight_close_menu(ctx: RunContext) -> ActionResult[Any]:
 
 def fight_click_end(ctx: RunContext) -> ActionResult[Any]:
     """点「点击空白区域到下一步」。"""
-    return click_image(ctx, T_FIGHT_END, settle=0.6)
+    ended = click_image(ctx, T_FIGHT_END, settle=0.6)
+    if ended.ok:
+        return ended
+    return click_image(ctx, T_FIGHT_WIN_CLOSE, settle=0.6)
 
 
 def fight_click_next(ctx: RunContext) -> ActionResult[Any]:

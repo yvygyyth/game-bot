@@ -25,6 +25,7 @@ __all__ = [
     "T_FIGHT_MENU",
     "T_FIGHT_NEXT",
     "T_FIGHT_SETTING",
+    "T_FIGHT_WIN_CLOSE",
     "T_FLOW",
     "T_FLOW_BAG",
     "T_FLOW_MAP",
@@ -209,6 +210,8 @@ T_FIGHT_SETTING = "flow/setting.png"
 T_FIGHT_MENU = "flow/menu.png"
 #: 战斗结束「点击空白区域到下一步」。
 T_FIGHT_END = "flow/challenge_end.png"
+#: 完胜页「点击空白处关闭」。
+T_FIGHT_WIN_CLOSE = "flow/win_close.png"
 #: 结算「下一步」条。
 T_FIGHT_NEXT = "flow/next_step.png"
 #: 战斗「托管」（未托管，点了才托管）。

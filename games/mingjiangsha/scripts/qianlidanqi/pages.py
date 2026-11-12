@@ -52,6 +52,7 @@ from .templates import (
     T_FIGHT_MENU,
     T_FIGHT_NEXT,
     T_FIGHT_SETTING,
+    T_FIGHT_WIN_CLOSE,
     T_FLOW,
     T_FLOW_MAP,
     T_GIFT_KIND_TITLE,
@@ -278,6 +279,7 @@ FEATURE_TREE = PageGroup(
                                     queries=(ImageQuery(T_FIGHT_AUTO),),
                                     exclude=(
                                         ImageQuery(T_FIGHT_END),
+                                        ImageQuery(T_FIGHT_WIN_CLOSE),
                                         ImageQuery(T_FIGHT_NEXT),
                                     ),
                                     priority=35,
@@ -289,6 +291,7 @@ FEATURE_TREE = PageGroup(
                                     queries=(ImageQuery(T_FIGHT_AUTO_OFF),),
                                     exclude=(
                                         ImageQuery(T_FIGHT_END),
+                                        ImageQuery(T_FIGHT_WIN_CLOSE),
                                         ImageQuery(T_FIGHT_NEXT),
                                     ),
                                     priority=34,
@@ -297,7 +300,13 @@ FEATURE_TREE = PageGroup(
                                 PageLeaf(
                                     "qianli/fight/ended",
                                     name="战斗 · 结束提示",
-                                    queries=(ImageQuery(T_FIGHT_END),),
+                                    queries=(
+                                        any_image(
+                                            T_FIGHT_END,
+                                            T_FIGHT_WIN_CLOSE,
+                                            confidence=0.9,
+                                        ),
+                                    ),
                                     priority=60,
                                     description="点击空白区域到下一步",
                                 ),
@@ -323,6 +332,7 @@ FEATURE_TREE = PageGroup(
                                         ImageQuery(T_FIGHT_AUTO),
                                         ImageQuery(T_FIGHT_AUTO_OFF),
                                         ImageQuery(T_FIGHT_END),
+                                        ImageQuery(T_FIGHT_WIN_CLOSE),
                                         ImageQuery(T_FIGHT_NEXT),
                                     ),
                                     priority=10,
