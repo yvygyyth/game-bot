@@ -29,7 +29,6 @@ from ..store import (
     resolve_general_priority,
 )
 from ..templates import (
-    T_CLAIM_REWARD,
     T_EVENT_FEIFEI_BARGAIN,
     T_EVENT_FEIFEI_HELP,
     T_EVENT_FEIFEI_SLEEP,
@@ -37,7 +36,6 @@ from ..templates import (
     T_FIGHT_CANCEL,
     T_FIGHT_END,
     T_FIGHT_MENU,
-    T_FIGHT_NEXT,
     T_FIGHT_WIN_CLOSE,
     T_NODE_BATTLE,
     T_NODE_FEI_FEI,
@@ -324,15 +322,8 @@ def fight_click_end(ctx: RunContext) -> ActionResult[Any]:
 
 
 def fight_click_next(ctx: RunContext) -> ActionResult[Any]:
-    """结算后「下一步」条，最多点 5 次。"""
-    for _ in range(5):
-        nxt = ctx.frame().find_image(T_FIGHT_NEXT)
-        if not nxt.ok or nxt.value is None:
-            break
-        actions.click_source_point(ctx.session, nxt.value)
-        ctx.invalidate_frame()
-        ctx.sleep(0.5)
-    return ActionResult.success("战斗下一步处理完成", action="sequence")
+    """结算后「下一步」：公共 gold_frame 按钮。"""
+    return click_gold_frame(ctx, region=Region(900, 1100, 700, 250), settle=0.6)
 
 
 def pick_gift(ctx: RunContext) -> ActionResult[Any]:
@@ -622,7 +613,7 @@ def choose_mozi(ctx: RunContext) -> ActionResult[Any]:
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:
     """本局结束 → 点「确定」。"""
-    return click_image(ctx, T_CLAIM_REWARD, region=CLAIM_ROI, settle=1.2)
+    return click_gold_frame(ctx, region=CLAIM_ROI, settle=1.2)
 
 
 def close_congrats(ctx: RunContext) -> ActionResult[Any]:
