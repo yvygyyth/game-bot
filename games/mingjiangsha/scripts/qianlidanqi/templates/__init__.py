@@ -116,7 +116,7 @@ T_GIFT_TITLE = "flow/gift_title.png"
 #: 赠礼第二屏标题「请选择一项赠礼？」。
 T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
 #: 本局结束「领取奖励」。
-T_CLAIM_REWARD = "flow/claim_reward.png"
+T_CLAIM_REWARD = "flow/end_confirm.png"
 
 # ---- 奇遇 ----
 #: 奇遇介绍页的「再想一想」按钮（三个奇遇共用）。
@@ -213,7 +213,7 @@ T_FIGHT_END = "flow/challenge_end.png"
 #: 完胜页「点击空白处关闭」。
 T_FIGHT_WIN_CLOSE = "flow/win_close.png"
 #: 结算「下一步」条。
-T_FIGHT_NEXT = "flow/next_step.png"
+T_FIGHT_NEXT = "gold_frame/next_step.png"
 #: 战斗「托管」（未托管，点了才托管）。
 T_FIGHT_AUTO = "flow/auto.png"
 #: 战斗「取消托管」（已经托管中，不要再点）。

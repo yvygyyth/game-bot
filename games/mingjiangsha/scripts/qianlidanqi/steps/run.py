@@ -621,7 +621,7 @@ def choose_mozi(ctx: RunContext) -> ActionResult[Any]:
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:
-    """本局结束 → 点「领取奖励」。"""
+    """本局结束 → 点「确定」。"""
     return click_image(ctx, T_CLAIM_REWARD, region=CLAIM_ROI, settle=1.2)
 
 

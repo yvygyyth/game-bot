@@ -64,8 +64,9 @@ CASES = (
     ("qianli/fight/menu_off", "battle_menu.png"),
     ("qianli/fight/ended", "fight_victory.png"),
     ("qianli/fight/ended", "fight_win.png"),
+    ("qianli/fight/result", "fight_next_new.png"),
+    ("qianli/end", "fight_settle_new.png"),
     ("qianli/gift_kind", "battle/zengli2.png"),
-    ("qianli/end", "end.png"),
     ("qianli/end2", "end2.png"),
 )
 

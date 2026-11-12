@@ -117,7 +117,7 @@ GIFT_TITLE_ROI = Region(950, 1142, 640, 95)
 GIFT_KIND_TITLE_ROI = Region(1025, 1142, 480, 95)
 
 #: 本局结束「领取奖励」。
-CLAIM_ROI = Region(1080, 1157, 420, 120)
+CLAIM_ROI = Region(1000, 1150, 600, 220)
 
 #: 「恭喜获得」浮层。
 CONGRATS_ROI = Region(880, 252, 640, 140)
@@ -394,7 +394,7 @@ FEATURE_TREE = PageGroup(
                             queries=(
                                 ImageQuery(T_CLAIM_REWARD, region=CLAIM_ROI),
                             ),
-                            description="本局结束：领取奖励",
+                            description="本局结束：点「确定」",
                         ),
                         PageLeaf(
                             "qianli/end2",

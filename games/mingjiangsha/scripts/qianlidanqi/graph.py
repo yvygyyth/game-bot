@@ -393,9 +393,10 @@ SCENARIO = ScenarioSpec(
         Node(
             "end",
             steps=[claim_reward],
-            description="本局结束：点「领取奖励」",
+            description="本局结束：点「确定」",
             transitions=[
                 Transition("end2", on_page("qianli/end2"), 10, "领奖浮层"),
+                Transition("open_pick", on_page("qianli/select1"), 8, "确定后回选将"),
             ],
         ),
         Node(
