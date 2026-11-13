@@ -42,6 +42,7 @@ from gamebot.types import Region
 from .templates import (
     T_CAMPAIGN,
     T_CLAIM_REWARD,
+    T_CLAIM_REWARD_HOVER,
     T_CLAIM_REWARD_REWARD,
     T_CONGRATS,
     T_EVENT_CHOICE_FEIFEI,
@@ -398,6 +399,9 @@ FEATURE_TREE = PageGroup(
                                             ImageQuery(T_CLAIM_REWARD, region=CLAIM_ROI),
                                             ImageQuery(
                                                 T_CLAIM_REWARD_REWARD, region=CLAIM_ROI
+                                            ),
+                                            ImageQuery(
+                                                T_CLAIM_REWARD_HOVER, region=CLAIM_ROI
                                             ),
                                         )
                                     ),

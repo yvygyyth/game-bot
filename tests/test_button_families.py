@@ -356,3 +356,15 @@ class TestNewNextButton:
         score, template = hits[0]
         assert template == "next_step.png"
         assert score >= 0.95
+
+
+class TestEndRewardVariants:
+    @pytest.mark.parametrize("name", ["end_reward.png", "end_reward_hover.png"])
+    def test_variants_are_gold_frame(self, matcher: OpenCvMatcher, name: str) -> None:
+        image = cv2.imread(str(GAME / "gold_frame" / name))
+        assert image is not None
+        hits = _family_hits(matcher, image, "gold_frame")
+        assert len(hits) == 1, hits
+        score, template = hits[0]
+        assert template == name
+        assert score >= 0.95
