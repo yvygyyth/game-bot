@@ -396,7 +396,10 @@ SCENARIO = ScenarioSpec(
             description="本局结束：点「确定」",
             transitions=[
                 Transition("end2", on_page("qianli/end2"), 10, "领奖浮层"),
+                Transition("gift", on_page("qianli/gift"), 10, "确定后直接赠礼"),
+                Transition("gift_kind", on_page("qianli/gift_kind"), 9, "确定后到赠礼类别"),
                 Transition("open_pick", on_page("qianli/select1"), 8, "确定后回选将"),
+                Transition("map", on_page("qianli/map"), 6, "确定后回地图"),
             ],
         ),
         Node(

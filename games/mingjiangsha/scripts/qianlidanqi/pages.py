@@ -119,7 +119,7 @@ GIFT_TITLE_ROI = Region(950, 1142, 640, 95)
 GIFT_KIND_TITLE_ROI = Region(1025, 1142, 480, 95)
 
 #: 本局结束「领取奖励」。
-CLAIM_ROI = Region(1000, 1150, 600, 220)
+CLAIM_ROI = Region(1000, 1100, 600, 300)
 
 #: 「恭喜获得」浮层。
 CONGRATS_ROI = Region(880, 252, 640, 140)
