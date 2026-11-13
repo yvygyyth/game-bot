@@ -35,13 +35,14 @@ home（容器）
 
 from __future__ import annotations
 
-from gamebot.atomic.query import ImageQuery, any_image
+from gamebot.atomic.query import ImageQuery, OrQuery, any_image
 from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 
 from .templates import (
     T_CAMPAIGN,
     T_CLAIM_REWARD,
+    T_CLAIM_REWARD_REWARD,
     T_CONGRATS,
     T_EVENT_CHOICE_FEIFEI,
     T_EVENT_INTRO_BACK,
@@ -392,7 +393,14 @@ FEATURE_TREE = PageGroup(
                             "qianli/end",
                             name="局内 · 本局结束",
                             queries=(
-                                ImageQuery(T_CLAIM_REWARD, region=CLAIM_ROI),
+                                OrQuery(
+                                        queries=(
+                                            ImageQuery(T_CLAIM_REWARD, region=CLAIM_ROI),
+                                            ImageQuery(
+                                                T_CLAIM_REWARD_REWARD, region=CLAIM_ROI
+                                            ),
+                                        )
+                                    ),
                             ),
                             description="本局结束：点「确定」",
                         ),

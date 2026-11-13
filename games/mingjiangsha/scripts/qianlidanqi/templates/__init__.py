@@ -10,6 +10,7 @@ __all__ = [
     "T_CAMPAIGN",
     "T_CAMPAIGN_CARD",
     "T_CLAIM_REWARD",
+    "T_CLAIM_REWARD_REWARD",
     "T_CONFIRM",
     "T_CONGRATS",
     "T_EVENT_CHOICE_FEIFEI",
@@ -117,6 +118,8 @@ T_GIFT_TITLE = "flow/gift_title.png"
 T_GIFT_KIND_TITLE = "flow/gift_kind_title.png"
 #: 本局结束「领取奖励」。
 T_CLAIM_REWARD = "flow/end_confirm.png"
+#: 局末「领取奖励」按钮（另一种结束界面）。
+T_CLAIM_REWARD_REWARD = "flow/end_reward.png"
 
 # ---- 奇遇 ----
 #: 奇遇介绍页的「再想一想」按钮（三个奇遇共用）。
