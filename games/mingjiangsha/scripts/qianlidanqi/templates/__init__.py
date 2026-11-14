@@ -15,6 +15,7 @@ __all__ = [
     "T_CONFIRM",
     "T_CONGRATS",
     "T_EVENT_CHOICE_FEIFEI",
+    "T_EVENT_ESCAPE_ANCHOR",
     "T_EVENT_ESCAPE_TITLE",
     "T_EVENT_FEIFEI_BARGAIN",
     "T_EVENT_FEIFEI_HELP",
@@ -128,6 +129,7 @@ T_CLAIM_REWARD_HOVER = "gold_frame/end_reward_hover.png"
 #: 奇遇介绍页的「再想一想」按钮（三个奇遇共用）。
 T_EVENT_INTRO_BACK = "flow/event_back.png"
 #: 「想逃？」意外战斗事件标题。
+T_EVENT_ESCAPE_ANCHOR = "flow/escape_anchor.png"
 T_EVENT_ESCAPE_TITLE = "flow/escape_title.png"
 #: 奇遇选完后的「请选择一项赠礼」提示。
 T_EVENT_GIFT = "flow/event_gift.png"
