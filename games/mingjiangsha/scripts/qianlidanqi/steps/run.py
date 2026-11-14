@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BATTLE_END_TIMEOUT",
+    "ESCAPE_BUTTON_REGION",
     "EVENT_ENTER_REGION",
     "EVENT_OPTION_POINTS",
     "EVENT_OPTION_PRIORITY",
@@ -92,6 +93,7 @@ __all__ = [
     "confirm_pocket",
     "do_zhuge",
     "enter_event",
+    "escape_battle",
     "fight_cancel_hand_swap",
     "fight_choose_auto",
     "fight_click_end",
@@ -154,6 +156,9 @@ ZHUGE_CONTINUE_POINT = Point(1300, 600)
 
 #: 锦囊三选一的三个选项中心（随便点一个）。
 # ---- 奇遇 ----
+#: 「想逃？」意外战斗事件的金色按钮。
+ESCAPE_BUTTON_REGION = Region(900, 1030, 780, 210)
+
 #: 奇遇介绍页左下角的金色按钮（选择事件/选择武将）。
 EVENT_ENTER_REGION = Region(650, 1140, 620, 220)
 
@@ -609,6 +614,11 @@ def choose_mozi(ctx: RunContext) -> ActionResult[Any]:
     ctx.invalidate_frame()
     ctx.sleep(0.9)
     return clicked.with_meta(point=(point.x, point.y))
+
+
+def escape_battle(ctx: RunContext) -> ActionResult[Any]:
+    """想逃？→ 点「与项羽、范增战斗」，直接进战斗。"""
+    return click_gold_frame(ctx, ESCAPE_BUTTON_REGION, settle=1.0)
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

@@ -46,6 +46,7 @@ from .templates import (
     T_CLAIM_REWARD_REWARD,
     T_CONGRATS,
     T_EVENT_CHOICE_FEIFEI,
+    T_EVENT_ESCAPE_TITLE,
     T_EVENT_INTRO_BACK,
     T_FIGHT_AUTO,
     T_FIGHT_AUTO_OFF,
@@ -147,6 +148,7 @@ EVENT_GIFT_ROI = Region(1050, 1190, 460, 140)
 
 #: 妃妃选择页顶部标题「偶遇朏朏」。
 EVENT_CHOICE_ROI = Region(1170, 110, 340, 140)
+ESCAPE_ROI = Region(1150, 840, 220, 120)
 
 #: 十常侍选择页「请选择一项蛊惑」。
 SHI_CHOICE_ROI = Region(1050, 1190, 460, 140)
@@ -229,6 +231,12 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
                             ),
                             description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/escape",
+                            name="局内 · 想逃（意外战斗）",
+                            queries=(ImageQuery(T_EVENT_ESCAPE_TITLE, region=ESCAPE_ROI),),
+                            description="想逃？点「与项羽、范增战斗」直接进战斗",
                         ),
                         PageLeaf(
                             "qianli/event/mo_zi",

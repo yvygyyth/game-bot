@@ -46,6 +46,7 @@ from .steps import (
     enter_campaign,
     enter_event,
     enter_qianli,
+    escape_battle,
     fight_cancel_hand_swap,
     fight_choose_auto,
     fight_click_end,
@@ -150,6 +151,7 @@ SCENARIO = ScenarioSpec(
             description="地图：找一个战斗节点点它",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition("escape", on_page("qianli/event/escape"), 25, "想逃？意外战斗"),
                 Transition("shop_ba_qing", on_page("qianli/shop/ba_qing"), 20, "进巴清商店"),
                 Transition("pocket_choice", on_page("qianli/pocket/choice"), 16, "进锦囊"),
                 Transition("rest", on_page("qianli/rest"), 15, "进休息"),
@@ -309,6 +311,23 @@ SCENARIO = ScenarioSpec(
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),
+            ],
+        ),
+        Node(
+            "escape",
+            steps=[escape_battle],
+            description="想逃？点「与项羽、范增战斗」直接进战斗",
+            transitions=[
+                Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
+                Transition(
+                    "fight_hand_swap",
+                    on_page("qianli/fight/hand_swap"),
+                    20,
+                    "进战斗（换牌弹窗）",
+                ),
+                Transition("fight_main", on_page("qianli/fight/main"), 15, "进战斗"),
+                Transition("map", on_page("qianli/map"), 5, "回地图"),
+                Transition("end", on_page("qianli/end"), 5, "本局结束"),
             ],
         ),
         Node(
