@@ -44,6 +44,7 @@ CASES = (
     ("qianli/gift", "battle/zengli.png"),
     ("qianli/gift", "flow_gift.png"),
     ("qianli/shop/ba_qing", "shop_ba_qing.png"),
+    ("qianli/shop/ba_qing/buy", "shop_ba_qing_buy.png"),
     ("qianli/rest", "rest.png"),
     ("qianli/pocket/choice", "pocket1.png"),
     ("qianli/pocket/confirm", "pocket2.png"),
