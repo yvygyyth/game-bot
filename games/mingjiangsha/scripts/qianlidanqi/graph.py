@@ -31,6 +31,7 @@ from games import on_page
 from .bindings import BINDINGS
 from .pages import FEATURE_TREE
 from .steps import (
+    buy_ba_qing,
     choose_event_option,
     choose_mozi,
     choose_node,
@@ -39,7 +40,6 @@ from .steps import (
     claim_reward,
     close_congrats,
     close_skill_panel,
-    confirm_ba_qing_exit,
     confirm_pocket,
     continue_run,
     do_zhuge,
@@ -58,8 +58,6 @@ from .steps import (
     pick_general,
     pick_gift,
     pick_kind,
-    resolve_ba_qing_buy,
-    shop_ba_qing_pick,
     start_battle,
     start_run,
     trigger_shi_battle,
@@ -287,52 +285,11 @@ SCENARIO = ScenarioSpec(
         ),
         Node(
             "shop_ba_qing",
-            steps=[shop_ba_qing_pick],
-            description="巴清商店主界面：选商品 / 退出",
+            steps=[buy_ba_qing],
+            description="巴清商店：买信物 → 退出 → 确认结束购买",
             transitions=[
                 Transition("skill_panel", on_page("qianli/skill_panel"), 30, "武将技能弹窗"),
-                Transition(
-                    "ba_qing_buy",
-                    on_page("qianli/shop/ba_qing/buy"),
-                    25,
-                    "购买弹窗",
-                ),
-                Transition(
-                    "ba_qing_exit",
-                    on_page("qianli/shop/ba_qing/exit"),
-                    20,
-                    "结束购买确认",
-                ),
                 Transition("map", on_page("qianli/map"), 10, "回地图"),
-            ],
-        ),
-        Node(
-            "ba_qing_buy",
-            steps=[resolve_ba_qing_buy],
-            description="购买弹窗：钱够买，不够取消",
-            transitions=[
-                Transition(
-                    "shop_ba_qing",
-                    on_page("qianli/shop/ba_qing"),
-                    20,
-                    "回商店",
-                ),
-                Transition(
-                    "ba_qing_exit",
-                    on_page("qianli/shop/ba_qing/exit"),
-                    10,
-                    "结束购买确认",
-                ),
-                Transition("map", on_page("qianli/map"), 5, "回地图"),
-            ],
-        ),
-        Node(
-            "ba_qing_exit",
-            steps=[confirm_ba_qing_exit],
-            description="结束购买：点确认回地图",
-            transitions=[
-                Transition("map", on_page("qianli/map"), 10, "回地图"),
-                Transition("end", on_page("qianli/end"), 5, "本局结束"),
             ],
         ),
         Node(

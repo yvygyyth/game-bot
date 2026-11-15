@@ -13,7 +13,7 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery, any_image
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
-from games.mingjiangsha.utils import click_cyan_glow, click_gold_frame
+from games.mingjiangsha.utils import click_gold_frame
 
 from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
@@ -25,7 +25,6 @@ from ..store import (
     pick_reward_kind,
     pick_reward_slot,
     rank_token_slots,
-    read_copper_coins,
     refresh_copper_coins,
     resolve_general_priority,
 )
@@ -57,10 +56,11 @@ from ..templates import (
     T_REWARD_TOKEN,
     T_SHI_ATTACK,
     T_SHOP_BUY_TITLE,
-    T_SHOP_BUY_TITLE_2,
     T_SHOP_CANCEL,
     T_SHOP_CONFIRM,
     T_SHOP_EXIT,
+    T_SHOP_EXIT_PROMPT,
+    T_SHOP_GRAY,
     T_START_BATTLE,
     T_ZHUGE_CONTINUE,
 )
@@ -70,8 +70,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BATTLE_END_TIMEOUT",
-    "BA_QING_BUY_REGION",
-    "BA_QING_CANCEL_REGION",
     "ESCAPE_BUTTON_REGION",
     "EVENT_ENTER_REGION",
     "EVENT_OPTION_POINTS",
@@ -83,6 +81,7 @@ __all__ = [
     "SHOP_MIN_COINS",
     "SKILL_PANEL_CLOSE",
     "ZHUGE_CARD_POINT",
+    "buy_ba_qing",
     "choose_event_option",
     "choose_mozi",
     "choose_node",
@@ -91,7 +90,6 @@ __all__ = [
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
-    "confirm_ba_qing_exit",
     "confirm_pocket",
     "do_zhuge",
     "enter_event",
@@ -104,8 +102,6 @@ __all__ = [
     "fight_open_menu_or_wait",
     "pick_gift",
     "pick_kind",
-    "resolve_ba_qing_buy",
-    "shop_ba_qing_pick",
     "start_battle",
     "trigger_shi_battle",
 ]
@@ -199,9 +195,6 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
     if shop.ok and shop.value is not None:
         coins = refresh_copper_coins(ctx)
         if coins is None or coins >= SHOP_MIN_COINS:
-            ctx.blackboard[BA_QING_ACTIVE] = False
-            ctx.blackboard[BA_QING_DONE] = set()
-            ctx.blackboard[BA_QING_CACHE] = None
             point = shop.value
             first = actions.click_source_point(ctx.session, point)
             if not first.ok:
@@ -404,17 +397,11 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
     return clicked
 
 
-BA_QING_ACTIVE = "qianli.ba_qing.active"
-BA_QING_DONE = "qianli.ba_qing.done"
-BA_QING_PENDING = "qianli.ba_qing.pending"
-BA_QING_CACHE = "qianli.ba_qing.cache"
+def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
+    """巴清商店：一次 OCR 读钱包/三个名字/三个价格，再按优先级买。
 
-BA_QING_BUY_REGION = Region(760, 890, 700, 160)
-BA_QING_CANCEL_REGION = Region(1450, 880, 520, 220)
-
-
-def _read_ba_qing(ctx: RunContext) -> tuple[int | None, list[str], list[int | None]]:
-    """一次 OCR：钱包 + 三个名字 + 三个价格。"""
+    价格已知就不必先点开弹窗：价格 > 钱包直接结束购买；价格够才点商品。
+    """
     title_regions = (
         Region(1260, 260, 320, 80),
         Region(1715, 260, 320, 80),
@@ -425,6 +412,10 @@ def _read_ba_qing(ctx: RunContext) -> tuple[int | None, list[str], list[int | No
         Region(1815, 625, 140, 70),
         Region(2270, 625, 140, 70),
     )
+    token_points = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
+    buy_point = Point(842, 964)
+
+    # 一次画布 OCR：钱包 + 3 个名字 + 3 个价格
     read = ctx.frame().read_regions((COPPER_REGION, *title_regions, *price_regions))
     groups = read.value if read.ok and read.value else []
 
@@ -438,32 +429,12 @@ def _read_ba_qing(ctx: RunContext) -> tuple[int | None, list[str], list[int | No
         parse_copper_text(_first_text(groups[i])) if i < len(groups) else None
         for i in range(4, 7)
     ]
-    return wallet, titles, prices
 
-
-def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
-    """商店主界面：按优先级点一个商品，弹出「购买」就交给 buy 状态。"""
-    if not ctx.blackboard.get(BA_QING_ACTIVE):
-        ctx.blackboard[BA_QING_ACTIVE] = True
-        ctx.blackboard[BA_QING_DONE] = set()
-        ctx.blackboard[BA_QING_CACHE] = None
-    done: set[int] = ctx.blackboard.get(BA_QING_DONE) or set()
-
-    cached = ctx.blackboard.get(BA_QING_CACHE)
-    if cached:
-        wallet, titles, prices = cached
-    else:
-        wallet, titles, prices = _read_ba_qing(ctx)
-        ctx.blackboard[BA_QING_CACHE] = (wallet, titles, prices)
-    token_points = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
-
+    bought: list[str] = []
     for slot, name in rank_token_slots(titles):
-        if slot in done:
-            continue
         price = prices[slot] if slot < len(prices) else None
-        # 主界面能确定钱不够就跳过，不弹购买
         if wallet is not None and price is not None and price > wallet:
-            continue
+            break
         point = token_points[min(slot, len(token_points) - 1)]
         picked = actions.click_source_point(ctx.session, point)
         if not picked.ok:
@@ -471,88 +442,56 @@ def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
         ctx.invalidate_frame()
         ctx.sleep(0.3)
 
+        # 钱够才会弹「购买」；钱不够/已售罄，点完什么都没发生。
         buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
         if not buy.ok:
-            buy = ctx.frame().find_image(T_SHOP_BUY_TITLE_2)
-        if buy.ok:
-            ctx.blackboard[BA_QING_PENDING] = {
-                "slot": slot,
-                "name": name,
-                "price": price,
-                "wallet": wallet,
-            }
-            ctx.blackboard[BA_QING_DONE] = done
-            return ActionResult.success(
-                "打开购买弹窗", action="click", slot=slot, name=name, price=price
-            )
-        done.add(slot)
+            continue
 
-    ctx.blackboard[BA_QING_DONE] = done
+        # 购买按钮是灰色边框 = 钱不够：点取消，直接结束本轮购买
+        gray = ctx.frame().find_image(
+            T_SHOP_GRAY, region=Region(700, 880, 550, 220), confidence=0.95
+        )
+        if gray.ok:
+            cancel = ctx.frame().find_image(T_SHOP_CANCEL)
+            if cancel.ok and cancel.value is not None:
+                actions.click_source_point(ctx.session, cancel.value)
+            else:
+                actions.click_source_point(ctx.session, Point(1517, 1009))
+            ctx.invalidate_frame()
+            ctx.sleep(0.6)
+            break
+
+        clicked = actions.click_source_point(ctx.session, buy_point)
+        if not clicked.ok:
+            return clicked
+        bought.append(name)
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
+
+    # ---- 退出商店：右上角箭头 → 是否结束购买？→ 确认 ----
     exit_btn = ctx.frame().find_image(T_SHOP_EXIT)
     if exit_btn.ok and exit_btn.value is not None:
         actions.click_source_point(ctx.session, exit_btn.value)
         ctx.invalidate_frame()
         ctx.sleep(0.4)
-    return ActionResult.success("巴清商店选购结束", action="sequence")
 
+    prompt = ctx.frame().find_image(T_SHOP_EXIT_PROMPT)
+    if prompt.ok:
+        confirm = ctx.frame().find_image(T_SHOP_CONFIRM)
+        if confirm.ok and confirm.value is not None:
+            actions.click_source_point(ctx.session, confirm.value)
+            ctx.invalidate_frame()
+            ctx.sleep(0.5)
 
-def resolve_ba_qing_buy(ctx: RunContext) -> ActionResult[Any]:
-    """购买弹窗：钱够点购买，不够/读不到就点取消。"""
-    pending: dict[str, Any] = ctx.blackboard.get(BA_QING_PENDING) or {}
-    slot = pending.get("slot")
-    price = pending.get("price")
-    wallet = pending.get("wallet")
-    if wallet is None:
-        wallet = read_copper_coins(ctx)
-    if price is None:
-        read = ctx.frame().read_text(BA_QING_BUY_REGION)
-        if read.ok and read.value:
-            price = parse_copper_text(read.value)
-
-    enough = price is not None and wallet is not None and price <= wallet
-    if enough:
-        clicked = click_gold_frame(ctx, BA_QING_BUY_REGION, settle=0.8)
-    else:
-        clicked = click_cyan_glow(ctx, BA_QING_CANCEL_REGION, settle=0.6)
-        if not clicked.ok:
-            clicked = click_image(ctx, T_SHOP_CANCEL, region=BA_QING_CANCEL_REGION, settle=0.6)
-
-    if not clicked.ok:
-        return clicked
-
-    if isinstance(slot, int):
-        done: set[int] = ctx.blackboard.get(BA_QING_DONE) or set()
-        done.add(slot)
-        ctx.blackboard[BA_QING_DONE] = done
-        if enough:
-            cached = ctx.blackboard.get(BA_QING_CACHE)
-            if cached and isinstance(price, int):
-                wallet0, titles0, prices0 = cached
-                left = wallet0 - price if wallet0 is not None else None
-                ctx.blackboard[BA_QING_CACHE] = (left, titles0, prices0)
-    ctx.blackboard[BA_QING_PENDING] = {}
     return ActionResult.success(
-        "已购买" if enough else "钱不够，已取消",
-        action="click",
-        bought=bool(enough),
-        slot=slot,
+        "巴清商店处理完成",
+        action="sequence",
+        bought=bought,
+        count=len(bought),
+        titles=titles,
+        prices=prices,
+        wallet=wallet,
     )
-
-
-def confirm_ba_qing_exit(ctx: RunContext) -> ActionResult[Any]:
-    """结束购买确认：点确认，回地图。"""
-    confirm = ctx.frame().find_image(T_SHOP_CONFIRM)
-    if not confirm.ok or confirm.value is None:
-        return ActionResult.not_found("结束购买确认按钮没找到", template=T_SHOP_CONFIRM)
-    clicked = actions.click_source_point(ctx.session, confirm.value)
-    if not clicked.ok:
-        return clicked
-    ctx.invalidate_frame()
-    ctx.sleep(0.5)
-    ctx.blackboard[BA_QING_ACTIVE] = False
-    ctx.blackboard[BA_QING_DONE] = set()
-    ctx.blackboard[BA_QING_PENDING] = {}
-    return ActionResult.success("结束购买", action="click")
 
 
 def choose_rest(ctx: RunContext) -> ActionResult[Any]:

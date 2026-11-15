@@ -41,6 +41,7 @@ from .enter import continue_run, enter_campaign, enter_qianli, open_pick, start_
 from .leave import leave_pick
 from .pick import pick_general
 from .run import (
+    buy_ba_qing,
     choose_event_option,
     choose_mozi,
     choose_node,
@@ -49,7 +50,6 @@ from .run import (
     claim_reward,
     close_congrats,
     close_skill_panel,
-    confirm_ba_qing_exit,
     confirm_pocket,
     do_zhuge,
     enter_event,
@@ -62,13 +62,12 @@ from .run import (
     fight_open_menu_or_wait,
     pick_gift,
     pick_kind,
-    resolve_ba_qing_buy,
-    shop_ba_qing_pick,
     start_battle,
     trigger_shi_battle,
 )
 
 __all__ = [
+    "buy_ba_qing",
     "choose_event_option",
     "choose_mozi",
     "choose_node",
@@ -77,7 +76,6 @@ __all__ = [
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
-    "confirm_ba_qing_exit",
     "confirm_pocket",
     "continue_run",
     "do_zhuge",
@@ -96,8 +94,6 @@ __all__ = [
     "pick_general",
     "pick_gift",
     "pick_kind",
-    "resolve_ba_qing_buy",
-    "shop_ba_qing_pick",
     "start_battle",
     "start_run",
     "trigger_shi_battle",

@@ -73,9 +73,6 @@ from .templates import (
     T_SEARCH,
     T_SELECT_TITLE,
     T_SHI_CHOICE,
-    T_SHOP_BUY_TITLE,
-    T_SHOP_BUY_TITLE_2,
-    T_SHOP_EXIT_PROMPT,
     T_SHOP_TITLE,
     T_SKILL_INFO,
     T_SKILL_TITLE,
@@ -402,25 +399,6 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_REST_TITLE, region=REST_TITLE_ROI),
                             ),
                             description="安营驻寨：三个选项，点一个就回地图",
-                        ),
-                        PageLeaf(
-                            "qianli/shop/ba_qing/buy",
-                            name="局内 · 巴清商店购买弹窗",
-                            queries=(
-                                OrQuery(
-                                    queries=(
-                                        ImageQuery(T_SHOP_BUY_TITLE),
-                                        ImageQuery(T_SHOP_BUY_TITLE_2),
-                                    )
-                                ),
-                            ),
-                            description="购买弹窗：钱够买 / 不够取消",
-                        ),
-                        PageLeaf(
-                            "qianli/shop/ba_qing/exit",
-                            name="局内 · 巴清商店结束购买",
-                            queries=(ImageQuery(T_SHOP_EXIT_PROMPT),),
-                            description="是否结束购买？确认退出",
                         ),
                         PageLeaf(
                             "qianli/shop/ba_qing",
