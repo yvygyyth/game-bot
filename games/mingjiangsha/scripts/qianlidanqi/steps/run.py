@@ -15,7 +15,7 @@ from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.utils import click_cyan_glow, click_gold_frame
 
-from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI, WIN_CLOSE_ROI
+from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
     COPPER_REGION,
     RewardKind,
@@ -322,13 +322,7 @@ def fight_close_menu(ctx: RunContext) -> ActionResult[Any]:
     点不到 menu.png 不能无限重试，看到「点击空白处关闭」就交给 ended。
     """
     ctx.blackboard[AUTO_READY_KEY] = True
-    clicked = click_image(ctx, T_FIGHT_MENU, settle=0.4)
-    if clicked.ok:
-        return clicked
-    text = ctx.frame().find_text("点击空白处关闭", region=WIN_CLOSE_ROI)
-    if text.ok:
-        return ActionResult.success("胜利结算，等状态转 ended", action="noop")
-    return clicked
+    return click_image(ctx, T_FIGHT_MENU, settle=0.4)
 
 
 def fight_click_end(ctx: RunContext) -> ActionResult[Any]:
