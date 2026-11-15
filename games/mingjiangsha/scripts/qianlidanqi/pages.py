@@ -35,7 +35,7 @@ home（容器）
 
 from __future__ import annotations
 
-from gamebot.atomic.query import ImageQuery, OrQuery, any_image
+from gamebot.atomic.query import ImageQuery, OrQuery, TextQuery, any_image
 from gamebot.state import PageGroup, PageLeaf
 from gamebot.types import Region
 
@@ -57,6 +57,7 @@ from .templates import (
     T_FIGHT_NEXT,
     T_FIGHT_SETTING,
     T_FIGHT_WIN_CLOSE,
+    T_FIGHT_WIN_CLOSE_NEW,
     T_FLOW,
     T_FLOW_MAP,
     T_GIFT_KIND_TITLE,
@@ -151,6 +152,7 @@ EVENT_GIFT_ROI = Region(1050, 1190, 460, 140)
 
 #: 妃妃选择页顶部标题「偶遇朏朏」。
 EVENT_CHOICE_ROI = Region(1170, 110, 340, 140)
+WIN_CLOSE_ROI = Region(700, 1150, 1400, 200)
 ESCAPE_ROI = Region(900, 1030, 780, 210)
 
 #: 十常侍选择页「请选择一项蛊惑」。
@@ -320,10 +322,17 @@ FEATURE_TREE = PageGroup(
                                     "qianli/fight/ended",
                                     name="战斗 · 结束提示",
                                     queries=(
-                                        any_image(
-                                            T_FIGHT_END,
-                                            T_FIGHT_WIN_CLOSE,
-                                            confidence=0.9,
+                                        OrQuery(
+                                            queries=(
+                                                ImageQuery(T_FIGHT_END),
+                                                ImageQuery(T_FIGHT_WIN_CLOSE),
+                                                ImageQuery(T_FIGHT_WIN_CLOSE_NEW),
+                                                TextQuery(
+                                                    "点击空白处关闭",
+                                                    region=WIN_CLOSE_ROI,
+                                                    confidence=0.7,
+                                                ),
+                                            )
                                         ),
                                     ),
                                     priority=60,

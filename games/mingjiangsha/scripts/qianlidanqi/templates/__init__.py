@@ -30,6 +30,7 @@ __all__ = [
     "T_FIGHT_NEXT",
     "T_FIGHT_SETTING",
     "T_FIGHT_WIN_CLOSE",
+    "T_FIGHT_WIN_CLOSE_NEW",
     "T_FLOW",
     "T_FLOW_BAG",
     "T_FLOW_MAP",
@@ -222,6 +223,8 @@ T_FIGHT_MENU = "flow/menu.png"
 T_FIGHT_END = "flow/challenge_end.png"
 #: 完胜页「点击空白处关闭」。
 T_FIGHT_WIN_CLOSE = "flow/win_close.png"
+#: 「点击空白处关闭」的另一种胜利结算（分辨率/字体不同）。
+T_FIGHT_WIN_CLOSE_NEW = "flow/win_close_new.png"
 #: 结算「下一步」条。
 T_FIGHT_NEXT = "gold_frame/next_step.png"
 #: 战斗「托管」（未托管，点了才托管）。
