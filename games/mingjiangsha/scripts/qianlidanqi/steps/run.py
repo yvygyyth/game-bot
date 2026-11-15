@@ -57,6 +57,7 @@ from ..templates import (
     T_REWARD_TOKEN,
     T_SHI_ATTACK,
     T_SHOP_BUY_TITLE,
+    T_SHOP_BUY_TITLE_2,
     T_SHOP_CANCEL,
     T_SHOP_CONFIRM,
     T_SHOP_EXIT,
@@ -198,6 +199,9 @@ def choose_node(ctx: RunContext) -> ActionResult[Any]:
     if shop.ok and shop.value is not None:
         coins = refresh_copper_coins(ctx)
         if coins is None or coins >= SHOP_MIN_COINS:
+            ctx.blackboard[BA_QING_ACTIVE] = False
+            ctx.blackboard[BA_QING_DONE] = set()
+            ctx.blackboard[BA_QING_CACHE] = None
             point = shop.value
             first = actions.click_source_point(ctx.session, point)
             if not first.ok:
@@ -403,6 +407,7 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
 BA_QING_ACTIVE = "qianli.ba_qing.active"
 BA_QING_DONE = "qianli.ba_qing.done"
 BA_QING_PENDING = "qianli.ba_qing.pending"
+BA_QING_CACHE = "qianli.ba_qing.cache"
 
 BA_QING_BUY_REGION = Region(760, 890, 700, 160)
 BA_QING_CANCEL_REGION = Region(1450, 880, 520, 220)
@@ -441,9 +446,15 @@ def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
     if not ctx.blackboard.get(BA_QING_ACTIVE):
         ctx.blackboard[BA_QING_ACTIVE] = True
         ctx.blackboard[BA_QING_DONE] = set()
+        ctx.blackboard[BA_QING_CACHE] = None
     done: set[int] = ctx.blackboard.get(BA_QING_DONE) or set()
 
-    wallet, titles, prices = _read_ba_qing(ctx)
+    cached = ctx.blackboard.get(BA_QING_CACHE)
+    if cached:
+        wallet, titles, prices = cached
+    else:
+        wallet, titles, prices = _read_ba_qing(ctx)
+        ctx.blackboard[BA_QING_CACHE] = (wallet, titles, prices)
     token_points = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
 
     for slot, name in rank_token_slots(titles):
@@ -452,7 +463,6 @@ def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
         price = prices[slot] if slot < len(prices) else None
         # 主界面能确定钱不够就跳过，不弹购买
         if wallet is not None and price is not None and price > wallet:
-            done.add(slot)
             continue
         point = token_points[min(slot, len(token_points) - 1)]
         picked = actions.click_source_point(ctx.session, point)
@@ -462,6 +472,8 @@ def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
         ctx.sleep(0.3)
 
         buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
+        if not buy.ok:
+            buy = ctx.frame().find_image(T_SHOP_BUY_TITLE_2)
         if buy.ok:
             ctx.blackboard[BA_QING_PENDING] = {
                 "slot": slot,
@@ -512,6 +524,12 @@ def resolve_ba_qing_buy(ctx: RunContext) -> ActionResult[Any]:
         done: set[int] = ctx.blackboard.get(BA_QING_DONE) or set()
         done.add(slot)
         ctx.blackboard[BA_QING_DONE] = done
+        if enough:
+            cached = ctx.blackboard.get(BA_QING_CACHE)
+            if cached and isinstance(price, int):
+                wallet0, titles0, prices0 = cached
+                left = wallet0 - price if wallet0 is not None else None
+                ctx.blackboard[BA_QING_CACHE] = (left, titles0, prices0)
     ctx.blackboard[BA_QING_PENDING] = {}
     return ActionResult.success(
         "已购买" if enough else "钱不够，已取消",

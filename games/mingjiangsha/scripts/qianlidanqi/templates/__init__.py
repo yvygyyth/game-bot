@@ -69,6 +69,7 @@ __all__ = [
     "T_SHI_ATTACK",
     "T_SHI_CHOICE",
     "T_SHOP_BUY_TITLE",
+    "T_SHOP_BUY_TITLE_2",
     "T_SHOP_CANCEL",
     "T_SHOP_CONFIRM",
     "T_SHOP_EXIT",
@@ -177,6 +178,8 @@ T_REST_TITLE = "flow/rest_title.png"
 T_SHOP_TITLE = "flow/shop_title.png"
 #: 购买弹窗标题「购买」。
 T_SHOP_BUY_TITLE = "flow/shop_buy_title.png"
+#: 另一种尺寸的「购买」标题。
+T_SHOP_BUY_TITLE_2 = "flow/shop_buy_title_2.png"
 #: 购买弹窗里「钱不够」的灰色购买按钮（左侧）。
 T_SHOP_GRAY = "flow/shop_gray.png"
 #: 购买弹窗右下「取消」。

@@ -74,6 +74,7 @@ from .templates import (
     T_SELECT_TITLE,
     T_SHI_CHOICE,
     T_SHOP_BUY_TITLE,
+    T_SHOP_BUY_TITLE_2,
     T_SHOP_EXIT_PROMPT,
     T_SHOP_TITLE,
     T_SKILL_INFO,
@@ -405,7 +406,14 @@ FEATURE_TREE = PageGroup(
                         PageLeaf(
                             "qianli/shop/ba_qing/buy",
                             name="局内 · 巴清商店购买弹窗",
-                            queries=(ImageQuery(T_SHOP_BUY_TITLE),),
+                            queries=(
+                                OrQuery(
+                                    queries=(
+                                        ImageQuery(T_SHOP_BUY_TITLE),
+                                        ImageQuery(T_SHOP_BUY_TITLE_2),
+                                    )
+                                ),
+                            ),
                             description="购买弹窗：钱够买 / 不够取消",
                         ),
                         PageLeaf(
