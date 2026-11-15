@@ -16,6 +16,7 @@ __all__ = [
     "T_GONG_HUI_ENTRY",
     "T_GONG_HUI_STATE",
     "T_HOME",
+    "T_JUNXU",
     "T_LINGXI",
     "T_MAIL_ENTRY",
     "T_MAIL_ONE_CLICK",
@@ -28,6 +29,7 @@ __all__ = [
     "T_SHOP_MINGJIANG",
     "T_SHOP_STATE",
     "T_SHOP_TAB_COPPER",
+    "T_SHOP_TAB_GOLD",
     "T_SHOP_TAB_JINLAN",
     "T_ZHANYI_SHOP_ENTRY",
     "T_ZHAN_YI_ENTRY",
@@ -55,9 +57,13 @@ T_GALLERY_MONTHLY = "gallery_monthly.png"
 
 # ---- 商店 ----
 T_SHOP_ENTRY = "entry/shop.png"
+#: 巴清商店「黄金」页签。
+T_SHOP_TAB_GOLD = "shop_tab_gold.png"
 T_SHOP_STATE = "state_shop.png"
 T_FREE_BINGLI = "free_bingli.png"
 T_LINGXI = "lingxi.png"
+#: 活动左侧「军需月令」入口。
+T_JUNXU = "junxu.png"
 T_MINGJIANG = "mingjiang.png"
 #: 新商店：灵犀宝箱 / 名将册 / 铜钱页签 / 金兰页签。
 T_SHOP_LINGXI = "shop_lingxi.png"

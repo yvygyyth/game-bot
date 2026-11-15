@@ -17,10 +17,13 @@ from ..templates import (
     T_GALLERY_MONTHLY,
     T_GONGHUI_STORE_ENTRY,
     T_HOME,
+    T_JUNXU,
     T_MAIL_ONE_CLICK,
     T_MAX,
     T_QINGMEI_ENTRY,
+    T_SHOP_LINGXI,
     T_SHOP_TAB_COPPER,
+    T_SHOP_TAB_GOLD,
     T_SHOP_TAB_JINLAN,
     T_ZHANYI_SHOP_ENTRY,
 )
@@ -69,12 +72,11 @@ def _claim_junxu(ctx: RunContext) -> bool:
     menu_point = Point(180, 800)
     claim_points = (Point(1054, 1076), Point(1931, 1076))
     for _ in range(3):
-        actions.scroll(ctx.session, -4, point=menu_point)
-        ctx.invalidate_frame()
-        ctx.sleep(0.6)
-        hit = ctx.frame().find_text("军需月令")
-        if hit.ok and hit.value is not None:
-            actions.click_source_point(ctx.session, hit.value)
+        target = scroll_find_image(
+            ctx, T_JUNXU, point=menu_point, steps=4, max_rounds=1
+        )
+        if target is not None:
+            actions.click_source_point(ctx.session, target)
             ctx.invalidate_frame()
             ctx.sleep(1.0)
             for pick, fallback in zip(("left", "right"), claim_points, strict=True):
@@ -235,10 +237,55 @@ def _buy_if_present(ctx: RunContext, template: str) -> bool:
     return True
 
 
+def scroll_find_image(
+    ctx: RunContext,
+    template: str,
+    *,
+    point: Point | None = None,
+    steps: int = 5,
+    max_rounds: int = 8,
+) -> Point | None:
+    """脚本级通用：边向下滚动边找模板。"""
+    scroll_point = point or Point(1280, 700)
+    for _ in range(max_rounds):
+        hit = ctx.frame().find_image(template, confidence=0.85)
+        if hit.ok and hit.value is not None:
+            return hit.value
+        actions.scroll(ctx.session, -abs(steps), point=scroll_point)
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
+    hit = ctx.frame().find_image(template, confidence=0.85)
+    return hit.value if hit.ok and hit.value is not None else None
+
+
+def _buy_template(
+    ctx: RunContext,
+    template: str,
+    *,
+    point: Point | None = None,
+    steps: int = 5,
+    max_rounds: int = 8,
+) -> bool:
+    target = scroll_find_image(
+        ctx, template, point=point, steps=steps, max_rounds=max_rounds
+    )
+    if target is None:
+        return False
+    actions.click_source_point(ctx.session, target)
+    ctx.invalidate_frame()
+    ctx.sleep(0.6)
+    click_image(ctx, T_MAX, settle=0.4)
+    click_gold_frame(ctx, settle=0.7)
+    press(ctx, "esc", settle=0.5)
+    return True
+
+
 def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
     """商店：黄金免费兵力 → 铜钱灵犀盒(满) → 金兰名将册(滚动找到, 满)。"""
-    actions.click_source_point(ctx.session, Point(1306, 354))
-    ctx.sleep(0.6)
+    tab = click_image(ctx, T_SHOP_TAB_GOLD, confidence=0.9, settle=0.6)
+    if not tab.ok:
+        actions.click_source_point(ctx.session, Point(1306, 354))
+        ctx.sleep(0.6)
     free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
     if free.ok:
         click_gold_frame(ctx, settle=0.5)
@@ -247,7 +294,7 @@ def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
     if not tab.ok:
         actions.click_source_point(ctx.session, Point(1669, 354))
         ctx.sleep(0.6)
-    _buy_named(ctx, "灵犀宝盒")
+    _buy_template(ctx, T_SHOP_LINGXI)
     press(ctx, "esc", settle=0.5)
 
     tab = click_image(ctx, T_SHOP_TAB_JINLAN, confidence=0.9, settle=0.6)
