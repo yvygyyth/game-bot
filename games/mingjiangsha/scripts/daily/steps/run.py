@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from gamebot.atomic import actions
 from gamebot.execution.builtins import click_image, press
-from gamebot.types import ActionResult, Point
+from gamebot.types import ActionResult, Point, Region
 from games.mingjiangsha.utils import click_gold_frame
 
 from ..entries import ENTRIES
@@ -20,8 +20,6 @@ from ..templates import (
     T_MAIL_ONE_CLICK,
     T_MAX,
     T_QINGMEI_ENTRY,
-    T_SHOP_LINGXI,
-    T_SHOP_MINGJIANG,
     T_SHOP_TAB_COPPER,
     T_SHOP_TAB_JINLAN,
     T_ZHANYI_SHOP_ENTRY,
@@ -79,9 +77,17 @@ def _claim_junxu(ctx: RunContext) -> bool:
             actions.click_source_point(ctx.session, hit.value)
             ctx.invalidate_frame()
             ctx.sleep(1.0)
-            for point in claim_points:
-                actions.click_source_point(ctx.session, point)
-                ctx.sleep(0.7)
+            for pick, fallback in zip(("left", "right"), claim_points, strict=True):
+                clicked = click_gold_frame(
+                    ctx,
+                    region=Region(800, 900, 1200, 400),
+                    pick=pick,
+                    settle=0.7,
+                )
+                if not clicked.ok:
+                    actions.click_source_point(ctx.session, fallback)
+                    ctx.invalidate_frame()
+                    ctx.sleep(0.7)
             press(ctx, "esc", settle=0.8)
             return True
     return False
@@ -92,11 +98,53 @@ def _esc(ctx: RunContext, times: int = 2) -> None:
         press(ctx, "esc", settle=0.4)
 
 
+def scroll_find(
+    ctx: RunContext,
+    text: str,
+    *,
+    point: Point | None = None,
+    steps: int = 5,
+    max_rounds: int = 8,
+) -> Point | None:
+    """脚本级通用：边向下滚动边找文字，找到返回中心点。"""
+    scroll_point = point or Point(1280, 700)
+    for _ in range(max_rounds):
+        hit = ctx.frame().find_text(text)
+        if hit.ok and hit.value is not None:
+            return hit.value
+        actions.scroll(ctx.session, -abs(steps), point=scroll_point)
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
+    hit = ctx.frame().find_text(text)
+    return hit.value if hit.ok and hit.value is not None else None
+
+
+def _buy_named(
+    ctx: RunContext,
+    name: str,
+    *,
+    point: Point | None = None,
+    steps: int = 5,
+    max_rounds: int = 8,
+) -> bool:
+    """滚到商品名 → 点击 → 最大 → 金色确认 → Esc 关弹窗。"""
+    target = scroll_find(ctx, name, point=point, steps=steps, max_rounds=max_rounds)
+    if target is None:
+        return False
+    actions.click_source_point(ctx.session, target)
+    ctx.invalidate_frame()
+    ctx.sleep(0.6)
+    click_image(ctx, T_MAX, settle=0.4)
+    click_gold_frame(ctx, settle=0.7)
+    press(ctx, "esc", settle=0.5)
+    return True
+
+
 def visit_next_entry(ctx: RunContext) -> ActionResult[Any]:
     """首页 hub：按红点挑下一个入口。
 
-    * 邮件/活动/丹青阁/商店：有红点才进；
-    * 煮酒/战役/公会/送花：日常流程，没有红点也进一次；
+    * 只有邮件用红点判断；
+    * 活动/丹青阁/商店/煮酒/战役/公会/送花：每次都进一次；
     * 任何一个入口只处理一次，全部处理完置 ``daily.done`` 走 finish。
     """
     # 首页都没确认时绝不按固定点点入口（否则会把“认不出来的画面”点开邮箱）
@@ -140,7 +188,7 @@ def mail_claim_then_activity(ctx: RunContext) -> ActionResult[Any]:
 
 def draw_then_gallery(ctx: RunContext) -> ActionResult[Any]:
     """活动：抽两张卡（今日卦象）→ 关活动 → 点丹青阁入口。"""
-    for point in (Point(735, 584), Point(735, 584)):
+    for point in (Point(735, 584), Point(2203, 584)):
         actions.click_source_point(ctx.session, point)
         ctx.invalidate_frame()
         # 翻牌有动画，等它翻完再点第二张；否则第二张会点在动画上
@@ -188,63 +236,59 @@ def _buy_if_present(ctx: RunContext, template: str) -> bool:
 
 
 def buy_shop_then_finish(ctx: RunContext) -> ActionResult[Any]:
-    """商店：黄金免费兵力 → 铜钱灵犀宝箱 → 金兰名将册。"""
-    gold_tab = Point(1306, 354)
-    copper_tab = Point(1669, 354)
-    jinlan_tab = Point(2017, 354)
-    actions.click_source_point(ctx.session, gold_tab)
+    """商店：黄金免费兵力 → 铜钱灵犀盒(满) → 金兰名将册(滚动找到, 满)。"""
+    actions.click_source_point(ctx.session, Point(1306, 354))
     ctx.sleep(0.6)
     free = click_image(ctx, T_FREE_BINGLI, settle=0.5)
     if free.ok:
         click_gold_frame(ctx, settle=0.5)
 
-    # 铜钱页签用「铜钱」艺术字模板，别按固定坐标
     tab = click_image(ctx, T_SHOP_TAB_COPPER, confidence=0.9, settle=0.6)
     if not tab.ok:
-        actions.click_source_point(ctx.session, copper_tab)
+        actions.click_source_point(ctx.session, Point(1669, 354))
         ctx.sleep(0.6)
-    _buy_if_present(ctx, T_SHOP_LINGXI)
+    _buy_named(ctx, "灵犀宝盒")
     press(ctx, "esc", settle=0.5)
 
     tab = click_image(ctx, T_SHOP_TAB_JINLAN, confidence=0.9, settle=0.6)
     if not tab.ok:
-        actions.click_source_point(ctx.session, jinlan_tab)
+        actions.click_source_point(ctx.session, Point(2017, 354))
         ctx.sleep(0.6)
-    _buy_if_present(ctx, T_SHOP_MINGJIANG)
+    _buy_named(ctx, "名将册", steps=6, max_rounds=10)
     press(ctx, "esc", settle=0.5)
     press(ctx, "esc", settle=0.6)
     return ActionResult.success("商店购买完成")
 
 
 def zhu_jiu_step(ctx: RunContext) -> ActionResult[Any]:
-    """煮酒 → 青梅商店：只买名将册/灵犀宝箱，没看到就退出。"""
+    """煮酒 → 青梅商店：名将册 + 10灵犀宝盒，都买满。"""
     shop = click_image(ctx, T_QINGMEI_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("煮酒没找到「青梅商店」", template=T_QINGMEI_ENTRY)
-    _buy_if_present(ctx, T_SHOP_MINGJIANG)
-    _buy_if_present(ctx, T_SHOP_LINGXI)
+    _buy_named(ctx, "名将册")
+    _buy_named(ctx, "灵犀宝盒")
     _esc(ctx, 2)
     return ActionResult.success("煮酒购买完成")
 
 
 def zhan_yi_step(ctx: RunContext) -> ActionResult[Any]:
-    """战役 → 战役商店：只买名将册/灵犀宝箱，不买问鼎令。"""
+    """战役 → 战役商店：滚动找名将册 + 10灵犀宝盒。"""
     shop = click_image(ctx, T_ZHANYI_SHOP_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("战役没找到「战役商店」", template=T_ZHANYI_SHOP_ENTRY)
-    _buy_if_present(ctx, T_SHOP_MINGJIANG)
-    _buy_if_present(ctx, T_SHOP_LINGXI)
+    _buy_named(ctx, "名将册", steps=5, max_rounds=5)
+    _buy_named(ctx, "灵犀宝盒", steps=5, max_rounds=6)
     _esc(ctx, 2)
     return ActionResult.success("战役购买完成")
 
 
 def gong_hui_step(ctx: RunContext) -> ActionResult[Any]:
-    """公会 → 商店：只买名将册/灵犀宝箱。"""
+    """公会 → 商店：老代码的六个商品，逐个滚到 + 买满。"""
     shop = click_image(ctx, T_GONGHUI_STORE_ENTRY, settle=1.0)
     if not shop.ok:
         return ActionResult.not_found("公会没找到「商店」入口", template=T_GONGHUI_STORE_ENTRY)
-    _buy_if_present(ctx, T_SHOP_MINGJIANG)
-    _buy_if_present(ctx, T_SHOP_LINGXI)
+    for name in ("名将册", "灵犀宝盒", "问鼎令", "天命令", "天法令", "军令状"):
+        _buy_named(ctx, name, steps=4, max_rounds=6)
     _esc(ctx, 2)
     return ActionResult.success("公会购买完成")
 
