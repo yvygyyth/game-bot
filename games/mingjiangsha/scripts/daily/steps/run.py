@@ -299,15 +299,16 @@ def send_flower_finish(ctx: RunContext) -> ActionResult[Any]:
     flower = Point(1865, 980)
     x100 = Point(2270, 1210)
     friend = Point(480, 400)
+    # 老代码顺序：送礼 → 赠送x100 → 油菜花 → 好友头像 → 关闭三层
     actions.click_source_point(ctx.session, gift_button)
     ctx.sleep(0.6)
-    actions.click_source_point(ctx.session, flower)
-    ctx.sleep(0.4)
     actions.click_source_point(ctx.session, x100)
+    ctx.sleep(0.4)
+    actions.click_source_point(ctx.session, flower)
     ctx.sleep(0.4)
     actions.click_source_point(ctx.session, friend)
     ctx.sleep(0.8)
-    _esc(ctx, 2)
+    _esc(ctx, 3)
     return ActionResult.success("送花完成", action="sequence")
 
 
