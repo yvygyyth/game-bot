@@ -319,7 +319,11 @@ def fight_close_menu(ctx: RunContext) -> ActionResult[Any]:
     点不到 menu.png 不能无限重试，看到「点击空白处关闭」就交给 ended。
     """
     ctx.blackboard[AUTO_READY_KEY] = True
-    return click_image(ctx, T_FIGHT_MENU, settle=0.4)
+    clicked = click_image(ctx, T_FIGHT_MENU, settle=0.4)
+    if clicked.ok:
+        return clicked
+    # 菜单已经自动关闭：不要报错重试，等战斗结束
+    return ActionResult.success("托管中，菜单已关", action="wait")
 
 
 def fight_click_end(ctx: RunContext) -> ActionResult[Any]:
