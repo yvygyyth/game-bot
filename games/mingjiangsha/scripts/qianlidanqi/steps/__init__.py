@@ -63,6 +63,7 @@ from .run import (
     pick_gift,
     pick_kind,
     start_battle,
+    start_event_duel,
     trigger_shi_battle,
 )
 
@@ -95,6 +96,7 @@ __all__ = [
     "pick_gift",
     "pick_kind",
     "start_battle",
+    "start_event_duel",
     "start_run",
     "trigger_shi_battle",
 ]

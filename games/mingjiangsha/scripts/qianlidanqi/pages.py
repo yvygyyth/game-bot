@@ -45,7 +45,10 @@ from .templates import (
     T_CLAIM_REWARD_HOVER,
     T_CLAIM_REWARD_REWARD,
     T_CONGRATS,
+    T_EVENT_BATTLE_LEFT,
+    T_EVENT_BATTLE_RIGHT,
     T_EVENT_CHOICE_FEIFEI,
+    T_EVENT_DUEL_TITLE,
     T_EVENT_ESCAPE_ANCHOR,
     T_EVENT_ESCAPE_TITLE,
     T_EVENT_INTRO_BACK,
@@ -233,6 +236,16 @@ FEATURE_TREE = PageGroup(
                                 ImageQuery(T_EVENT_INTRO_BACK, region=EVENT_BACK_ROI),
                             ),
                             description="偶遇/疯疯老道/小狗挡道：点左边金色按钮进事件",
+                        ),
+                        PageLeaf(
+                            "qianli/event/duel",
+                            name="局内 · 与曹操战斗（意外战斗）",
+                            queries=(
+                                ImageQuery(T_EVENT_DUEL_TITLE),
+                                ImageQuery(T_EVENT_BATTLE_LEFT),
+                                ImageQuery(T_EVENT_BATTLE_RIGHT),
+                            ),
+                            description="事件战斗：两个金边角都命中就点按钮中间进战斗",
                         ),
                         PageLeaf(
                             "qianli/event/escape",

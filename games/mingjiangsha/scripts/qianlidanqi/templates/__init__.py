@@ -14,7 +14,10 @@ __all__ = [
     "T_CLAIM_REWARD_REWARD",
     "T_CONFIRM",
     "T_CONGRATS",
+    "T_EVENT_BATTLE_LEFT",
+    "T_EVENT_BATTLE_RIGHT",
     "T_EVENT_CHOICE_FEIFEI",
+    "T_EVENT_DUEL_TITLE",
     "T_EVENT_ESCAPE_ANCHOR",
     "T_EVENT_ESCAPE_TITLE",
     "T_EVENT_FEIFEI_BARGAIN",
@@ -136,6 +139,9 @@ T_EVENT_ESCAPE_TITLE = "flow/escape_title.png"
 #: 奇遇选完后的「请选择一项赠礼」提示。
 T_EVENT_GIFT = "flow/event_gift.png"
 #: 妃妃选择页顶部标题「偶遇朏朏」（和赠礼类别屏区分）。
+T_EVENT_BATTLE_LEFT = "flow/event_battle_left.png"
+T_EVENT_BATTLE_RIGHT = "flow/event_battle_right.png"
+T_EVENT_DUEL_TITLE = "flow/event_duel_title.png"
 T_EVENT_CHOICE_FEIFEI = "flow/event_choice_feifei.png"
 T_EVENT_FEIFEI_SLEEP = "flow/event_feifei_sleep.png"
 T_EVENT_FEIFEI_HELP = "flow/event_feifei_help.png"

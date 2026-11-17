@@ -37,6 +37,7 @@ BINDINGS = NodeBindings(
         Binding("zhuge", "qianli/event/zhuge"),
         Binding("mo_zi", "qianli/event/mo_zi"),
         Binding("escape", "qianli/event/escape"),
+        Binding("duel", "qianli/event/duel"),
         Binding("end", "qianli/end"),
         Binding("end2", "qianli/end2"),
     )

@@ -29,6 +29,8 @@ from ..store import (
     resolve_general_priority,
 )
 from ..templates import (
+    T_EVENT_BATTLE_LEFT,
+    T_EVENT_BATTLE_RIGHT,
     T_EVENT_FEIFEI_BARGAIN,
     T_EVENT_FEIFEI_HELP,
     T_EVENT_FEIFEI_SLEEP,
@@ -103,6 +105,7 @@ __all__ = [
     "pick_gift",
     "pick_kind",
     "start_battle",
+    "start_event_duel",
     "trigger_shi_battle",
 ]
 
@@ -627,6 +630,21 @@ def choose_mozi(ctx: RunContext) -> ActionResult[Any]:
 def escape_battle(ctx: RunContext) -> ActionResult[Any]:
     """想逃？→ 点「与项羽、范增战斗」，直接进战斗。"""
     return click_gold_frame(ctx, ESCAPE_BUTTON_REGION, settle=1.0)
+
+
+def start_event_duel(ctx: RunContext) -> ActionResult[Any]:
+    """意外战斗事件：用按钮左右两个金边角定位，点中间进战斗。"""
+    left = ctx.frame().find_image(T_EVENT_BATTLE_LEFT)
+    right = ctx.frame().find_image(T_EVENT_BATTLE_RIGHT)
+    if not left.ok or not right.ok or left.value is None or right.value is None:
+        return ActionResult.not_found("事件战斗按钮左右角没同时找到")
+    point = Point((left.value.x + right.value.x + 64) // 2, left.value.y + 27)
+    clicked = actions.click_source_point(ctx.session, point)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(1.0)
+    return clicked.with_meta(point=(point.x, point.y))
 
 
 def claim_reward(ctx: RunContext) -> ActionResult[Any]:

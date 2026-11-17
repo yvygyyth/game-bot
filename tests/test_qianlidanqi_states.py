@@ -59,6 +59,7 @@ CASES = (
     ("qianli/event/zhuge", "zhuge2.png"),
     ("qianli/event/zhuge", "zhuge3.png"),
     ("qianli/event/escape", "event_escape.png"),
+    ("qianli/event/duel", "event_caocao.png"),
     ("qianli/event/mo_zi", "event_mozi_choice.png"),
     ("qianli/skill_panel", "skill_panel.png"),
     ("qianli/fight/hand_swap", "event_shichang_battle.png"),
