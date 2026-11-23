@@ -27,6 +27,7 @@ __all__ = [
     "BUTTON_FOLDERS",
     "BUTTON_GOLD_FRAME",
     "BUTTON_GOLD_GLOW",
+    "BUTTON_GRAY_FRAME",
 ]
 
 #: 金色发光按钮：创建队伍 / 添加伙伴 / 确定…
@@ -38,9 +39,13 @@ BUTTON_GOLD_FRAME = "gold_frame"
 #: 青色发光按钮：取消
 BUTTON_CYAN_GLOW = "cyan_glow"
 
+#: 灰色花纹边框（金框按钮的**禁用态**）：钱不够时的「N购买」
+BUTTON_GRAY_FRAME = "gray_frame"
+
 #: 全部花纹目录。**只作参考**，新加文件夹不必登记到这里才能用。
 BUTTON_FOLDERS = (
     BUTTON_GOLD_GLOW,
     BUTTON_GOLD_FRAME,
+    BUTTON_GRAY_FRAME,
     BUTTON_CYAN_GLOW,
 )

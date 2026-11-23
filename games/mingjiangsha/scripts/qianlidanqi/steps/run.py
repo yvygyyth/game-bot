@@ -13,7 +13,11 @@ from gamebot.atomic import actions
 from gamebot.atomic.query import ImageQuery, any_image
 from gamebot.execution.builtins import click_image, press, wait_for
 from gamebot.types import ActionResult, Point, Region
-from games.mingjiangsha.utils import click_gold_frame
+from games.mingjiangsha.utils import (
+    click_cyan_glow,
+    click_gold_frame,
+    gold_frame_enabled,
+)
 
 from ..pages import CLAIM_ROI, NODE_REGION, POCKET_CONFIRM_ROI, START_BATTLE_ROI
 from ..store import (
@@ -57,12 +61,8 @@ from ..templates import (
     T_REWARD_JOINT,
     T_REWARD_TOKEN,
     T_SHI_ATTACK,
-    T_SHOP_BUY_TITLE,
-    T_SHOP_CANCEL,
     T_SHOP_CONFIRM,
     T_SHOP_EXIT,
-    T_SHOP_EXIT_PROMPT,
-    T_SHOP_GRAY,
     T_START_BATTLE,
     T_ZHUGE_CONTINUE,
 )
@@ -83,7 +83,6 @@ __all__ = [
     "SHOP_MIN_COINS",
     "SKILL_PANEL_CLOSE",
     "ZHUGE_CARD_POINT",
-    "buy_ba_qing",
     "choose_event_option",
     "choose_mozi",
     "choose_node",
@@ -92,6 +91,7 @@ __all__ = [
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
+    "confirm_ba_qing_exit",
     "confirm_pocket",
     "do_zhuge",
     "enter_event",
@@ -104,6 +104,8 @@ __all__ = [
     "fight_open_menu_or_wait",
     "pick_gift",
     "pick_kind",
+    "resolve_ba_qing_buy",
+    "shop_ba_qing_pick",
     "start_battle",
     "start_event_duel",
     "trigger_shi_battle",
@@ -145,6 +147,15 @@ SKILL_PANEL_CLOSE = Point(1300, 1127)
 
 #: 铜币少于这个数就不进巴清商店（旧脚本的阈值）。
 SHOP_MIN_COINS = 30
+
+#: 购买弹窗底部两个按钮（金框购买 / 青色取消）所在的区域。
+BA_QING_BUTTON_REGION = Region(600, 880, 1150, 250)
+
+#: 商店右上角退出箭头的搜索区域。
+#: **必须限定 ROI**：箭头是个小花纹图，全屏找在默认阈值下会卡在临界分之下
+#: （真机实测：ROI 里 0.85 稳定命中，全屏 not_found），还会到处假命中。
+SHOP_EXIT_REGION = Region(2300, 20, 260, 200)
+SHOP_EXIT_CONFIDENCE = 0.85
 
 #: 休息界面随便点一个选项（第一个）。
 REST_OPTION_POINT = Point(457, 1150)
@@ -404,10 +415,12 @@ def close_skill_panel(ctx: RunContext) -> ActionResult[Any]:
     return clicked
 
 
-def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
-    """巴清商店：一次 OCR 读钱包/三个名字/三个价格，再按优先级买。
+def shop_ba_qing_pick(ctx: RunContext) -> ActionResult[Any]:
+    """商店主界面：按优先级点一个**买得起**的商品；都买不起就点退出箭头。
 
-    价格已知就不必先点开弹窗：价格 > 钱包直接结束购买；价格够才点商品。
+    铜币每轮重新 OCR（买完一件钱就变少，不能用旧值）；价格认不出数字
+    的槽位视为已售罄，直接跳过。钱不够**跳过这一件看下一件**——
+    优先级序不等于价格序，不能 break。
     """
     title_regions = (
         Region(1260, 260, 320, 80),
@@ -420,7 +433,6 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
         Region(2270, 625, 140, 70),
     )
     token_points = (Point(1416, 302), Point(1870, 302), Point(2326, 302))
-    buy_point = Point(842, 964)
 
     # 一次画布 OCR：钱包 + 3 个名字 + 3 个价格
     read = ctx.frame().read_regions((COPPER_REGION, *title_regions, *price_regions))
@@ -437,68 +449,74 @@ def buy_ba_qing(ctx: RunContext) -> ActionResult[Any]:
         for i in range(4, 7)
     ]
 
-    bought: list[str] = []
     for slot, name in rank_token_slots(titles):
         price = prices[slot] if slot < len(prices) else None
-        if wallet is not None and price is not None and price > wallet:
-            break
+        if price is None:
+            continue  # 已售罄 / 认不出价格：跳过
+        if wallet is not None and price > wallet:
+            continue  # 钱不够这件：看下一件
         point = token_points[min(slot, len(token_points) - 1)]
-        picked = actions.click_source_point(ctx.session, point)
-        if not picked.ok:
-            return picked
-        ctx.invalidate_frame()
-        ctx.sleep(0.3)
-
-        # 钱够才会弹「购买」；钱不够/已售罄，点完什么都没发生。
-        buy = ctx.frame().find_image(T_SHOP_BUY_TITLE)
-        if not buy.ok:
-            continue
-
-        # 购买按钮是灰色边框 = 钱不够：点取消，直接结束本轮购买
-        gray = ctx.frame().find_image(
-            T_SHOP_GRAY, region=Region(700, 880, 550, 220), confidence=0.95
-        )
-        if gray.ok:
-            cancel = ctx.frame().find_image(T_SHOP_CANCEL)
-            if cancel.ok and cancel.value is not None:
-                actions.click_source_point(ctx.session, cancel.value)
-            else:
-                actions.click_source_point(ctx.session, Point(1517, 1009))
-            ctx.invalidate_frame()
-            ctx.sleep(0.6)
-            break
-
-        clicked = actions.click_source_point(ctx.session, buy_point)
+        clicked = actions.click_source_point(ctx.session, point)
         if not clicked.ok:
             return clicked
-        bought.append(name)
-        ctx.invalidate_frame()
-        ctx.sleep(0.5)
-
-    # ---- 退出商店：右上角箭头 → 是否结束购买？→ 确认 ----
-    exit_btn = ctx.frame().find_image(T_SHOP_EXIT)
-    if exit_btn.ok and exit_btn.value is not None:
-        actions.click_source_point(ctx.session, exit_btn.value)
         ctx.invalidate_frame()
         ctx.sleep(0.4)
+        return clicked.with_meta(
+            slot=slot, wu_jiang=name, price=price, wallet=wallet, titles=titles
+        )
 
-    prompt = ctx.frame().find_image(T_SHOP_EXIT_PROMPT)
-    if prompt.ok:
-        confirm = ctx.frame().find_image(T_SHOP_CONFIRM)
-        if confirm.ok and confirm.value is not None:
-            actions.click_source_point(ctx.session, confirm.value)
-            ctx.invalidate_frame()
-            ctx.sleep(0.5)
-
-    return ActionResult.success(
-        "巴清商店处理完成",
-        action="sequence",
-        bought=bought,
-        count=len(bought),
-        titles=titles,
-        prices=prices,
-        wallet=wallet,
+    # 没有可买的：点右上角退出箭头（引擎在下一帧认出结束弹窗或地图）
+    exit_btn = ctx.frame().find_image(
+        T_SHOP_EXIT, region=SHOP_EXIT_REGION, confidence=SHOP_EXIT_CONFIDENCE
     )
+    if exit_btn.ok and exit_btn.value is not None:
+        clicked = actions.click_source_point(ctx.session, exit_btn.value)
+        if not clicked.ok:
+            return clicked
+        ctx.invalidate_frame()
+        ctx.sleep(0.5)
+        return clicked.with_meta(action="exit", wallet=wallet, titles=titles)
+
+    return ActionResult.not_found(
+        "商店里没有买得起的商品，也没找到退出箭头", template=T_SHOP_EXIT
+    )
+
+
+def resolve_ba_qing_buy(ctx: RunContext) -> ActionResult[Any]:
+    """购买弹窗：金框购买按钮 = 钱够，买；灰框 = 钱不够，点「取消」。
+
+    金/灰共用同一副花纹，边框环分不出来 —— 用 :func:`gold_frame_enabled`
+    按饱和度分（见 buttons.py 的说明）。
+    """
+    enabled = gold_frame_enabled(ctx, BA_QING_BUTTON_REGION)
+    if enabled is None:
+        return ActionResult.not_found(
+            "购买弹窗里没找到购买按钮", region=BA_QING_BUTTON_REGION
+        )
+    if enabled:
+        clicked = click_gold_frame(ctx, BA_QING_BUTTON_REGION, settle=0.8)
+        if clicked.ok:
+            return clicked.with_meta(action="buy")
+        return clicked
+    clicked = click_cyan_glow(ctx, BA_QING_BUTTON_REGION, settle=0.6)
+    if clicked.ok:
+        return clicked.with_meta(action="cancel_insufficient")
+    return clicked
+
+
+def confirm_ba_qing_exit(ctx: RunContext) -> ActionResult[Any]:
+    """是否结束购买？点「确认」回地图。"""
+    confirm = ctx.frame().find_image(T_SHOP_CONFIRM)
+    if not confirm.ok or confirm.value is None:
+        return ActionResult.not_found(
+            "结束购买弹窗里没找到「确认」按钮", template=T_SHOP_CONFIRM
+        )
+    clicked = actions.click_source_point(ctx.session, confirm.value)
+    if not clicked.ok:
+        return clicked
+    ctx.invalidate_frame()
+    ctx.sleep(0.8)
+    return clicked.with_meta(point=(confirm.value.x, confirm.value.y))
 
 
 def choose_rest(ctx: RunContext) -> ActionResult[Any]:

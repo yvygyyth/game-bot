@@ -5,6 +5,8 @@
 
   - :func:`.buttons.click_gold_glow` —— 金色发光（创建队伍 / 添加伙伴 / 确定…）
   - :func:`.buttons.click_gold_frame` —— 金色花纹大边框（选将确定 / 开始匹配 / 开始对局…）
+  - :func:`.buttons.click_gray_frame` —— 灰色花纹边框，金框的**禁用态**（钱不够的「N购买」）
+  - :func:`.buttons.gold_frame_enabled` —— 金框按钮是启用还是禁用（按饱和度分）
   - :func:`.buttons.click_cyan_glow` —— 青色发光（取消）
 
   写脚本时**直接挑对应的方法**，不用关心按钮位置、尺寸、具体文字；
@@ -23,8 +25,10 @@ from .buttons import (
     click_cyan_glow,
     click_gold_frame,
     click_gold_glow,
+    click_gray_frame,
     find_buttons,
     folder_templates,
+    gold_frame_enabled,
     ring_mask,
 )
 
@@ -37,8 +41,10 @@ __all__ = [
     "click_cyan_glow",
     "click_gold_frame",
     "click_gold_glow",
+    "click_gray_frame",
     "find_buttons",
     "folder_templates",
     "go_back",
+    "gold_frame_enabled",
     "ring_mask",
 ]

@@ -73,11 +73,9 @@ __all__ = [
     "T_SHI_CHOICE",
     "T_SHOP_BUY_TITLE",
     "T_SHOP_BUY_TITLE_2",
-    "T_SHOP_CANCEL",
     "T_SHOP_CONFIRM",
     "T_SHOP_EXIT",
     "T_SHOP_EXIT_PROMPT",
-    "T_SHOP_GRAY",
     "T_SHOP_TITLE",
     "T_SKILL_INFO",
     "T_SKILL_TITLE",
@@ -186,10 +184,7 @@ T_SHOP_TITLE = "flow/shop_title.png"
 T_SHOP_BUY_TITLE = "flow/shop_buy_title.png"
 #: 另一种尺寸的「购买」标题。
 T_SHOP_BUY_TITLE_2 = "flow/shop_buy_title_2.png"
-#: 购买弹窗里「钱不够」的灰色购买按钮（左侧）。
-T_SHOP_GRAY = "flow/shop_gray.png"
-#: 购买弹窗右下「取消」。
-T_SHOP_CANCEL = "flow/shop_cancel.png"
+# 购买/取消按钮走游戏级按钮家族（gold_frame / gray_frame / cyan_glow），不在这里声明。
 #: 商店右上角退出箭头。
 T_SHOP_EXIT = "flow/shop_exit.png"
 #: 退出提示「是否结束购买？」。

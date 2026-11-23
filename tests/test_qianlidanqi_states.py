@@ -44,6 +44,11 @@ CASES = (
     ("qianli/gift", "battle/zengli.png"),
     ("qianli/gift", "flow_gift.png"),
     ("qianli/shop/ba_qing", "shop_ba_qing.png"),
+    ("qianli/shop/ba_qing/buy", "shop_buy.png"),
+    ("qianli/shop/ba_qing/buy", "shop_buy2.png"),
+    ("qianli/shop/ba_qing/buy", "shop_ba_qing_buy.png"),
+    ("qianli/shop/ba_qing/buy", "shop_insufficient.png"),
+    ("qianli/shop/ba_qing/exit", "shop_exit.png"),
     ("qianli/rest", "rest.png"),
     ("qianli/pocket/choice", "pocket1.png"),
     ("qianli/pocket/confirm", "pocket2.png"),
@@ -120,6 +125,56 @@ def test_select2_and_select3_differ_by_the_placeholder(scenario, matcher) -> Non
     """两个面板只差"占位卡在不在" —— 这就是 exclude 的作用，单独钉一下。"""
     assert _locate(scenario, matcher, "select2.png") == "qianli/select2"
     assert _locate(scenario, matcher, "select3.png") == "qianli/select3"
+
+
+def _ctx_for(matcher, image):
+    session = BaseSession(build_fake_backends(image=image), matcher=matcher)
+    return RunContext(
+        session,
+        name="mingjiangsha/qianlidanqi",
+        paths=RunPaths.under(Path(tempfile.mkdtemp())),
+        frame_ttl=0.0,
+    )
+
+
+def test_shop_buy_modal_distinguishes_gold_and_gray(matcher) -> None:
+    """金框购买 = 买得起，灰框购买 = 钱不够 —— 按饱和度分，不许互相误认。
+
+    金/灰共用同一副花纹，边框环**分不出来**（灰模板在金按钮上 0.999），
+    所以判定走 :func:`gold_frame_enabled` 的饱和度路径，这里钉住四个方向。
+    """
+    from games.mingjiangsha.scripts.qianlidanqi.steps.run import (
+        BA_QING_BUTTON_REGION,
+    )
+    from games.mingjiangsha.utils import gold_frame_enabled
+
+    enabled_shots = ("shop_buy2.png",)  # 12购买 < 钱包 15：金色
+    disabled_shots = (  # 价格 > 钱包：灰色禁用态
+        "shop_buy.png",  # 27购买 > 15
+        "shop_ba_qing_buy.png",  # 40购买 > 5
+        "shop_insufficient.png",  # 49购买 > 46
+    )
+
+    def _enabled(shot: str) -> bool | None:
+        image = cv2.imread(str(RAW_DIR / shot))[23:23 + 1369, :]
+        ctx = _ctx_for(matcher, image)
+        try:
+            return gold_frame_enabled(ctx, BA_QING_BUTTON_REGION)
+        finally:
+            ctx.close()
+
+    for shot in enabled_shots:
+        assert _enabled(shot) is True, f"{shot}: 买得起的按钮应判为金色启用"
+    for shot in disabled_shots:
+        assert _enabled(shot) is False, f"{shot}: 买不起的按钮应判为灰色禁用"
+
+    # 没有按钮的画面：返回 None（不是 True/False）
+    image = cv2.imread(str(RAW_DIR / "flow1.png"))[23:23 + 1369, :]
+    ctx = _ctx_for(matcher, image)
+    try:
+        assert gold_frame_enabled(ctx, BA_QING_BUTTON_REGION) is None
+    finally:
+        ctx.close()
 
 
 def test_all_templates_are_declared() -> None:

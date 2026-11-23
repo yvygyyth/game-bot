@@ -19,7 +19,9 @@
 | `qianli/fight/result` | :func:`fight_click_next` | 点下一步，最多 5 次 |
 | `qianli/gift` | :func:`pick_gift` | OCR 三个武将名 → 按优先表点一个 |
 | `qianli/gift_kind` | :func:`pick_kind` | 按优先表选信物/资助/驰援… |
-| `qianli/shop/ba_qing` | :func:`buy_ba_qing` | 按 TOKEN_PRIORITY 买信物 → 退出 → 确认 |
+| `qianli/shop/ba_qing` | :func:`shop_ba_qing_pick` | 按优先级点一个买得起的商品；买不起就退出 |
+| `qianli/shop/ba_qing/buy` | :func:`resolve_ba_qing_buy` | 金框购买按钮=买，灰框=钱不够点取消 |
+| `qianli/shop/ba_qing/exit` | :func:`confirm_ba_qing_exit` | 结束购买弹窗点「确认」 |
 | `qianli/rest` | :func:`choose_rest` | 随便点一个休息选项 → 回地图 |
 | `qianli/pocket/choice` | :func:`choose_pocket` | 锦囊三选一随便点一个 |
 | `qianli/pocket/confirm` | :func:`confirm_pocket` | 锦囊确认页点「确认」 |
@@ -41,7 +43,6 @@ from .enter import continue_run, enter_campaign, enter_qianli, open_pick, start_
 from .leave import leave_pick
 from .pick import pick_general
 from .run import (
-    buy_ba_qing,
     choose_event_option,
     choose_mozi,
     choose_node,
@@ -50,6 +51,7 @@ from .run import (
     claim_reward,
     close_congrats,
     close_skill_panel,
+    confirm_ba_qing_exit,
     confirm_pocket,
     do_zhuge,
     enter_event,
@@ -62,13 +64,14 @@ from .run import (
     fight_open_menu_or_wait,
     pick_gift,
     pick_kind,
+    resolve_ba_qing_buy,
+    shop_ba_qing_pick,
     start_battle,
     start_event_duel,
     trigger_shi_battle,
 )
 
 __all__ = [
-    "buy_ba_qing",
     "choose_event_option",
     "choose_mozi",
     "choose_node",
@@ -77,6 +80,7 @@ __all__ = [
     "claim_reward",
     "close_congrats",
     "close_skill_panel",
+    "confirm_ba_qing_exit",
     "confirm_pocket",
     "continue_run",
     "do_zhuge",
@@ -95,6 +99,8 @@ __all__ = [
     "pick_general",
     "pick_gift",
     "pick_kind",
+    "resolve_ba_qing_buy",
+    "shop_ba_qing_pick",
     "start_battle",
     "start_event_duel",
     "start_run",

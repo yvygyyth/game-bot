@@ -76,6 +76,9 @@ from .templates import (
     T_SEARCH,
     T_SELECT_TITLE,
     T_SHI_CHOICE,
+    T_SHOP_BUY_TITLE,
+    T_SHOP_BUY_TITLE_2,
+    T_SHOP_EXIT_PROMPT,
     T_SHOP_TITLE,
     T_SKILL_INFO,
     T_SKILL_TITLE,
@@ -414,10 +417,38 @@ FEATURE_TREE = PageGroup(
                             description="安营驻寨：三个选项，点一个就回地图",
                         ),
                         PageLeaf(
+                            "qianli/shop/ba_qing/buy",
+                            name="局内 · 巴清商店购买弹窗",
+                            queries=(
+                                OrQuery(
+                                    queries=(
+                                        ImageQuery(T_SHOP_BUY_TITLE),
+                                        ImageQuery(T_SHOP_BUY_TITLE_2),
+                                    )
+                                ),
+                            ),
+                            priority=25,
+                            description="购买弹窗：金框购买=钱够，灰框=钱不够点取消",
+                        ),
+                        PageLeaf(
+                            "qianli/shop/ba_qing/exit",
+                            name="局内 · 巴清商店结束购买",
+                            queries=(ImageQuery(T_SHOP_EXIT_PROMPT),),
+                            priority=30,
+                            description="是否结束购买？点「确认」回地图",
+                        ),
+                        PageLeaf(
                             "qianli/shop/ba_qing",
                             name="局内 · 巴清商店",
                             queries=(
                                 ImageQuery(T_SHOP_TITLE, region=SHOP_TITLE_ROI),
+                            ),
+                            # 弹窗盖上时商店标题还看得见 —— 靠"没什么"让位给子状态，
+                            # 否则两个末梢同时命中，定位会在主界面和弹窗之间抖动。
+                            exclude=(
+                                ImageQuery(T_SHOP_BUY_TITLE),
+                                ImageQuery(T_SHOP_BUY_TITLE_2),
+                                ImageQuery(T_SHOP_EXIT_PROMPT),
                             ),
                             description="巴清小铺子：信物专区 + 武将牌专区",
                         ),

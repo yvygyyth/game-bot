@@ -68,6 +68,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import cv2
+import numpy as np
+
 from gamebot.atomic import actions
 from gamebot.bootstrap import project_root
 from gamebot.exceptions import ConfigError
@@ -76,6 +79,7 @@ from games.mingjiangsha.templates import (
     BUTTON_CYAN_GLOW,
     BUTTON_GOLD_FRAME,
     BUTTON_GOLD_GLOW,
+    BUTTON_GRAY_FRAME,
 )
 
 if TYPE_CHECKING:
@@ -90,8 +94,10 @@ __all__ = [
     "click_cyan_glow",
     "click_gold_frame",
     "click_gold_glow",
+    "click_gray_frame",
     "find_buttons",
     "folder_templates",
+    "gold_frame_enabled",
     "ring_mask",
 ]
 
@@ -118,6 +124,10 @@ BUTTON_SAME_SPOT = 60
 
 #: ``pick`` 的合法值。
 PICK_CHOICES = ("only", "best", "right", "left", "top", "bottom")
+
+#: 金框（启用）与灰框（禁用）的**饱和度**分界。
+#: 实测购买弹窗：金框按钮区域饱和度均值 ~108，灰框 ~30 —— 60 有充分余量。
+GOLD_FRAME_SATURATION = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +391,50 @@ def click_gold_frame(
 ) -> ActionResult[Point]:
     """金色花纹大确认按钮。"""
     return _click_pattern(ctx, BUTTON_GOLD_FRAME, region, **kwargs)
+
+
+def click_gray_frame(
+    ctx: RunContext, region: Region | None = None, **kwargs: Any
+) -> ActionResult[Point]:
+    """灰色花纹边框按钮 —— 金框的**禁用态**（比如钱不够时的「N购买」）。
+
+    ⚠️ 边框环匹配**分不出金框和灰框**：两者共用同一副花纹，环只比纹理、
+    不比颜色（实测灰模板在金按钮上能打到 0.999）。要区分启用/禁用，
+    用 :func:`gold_frame_enabled`（按饱和度分）。
+    """
+    return _click_pattern(ctx, BUTTON_GRAY_FRAME, region, **kwargs)
+
+
+def gold_frame_enabled(
+    ctx: RunContext,
+    region: Region | None = None,
+    *,
+    threshold: float = GOLD_FRAME_SATURATION,
+) -> bool | None:
+    """金框花纹按钮当前是**启用（金色）**还是**禁用（灰色）**。
+
+    金框和灰框共用同一副花纹，:func:`find_buttons` 两者都认（纹理相同）；
+    颜色差异单独用饱和度量：命中按钮的矩形区域里，金色饱和度均值高、
+    灰色低（实测 ~108 vs ~30）。
+
+    :param region: 搜索范围（源坐标）。
+    :param threshold: 饱和度均值高于它算启用。
+    :return: ``True`` 启用 / ``False`` 禁用 / ``None`` 区域里没有这类按钮。
+    """
+    hits = find_buttons(ctx, BUTTON_GOLD_FRAME, region)
+    if not hits:
+        return None
+    hit = max(hits, key=lambda item: item.score)
+    shape = ctx.session.matcher.load_template(hit.template).shape
+    height, width = int(shape[0]), int(shape[1])
+    frame = ctx.frame()
+    x = max(hit.point.x - width // 2, 0)
+    y = max(hit.point.y - height // 2, 0)
+    box = frame.image[y : y + height, x : x + width]
+    if box.size == 0:
+        return None
+    saturation = cv2.cvtColor(box, cv2.COLOR_BGR2HSV)[:, :, 1]
+    return bool(np.asarray(saturation, dtype=np.float64).mean() >= threshold)
 
 
 def click_cyan_glow(

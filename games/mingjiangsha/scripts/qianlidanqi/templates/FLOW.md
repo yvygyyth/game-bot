@@ -20,7 +20,9 @@ fight/gift_kind --本局结束--> qianli/end --领取奖励--> qianli/end2 --Esc
 | 状态 | 靠什么认 | 步骤 |
 |---|---|---|
 | `qianli/skill_panel` | 「武将技能」+「武将信息」两个标题 | `close_skill_panel`：点空白 (1300,1127) 回地图 |
-| `qianli/shop/ba_qing` | 「巴清小铺子」标题 | `buy_ba_qing`：OCR 三信物 → `rank_token_slots` 按优先表排序 → 逐个点、能买就买（最多 3 个）→ 右上箭头 → 确认结束 |
+| `qianli/shop/ba_qing` | 「巴清小铺子」标题（exclude 两个弹窗锚点） | `shop_ba_qing_pick`：OCR 钱包+三信物 → 按优先表点一个**买得起**的商品（价格认不出=已售罄跳过）；都买不起 → 右上箭头退出 |
+| `qianli/shop/ba_qing/buy` | 「购买」弹窗标题 | `resolve_ba_qing_buy`：`gold_frame_enabled` 按饱和度分金/灰 —— 金框点购买，灰框点「取消」 |
+| `qianli/shop/ba_qing/exit` | 「是否结束购买？」 | `confirm_ba_qing_exit`：点「确认」回地图 |
 | `qianli/rest` | 「安营驻寨」标题 | `choose_rest`：随便点一个选项（457,1150）→ 回地图 |
 | `qianli/pocket/choice` | 「三顾茅庐」标题 | `choose_pocket`：三个选项随机点一个；可能还在本屏/到确认/直接进战斗 |
 | `qianli/pocket/confirm` | 确认按钮 | `confirm_pocket`：点确认 → 地图/战斗/下一个锦囊 |
